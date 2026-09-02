@@ -1,0 +1,199 @@
+# CLAUDE.md — Studio
+
+> **Entry point for every Claude Code / AI agent session in this repository.**
+> Read this file first. Then read the relevant documents under [`docs/`](docs/) before
+> implementing or modifying anything.
+
+---
+
+## 1. What Studio is
+
+**Studio** is a standalone **Next.js (App Router, TypeScript)** application — frontend and
+backend in one deployable — for operating a **video-rendering job pipeline**:
+
+- Operators define reusable **Templates** (a render recipe + a set of asset slots).
+- Operators create **Jobs** that bind concrete media/text to a Template's slots.
+- An external **Render Worker** (not in this repo) polls Studio over REST, renders the
+  video, reports progress/state, and uploads the finished file.
+- On completion, the video is optionally delivered to **YouTube** and/or **Telegram**.
+- A **Telegram Bot** offers an alternative conversational way to create and monitor Jobs.
+- A **File Gallery** stores reusable media assets.
+
+Studio replaces the `src/render` module of the legacy NestJS backend
+`qtical-backend-node`. It is a **rewrite on a new architecture**, not a port.
+
+## 2. Where the documentation lives
+
+| Area | Path |
+|---|---|
+| Documentation index | [`docs/README.md`](docs/README.md) |
+| Glossary | [`docs/glossary.md`](docs/glossary.md) |
+| Architecture overview | [`docs/architecture/overview.md`](docs/architecture/overview.md) |
+| Server Actions vs REST boundaries | [`docs/architecture/boundaries.md`](docs/architecture/boundaries.md) |
+| Project / folder structure | [`docs/architecture/project-structure.md`](docs/architecture/project-structure.md) |
+| Data flow | [`docs/architecture/data-flow.md`](docs/architecture/data-flow.md) |
+| Tech stack | [`docs/architecture/tech-stack.md`](docs/architecture/tech-stack.md) |
+| Architecture Decision Records (ADRs) | [`docs/architecture/decisions.md`](docs/architecture/decisions.md) |
+| Domain: Users | [`docs/domain/users.md`](docs/domain/users.md) |
+| Domain: Departments | [`docs/domain/departments.md`](docs/domain/departments.md) |
+| Domain: Files / Gallery | [`docs/domain/files.md`](docs/domain/files.md) |
+| Domain: Templates | [`docs/domain/templates.md`](docs/domain/templates.md) |
+| Domain: Jobs | [`docs/domain/jobs.md`](docs/domain/jobs.md) |
+| Authorization model | [`docs/domain/authorization.md`](docs/domain/authorization.md) |
+| Database direction & entities | [`docs/data/database.md`](docs/data/database.md) |
+| Data lifecycle rules | [`docs/data/lifecycle-rules.md`](docs/data/lifecycle-rules.md) |
+| Historical data integrity | [`docs/data/historical-integrity.md`](docs/data/historical-integrity.md) |
+| Worker REST API | [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md) |
+| Telegram integration | [`docs/integrations/telegram.md`](docs/integrations/telegram.md) |
+| YouTube integration | [`docs/integrations/youtube.md`](docs/integrations/youtube.md) |
+| Security requirements | [`docs/security/security.md`](docs/security/security.md) |
+| Legacy system overview | [`docs/legacy/overview.md`](docs/legacy/overview.md) |
+| Legacy render module — reading guide | [`docs/legacy/render-module.md`](docs/legacy/render-module.md) |
+| Legacy render module (deep analysis) | [`docs/legacy/render-module-analysis.md`](docs/legacy/render-module-analysis.md) |
+| Legacy known issues | [`docs/legacy/known-issues.md`](docs/legacy/known-issues.md) |
+| Legacy → Studio mapping | [`docs/legacy/legacy-vs-studio.md`](docs/legacy/legacy-vs-studio.md) |
+| Compatibility matrix | [`docs/legacy/compatibility-matrix.md`](docs/legacy/compatibility-matrix.md) |
+| Frontend conventions | [`docs/frontend/conventions.md`](docs/frontend/conventions.md) |
+| Development conventions | [`docs/development/conventions.md`](docs/development/conventions.md) |
+| Development workflow | [`docs/development/workflow.md`](docs/development/workflow.md) |
+| **OPEN DECISION register** | [`docs/development/open-decisions.md`](docs/development/open-decisions.md) |
+
+The legacy repository is at `/home/mahdirazaqi/Projects/qtical-backend-node`
+(module of interest: `src/render`).
+
+## 3. Mandatory workflow for AI agents
+
+> **Before implementing or modifying any significant feature, first read the relevant
+> Studio documentation, and inspect the legacy implementation when the feature
+> originates from the legacy system.**
+
+1. Read this file.
+2. Read the `docs/` pages relevant to the task (use the table above).
+3. If the feature derives from legacy behavior, open the corresponding legacy source
+   under `/home/mahdirazaqi/Projects/qtical-backend-node/src/render` and confirm the
+   actual behavior. Do not trust summaries alone for security- or correctness-sensitive
+   work.
+4. Implement following the architecture rules below.
+5. If the docs do not answer a question, see rule §9 (ambiguity).
+6. Record any architectural decision you make in
+   [`docs/architecture/decisions.md`](docs/architecture/decisions.md).
+
+## 4. Source-of-truth priority
+
+When sources conflict, resolve in this order (highest wins):
+
+1. **Explicit Studio requirements** (from the product owner / phase briefs)
+2. **Explicit architectural decisions** (ADRs in `docs/architecture/decisions.md`)
+3. **Studio documentation** (the rest of `docs/`)
+4. **Legacy behavioral requirements** (what the legacy system does for the business)
+5. **Legacy implementation details** (how the legacy code happens to do it)
+
+The legacy code **never** overrides a deliberate Studio architectural decision.
+But do **not** silently discard legacy business behavior — if it looks important and
+Studio requirements are silent, record it as an **OPEN DECISION** (rule §9).
+
+## 5. Architectural rules (non-negotiable)
+
+- **The legacy system is a behavioral reference, not an architectural source of truth.**
+  Never copy legacy code, schemas, or services into Studio.
+- **Layering:** `UI (Server / Client Components)` → `Server Action` → `Application
+  Service / Use Case` → `Repository (Prisma)`. External clients enter through a
+  `Route Handler` instead of a Server Action, then join the same service layer.
+- **The UI contains no business logic.** Business rules live in the application/domain
+  layer and are reachable identically from Server Actions, Route Handlers, and the
+  Telegram adapter.
+- **Authorization is always enforced server-side**, in or below the application service
+  layer. Hiding a button is not authorization. Every entry point re-checks.
+- **Prefer Server Actions and Server Components** for all internal panel operations.
+  Do **not** build internal REST endpoints for UI features.
+- **REST exists only for external clients** with a stable HTTP contract — at minimum the
+  Render Worker. See [`docs/architecture/boundaries.md`](docs/architecture/boundaries.md).
+- **Database is PostgreSQL + Prisma.** No MongoDB / Mongoose. See ADR-0002.
+- **Every scoped resource carries a `departmentId`** and every query is department-scoped
+  at the repository/service layer (ADMIN bypasses). See
+  [`docs/domain/authorization.md`](docs/domain/authorization.md).
+- **No process-local state** for anything that must survive a restart or scale
+  horizontally (this killed the legacy Telegram wizard). Durable state → PostgreSQL.
+
+## 6. Data lifecycle rules (critical)
+
+| Entity | Deletion policy |
+|---|---|
+| **Job** | **Never deleted.** No hard delete, no soft delete. Permanent historical record. Retry creates a **new** Job linked to the original. |
+| **Template** | **Soft-delete only** (`deletedAt` / status). Row stays forever so historical Jobs resolve their Template. Hidden from pickers when deleted/disabled. |
+| **User** | **Never deleted.** `active` / `disabled` status. Historical records keep referencing the User. |
+| **File** | **Hard delete allowed when safe.** Two categories: *Persistent Gallery Assets* (kept until explicitly deleted) and *Job Artifacts* (may be auto-deleted after the Job completes). A file may be deleted only when no active/required dependency breaks. |
+
+Full detail: [`docs/data/lifecycle-rules.md`](docs/data/lifecycle-rules.md).
+
+## 7. Historical integrity rule (critical)
+
+Opening an old Job must **always** show a coherent record: its Template, its creator, its
+asset values, its timeline — none of it "missing" or "destroyed". A foreign key alone
+does **not** guarantee this. Where a Job needs immutable knowledge of a Template/File as
+it was at creation time, the design must use **snapshots / immutable references**, not
+just an FK. See [`docs/data/historical-integrity.md`](docs/data/historical-integrity.md).
+Exact snapshot shape is an **OPEN DECISION**.
+
+## 8. Authorization rules (summary)
+
+Three roles. Every rule is enforced server-side; see
+[`docs/domain/authorization.md`](docs/domain/authorization.md) for the full matrix.
+
+- **USER** — normal operator. Works with Jobs / Files / Templates **within their own
+  Department**, per the permission matrix.
+- **MANAGER** — manages users, templates, jobs, files, and department-level operations
+  **within their own Department**.
+- **ADMIN** — system-wide: all departments, all users, all resources.
+
+Telegram users map to the **same** User + Department + role and get the **same** checks.
+Telegram must never bypass authorization.
+
+## 9. Handling ambiguity
+
+- **Never invent business requirements when the documentation does not define them.**
+- Mark the gap as **`OPEN DECISION`** inline in the doc you are editing, add it to
+  [`docs/development/open-decisions.md`](docs/development/open-decisions.md), and — when
+  the decision blocks you — ask the user for clarification.
+- When you record an OPEN DECISION, also record **the consequence of each option**, so
+  whoever decides has what they need.
+- Do not "temporarily" pick an answer and build on it silently.
+
+## 10. Worker REST compatibility
+
+Studio must keep the existing Render Worker working with minimal changes. The legacy
+endpoints (`POST /files`, `GET /jobs/fetch`, `GET /jobs/:id`,
+`PATCH /jobs/:id/progress|duration|state`, `POST /jobs/:id/upload`) are the compatibility
+baseline. The **one deliberate break**: the Worker API **must be authenticated** (it was
+not in legacy). See [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md)
+and [`docs/legacy/compatibility-matrix.md`](docs/legacy/compatibility-matrix.md).
+
+## 11. Security rules (summary)
+
+Full document: [`docs/security/security.md`](docs/security/security.md). Highlights:
+
+- Authenticated + authorized on every entry point (UI, REST, Telegram).
+- Worker API authenticated via a service credential (mechanism = OPEN DECISION).
+- **No shell string interpolation.** If Studio ever shells out (ffmpeg/ImageMagick),
+  use `execFile`/`spawn` with an argument array — never `exec` with a built string.
+  Legacy had a real command-injection hole here.
+- Atomic Job claiming (legacy `fetch` had a race).
+- All file uploads validated by real content type, size, and a sanitized stored name.
+- Validate every input at the boundary (Zod or equivalent) — Server Actions included.
+- Secrets only via environment / secret manager; never in the repo.
+
+## 12. Frontend conventions (summary)
+
+Panel-only app, **no landing page**. Next.js App Router + React + TypeScript + Tailwind +
+shadcn/ui. **LTR**, **English** UI and messages. Responsive with an excellent mobile
+experience. **Light / Dark / System** themes. Full detail:
+[`docs/frontend/conventions.md`](docs/frontend/conventions.md).
+
+## 13. Phase 0 status
+
+This repository is currently at **Phase 0 — documentation & architecture foundation
+only**. No application features are implemented. Do **not** start Phase 1 (feature
+implementation) unless explicitly asked. See
+[`docs/development/workflow.md`](docs/development/workflow.md) for phase boundaries and
+[`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
+remains undecided.

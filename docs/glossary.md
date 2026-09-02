@@ -1,0 +1,36 @@
+# Glossary
+
+Shared vocabulary for Studio. When a legacy term maps to a different Studio term, both
+are listed.
+
+| Term | Meaning |
+|---|---|
+| **Studio** | This application — the control plane for the rendering pipeline. |
+| **Legacy** / **qtical-backend-node** | The existing NestJS backend. Studio extracts and replaces its `src/render` module. Behavioral reference only. |
+| **Department** | Studio's tenancy / ownership boundary. Every scoped resource (User, Template, Job, File) belongs to exactly one Department. Replaces the legacy concept of **Workspace**. |
+| **Workspace** *(legacy)* | Legacy multi-tenant boundary. In legacy `src/render` it was **not enforced** for templates/jobs/files. → Studio **Department**. |
+| **User** | A person who operates Studio. Belongs to one Department. Has a role. Never deleted; only `active`/`disabled`. |
+| **Role** | `USER`, `MANAGER`, or `ADMIN`. Determines what a User may do. See [authorization](domain/authorization.md). |
+| **Template** | A reusable render recipe: composition id, source project location, output naming, plus an ordered list of **asset slots**. Soft-deletable. |
+| **Template Asset** / **Asset Slot** | One input the Template requires: a name, a kind (`data` / `image` / `audio` / `video`), a target composition + layer, and (for images) an expected aspect ratio. |
+| **Job** | One concrete render request: a Template with every asset slot filled with a value, tracked through a state machine. **Never deleted.** |
+| **Job Asset** | A resolved asset value on a Job: either literal text (`data`) or a reference to a File. |
+| **Retry** | Creating a **new** Job from a failed/eligible Job, preserving a link to the original. Legacy deleted the original; Studio does not. |
+| **File** | An uploaded media asset (image / audio / video). Lives in the **File Gallery** or is a **Job Artifact**. Hard-deletable when safe. |
+| **File Gallery** | The persistent, browsable library of reusable **Persistent Gallery Assets**. |
+| **Persistent Gallery Asset** | A File intentionally kept for reuse; deleted only explicitly and only when safe. |
+| **Job Artifact** | A File produced by or attached to a specific Job (rendered video, screenshot, thumbnail, or one-off uploaded input) that is not needed after the Job completes; may be auto-deleted. |
+| **Render Worker** / **Worker** | External service (not in this repo) that performs the actual video rendering. Communicates with Studio only over the **Worker REST API**. |
+| **Worker REST API** | The authenticated HTTP contract the Worker uses: fetch/claim a job, report progress/state/duration, upload the result, upload input files. |
+| **Composition** | An identifier the Worker understands (e.g. a Remotion / After Effects composition name). Studio passes it through; it does not interpret it. |
+| **Channel** *(legacy term)* | A connected **YouTube channel** with an OAuth token, used for auto-upload. In Studio this is the **YouTube target** concept — see [youtube.md](integrations/youtube.md). Not to be confused with a Department. |
+| **Server Action** | A Next.js server-side function invoked from the UI for mutations/commands. Studio's default for all internal operations. |
+| **Route Handler** | A Next.js `app/api/**/route.ts` HTTP endpoint. Used only for external clients (the Worker; possibly Telegram webhooks). |
+| **Application Service** / **Use Case** | The layer holding business rules. Called by Server Actions, Route Handlers, and the Telegram adapter alike. |
+| **Repository** | Thin data-access layer over Prisma. The only place raw Prisma queries live. |
+| **Telegram Adapter** | The module translating Telegram updates into Application Service calls. Holds **no business logic** and **no in-memory conversation state**. |
+| **Wizard state** | The in-progress conversation state for a Telegram job-creation flow. Legacy kept it in process memory (lost on restart, not scalable). Studio persists it in PostgreSQL. |
+| **State machine** | The fixed set of allowed **Job** states and transitions. Arbitrary transitions are rejected. |
+| **Snapshot** | An immutable copy of data (e.g. Template fields, asset values) stored on a Job so the Job stays readable even if the source changes or a File is deleted. |
+| **OPEN DECISION** | A design question intentionally left unresolved. Tracked in [open-decisions.md](development/open-decisions.md). |
+| **ADR** | Architecture Decision Record. See [decisions.md](architecture/decisions.md). |
