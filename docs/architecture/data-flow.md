@@ -114,7 +114,7 @@ Operator/Telegram → retryJob(actor, originalJobId)
   │  6. audit entry
 ```
 
-Legacy deleted the original job *before* checking the cap, so a failed retry could leave
+Legacy deleted the original job _before_ checking the cap, so a failed retry could leave
 the user with nothing. Studio never deletes and checks the cap before writing.
 
 ## 4. Cancel
@@ -131,11 +131,11 @@ Cancellation is a **state transition**, not a delete. The job row remains foreve
 
 ## 5. Notifications
 
-| Event | Channel(s) | Notes |
-|---|---|---|
-| Job RENDERED | in-app notification + Telegram DM (if creator linked) | Consistent across transitions — legacy was asymmetric. |
-| Job UPLOADED | in-app notification + Telegram DM | |
-| Job ERROR | in-app notification + Telegram DM, **with the failure reason** | Legacy only logged the reason server-side. |
+| Event        | Channel(s)                                                     | Notes                                                  |
+| ------------ | -------------------------------------------------------------- | ------------------------------------------------------ |
+| Job RENDERED | in-app notification + Telegram DM (if creator linked)          | Consistent across transitions — legacy was asymmetric. |
+| Job UPLOADED | in-app notification + Telegram DM                              |                                                        |
+| Job ERROR    | in-app notification + Telegram DM, **with the failure reason** | Legacy only logged the reason server-side.             |
 
 Notification delivery is best-effort but **logged**; a failed notification never blocks
 or reverts a job transition.

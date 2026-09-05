@@ -1,5 +1,13 @@
 # Architecture Overview
 
+> **Implementation status (end of Phase 1).** The layered structure below is
+> established in code: `src/app` (presentation), `src/features/*` (modules, currently
+> README-only), `src/server/*` (infrastructure — env, logging, errors, validation,
+> `defineAction`, `defineRouteHandler`, auth & authz boundaries). The Application/Domain
+> and Infrastructure/Repository layers have their conventions and boundaries in place but
+> **no domain logic yet** — that starts in Phase 2. The DB layer (Prisma) is not wired.
+> See [project-structure.md](project-structure.md) for the actual tree.
+
 ## 1. What Studio is
 
 Studio is the **control plane** for a video-rendering pipeline. It does **not** render
@@ -62,13 +70,13 @@ Studio is one Next.js application (App Router). Internally it is strictly layere
 
 ## 3. Canonical flows
 
-| Trigger | Path |
-|---|---|
-| Operator does something in the panel | `UI → Server Action → Use Case → Repository → Prisma` |
-| Server-side read for a page | `Server Component → Use Case (or read model) → Repository → Prisma` |
-| Render Worker calls Studio | `Worker → Route Handler (app/api/worker) → Use Case → Repository → Prisma` |
-| Telegram user interacts | `Telegram → Telegram Adapter → Use Case → Repository → Prisma` |
-| Job finished, deliver video | `Use Case → YouTube Adapter / Telegram Adapter` (durably, not fire-and-forget) |
+| Trigger                              | Path                                                                           |
+| ------------------------------------ | ------------------------------------------------------------------------------ |
+| Operator does something in the panel | `UI → Server Action → Use Case → Repository → Prisma`                          |
+| Server-side read for a page          | `Server Component → Use Case (or read model) → Repository → Prisma`            |
+| Render Worker calls Studio           | `Worker → Route Handler (app/api/worker) → Use Case → Repository → Prisma`     |
+| Telegram user interacts              | `Telegram → Telegram Adapter → Use Case → Repository → Prisma`                 |
+| Job finished, deliver video          | `Use Case → YouTube Adapter / Telegram Adapter` (durably, not fire-and-forget) |
 
 Detailed sequences: [data-flow.md](data-flow.md).
 
@@ -76,16 +84,16 @@ Detailed sequences: [data-flow.md](data-flow.md).
 
 Studio's domain is intentionally small. The modules:
 
-| Module | Responsibility | Boundary |
-|---|---|---|
-| **Authentication** | Establish who the caller is (session for humans, service credential for the Worker, phone-linked identity for Telegram). Issue/verify sessions. | Does **not** decide what a caller may do — that is Authorization. |
-| **Users** | User records, department membership, role, `active`/`disabled` lifecycle, Telegram linkage. | Never deletes users. |
-| **Departments** | The tenancy boundary. Department records; scoping enforcement helpers. | Deletion policy is an **OPEN DECISION**. |
-| **Files / File Gallery** | Upload, catalog, browse, preview, reuse, and safe deletion of media assets. Distinguishes Persistent Gallery Assets from Job Artifacts. | Owns storage adapter usage. |
-| **Templates** | Template + template-asset authoring, editing, disabling, soft-deletion, validation. | Soft-delete only; preserves historical Job references. |
-| **Jobs** | Job creation, the state machine, assets, progress/duration, cancellation, retry lineage, completion, delivery orchestration, historical integrity. | Never deletes jobs. |
-| **Render Worker integration** | The authenticated Worker REST API: atomic claim, progress/state/duration updates, result upload, input-file upload. | Compatibility contract with an external system. |
-| **Telegram Bot** | Conversational job creation/monitoring. Durable wizard state. Same authz as the web UI. | No business logic in the adapter; no in-memory state. |
+| Module                        | Responsibility                                                                                                                                     | Boundary                                                          |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Authentication**            | Establish who the caller is (session for humans, service credential for the Worker, phone-linked identity for Telegram). Issue/verify sessions.    | Does **not** decide what a caller may do — that is Authorization. |
+| **Users**                     | User records, department membership, role, `active`/`disabled` lifecycle, Telegram linkage.                                                        | Never deletes users.                                              |
+| **Departments**               | The tenancy boundary. Department records; scoping enforcement helpers.                                                                             | Deletion policy is an **OPEN DECISION**.                          |
+| **Files / File Gallery**      | Upload, catalog, browse, preview, reuse, and safe deletion of media assets. Distinguishes Persistent Gallery Assets from Job Artifacts.            | Owns storage adapter usage.                                       |
+| **Templates**                 | Template + template-asset authoring, editing, disabling, soft-deletion, validation.                                                                | Soft-delete only; preserves historical Job references.            |
+| **Jobs**                      | Job creation, the state machine, assets, progress/duration, cancellation, retry lineage, completion, delivery orchestration, historical integrity. | Never deletes jobs.                                               |
+| **Render Worker integration** | The authenticated Worker REST API: atomic claim, progress/state/duration updates, result upload, input-file upload.                                | Compatibility contract with an external system.                   |
+| **Telegram Bot**              | Conversational job creation/monitoring. Durable wizard state. Same authz as the web UI.                                                            | No business logic in the adapter; no in-memory state.             |
 
 Do **not** add modules or entities beyond these without a requirement and an ADR.
 
@@ -93,29 +101,29 @@ Do **not** add modules or entities beyond these without a requirement and an ADR
 
 See [tech-stack.md](tech-stack.md) and [integrations/](../integrations/). Summary:
 
-| System | Role | Owned by |
-|---|---|---|
-| PostgreSQL | All Studio persistence | Studio |
-| File / object storage | Media bytes (gallery assets, job artifacts) | Studio (storage impl TBD) |
-| Render Worker | Performs rendering | External |
-| YouTube Data API | Publishes finished videos | External |
-| Telegram Bot API | Conversational UI + notifications | External |
-| ffmpeg / ImageMagick | Screenshot & thumbnail generation, media normalization | Studio host (invoked safely) |
+| System                | Role                                                   | Owned by                     |
+| --------------------- | ------------------------------------------------------ | ---------------------------- |
+| PostgreSQL            | All Studio persistence                                 | Studio                       |
+| File / object storage | Media bytes (gallery assets, job artifacts)            | Studio (storage impl TBD)    |
+| Render Worker         | Performs rendering                                     | External                     |
+| YouTube Data API      | Publishes finished videos                              | External                     |
+| Telegram Bot API      | Conversational UI + notifications                      | External                     |
+| ffmpeg / ImageMagick  | Screenshot & thumbnail generation, media normalization | Studio host (invoked safely) |
 
 ## 6. Key differences from legacy (at a glance)
 
-| Legacy | Studio |
-|---|---|
-| MongoDB + Mongoose | PostgreSQL + Prisma |
-| GraphQL for internal ops | Server Actions / Server Components |
-| Unauthenticated Worker REST | Authenticated Worker REST |
-| No department scoping in render module | Department scoping enforced everywhere |
-| Telegram wizard state in process memory | Durable wizard state in PostgreSQL |
-| Retry deletes the original Job | Retry creates a linked new Job; original kept forever |
-| `child_process.exec` with string interpolation | `execFile`/`spawn` with argument arrays |
-| Non-atomic job `fetch` (race) | Atomic claim (`SELECT … FOR UPDATE SKIP LOCKED` or equivalent) |
-| Fire-and-forget delivery | Durable delivery with retry / recorded outcome |
-| Global daily upload cap of 3, all users | Cap model is an **OPEN DECISION** (scope + value) |
+| Legacy                                         | Studio                                                         |
+| ---------------------------------------------- | -------------------------------------------------------------- |
+| MongoDB + Mongoose                             | PostgreSQL + Prisma                                            |
+| GraphQL for internal ops                       | Server Actions / Server Components                             |
+| Unauthenticated Worker REST                    | Authenticated Worker REST                                      |
+| No department scoping in render module         | Department scoping enforced everywhere                         |
+| Telegram wizard state in process memory        | Durable wizard state in PostgreSQL                             |
+| Retry deletes the original Job                 | Retry creates a linked new Job; original kept forever          |
+| `child_process.exec` with string interpolation | `execFile`/`spawn` with argument arrays                        |
+| Non-atomic job `fetch` (race)                  | Atomic claim (`SELECT … FOR UPDATE SKIP LOCKED` or equivalent) |
+| Fire-and-forget delivery                       | Durable delivery with retry / recorded outcome                 |
+| Global daily upload cap of 3, all users        | Cap model is an **OPEN DECISION** (scope + value)              |
 
 Full mapping: [../legacy/legacy-vs-studio.md](../legacy/legacy-vs-studio.md).
 Full compatibility analysis: [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).

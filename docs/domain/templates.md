@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A **Template** is a reusable render recipe. It defines *what* to render and *what inputs*
+A **Template** is a reusable render recipe. It defines _what_ to render and _what inputs_
 a Job must supply. Studio does not interpret the render definition — it passes identifiers
 through to the Render Worker.
 
@@ -43,11 +43,11 @@ DRAFT? ──> ACTIVE ──> DISABLED ──> ACTIVE ...
                  └──> DELETED (soft)      (row kept forever)
 ```
 
-| State | In creation pickers? | Editable? | Resolvable by historical Jobs? |
-|---|---|---|---|
-| `ACTIVE` | yes | yes | yes |
-| `DISABLED` | **no** | yes | yes |
-| `DELETED` (soft) | **no** | no (or restore only) | **yes** |
+| State            | In creation pickers? | Editable?            | Resolvable by historical Jobs? |
+| ---------------- | -------------------- | -------------------- | ------------------------------ |
+| `ACTIVE`         | yes                  | yes                  | yes                            |
+| `DISABLED`       | **no**               | yes                  | yes                            |
+| `DELETED` (soft) | **no**               | no (or restore only) | **yes**                        |
 
 - **Templates are soft-deleted only** (ADR-0006). The row is **never** physically
   removed. `deletedAt` + `deletedByUserId`.
@@ -59,33 +59,33 @@ DRAFT? ──> ACTIVE ──> DISABLED ──> ACTIVE ...
 
 ### Fields (conceptual — final schema in [../data/database.md](../data/database.md))
 
-| Field | Notes |
-|---|---|
-| `id` | Referenced by Jobs (and snapshots) forever. |
-| `departmentId` | **New in Studio.** Required. Scopes ownership. |
-| `createdByUserId` | |
-| `name` | Display/lookup name. Uniqueness scope = OPEN DECISION (see below). |
-| `status` | `ACTIVE` \| `DISABLED` \| `DELETED`. |
-| `composition` | Passed to the Worker. Opaque to Studio. |
-| `source` | Legacy `src` — the Worker's project/source location. Opaque. |
-| `outputPattern` | Legacy `output` — output naming/dir. Copied into the Job at creation. |
-| `scriptRef` | Legacy `script` — injected as the first job asset. |
-| `description` | Used as the YouTube description on delivery. |
-| `tags` | YouTube tag templates with `{{layer}}` placeholders. |
-| `youtubeTargetId` | Legacy `_channel`. Nullable. If set, Jobs from this Template may be delivered to that YouTube target. See [../integrations/youtube.md](../integrations/youtube.md). |
-| `assets` | Ordered list of Template Assets (below). |
-| `createdAt`, `updatedAt`, `deletedAt`, `deletedByUserId` | |
+| Field                                                    | Notes                                                                                                                                                               |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                     | Referenced by Jobs (and snapshots) forever.                                                                                                                         |
+| `departmentId`                                           | **New in Studio.** Required. Scopes ownership.                                                                                                                      |
+| `createdByUserId`                                        |                                                                                                                                                                     |
+| `name`                                                   | Display/lookup name. Uniqueness scope = OPEN DECISION (see below).                                                                                                  |
+| `status`                                                 | `ACTIVE` \| `DISABLED` \| `DELETED`.                                                                                                                                |
+| `composition`                                            | Passed to the Worker. Opaque to Studio.                                                                                                                             |
+| `source`                                                 | Legacy `src` — the Worker's project/source location. Opaque.                                                                                                        |
+| `outputPattern`                                          | Legacy `output` — output naming/dir. Copied into the Job at creation.                                                                                               |
+| `scriptRef`                                              | Legacy `script` — injected as the first job asset.                                                                                                                  |
+| `description`                                            | Used as the YouTube description on delivery.                                                                                                                        |
+| `tags`                                                   | YouTube tag templates with `{{layer}}` placeholders.                                                                                                                |
+| `youtubeTargetId`                                        | Legacy `_channel`. Nullable. If set, Jobs from this Template may be delivered to that YouTube target. See [../integrations/youtube.md](../integrations/youtube.md). |
+| `assets`                                                 | Ordered list of Template Assets (below).                                                                                                                            |
+| `createdAt`, `updatedAt`, `deletedAt`, `deletedByUserId` |                                                                                                                                                                     |
 
 ### Template Asset (slot definition)
 
-| Field | Notes |
-|---|---|
-| `name` | Slot identifier; the key a Job must fill. Unique within the Template. |
-| `kind` | Enum: `DATA` (literal text) \| `IMAGE` \| `AUDIO` \| `VIDEO`. (Legacy free-text `type` becomes a validated enum. `script` is not an author-visible kind — it is injected.) |
-| `composition` | Passed through to the Job asset. |
-| `layer` | Passed through; also the `{{layer}}` token for tag substitution. |
-| `imageRatio` | For `IMAGE` kind: `PORTRAIT_9_16` \| `LANDSCAPE_16_9` \| `SQUARE` \| `ANY`. |
-| `order` | Explicit ordering. |
+| Field         | Notes                                                                                                                                                                      |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | Slot identifier; the key a Job must fill. Unique within the Template.                                                                                                      |
+| `kind`        | Enum: `DATA` (literal text) \| `IMAGE` \| `AUDIO` \| `VIDEO`. (Legacy free-text `type` becomes a validated enum. `script` is not an author-visible kind — it is injected.) |
+| `composition` | Passed through to the Job asset.                                                                                                                                           |
+| `layer`       | Passed through; also the `{{layer}}` token for tag substitution.                                                                                                           |
+| `imageRatio`  | For `IMAGE` kind: `PORTRAIT_9_16` \| `LANDSCAPE_16_9` \| `SQUARE` \| `ANY`.                                                                                                |
+| `order`       | Explicit ordering.                                                                                                                                                         |
 
 ### Creation & editing
 
@@ -123,16 +123,16 @@ DRAFT? ──> ACTIVE ──> DISABLED ──> ACTIVE ...
 
 > **`OPEN DECISION` — `name` uniqueness scope.** Options: (a) globally unique among
 > non-deleted templates; (b) unique per Department; (c) unique per Department among
-> non-deleted. *Consequence of global:* matches legacy, but two departments can't both
-> have a "Standard" template. *Consequence of per-department:* natural isolation, but
+> non-deleted. _Consequence of global:_ matches legacy, but two departments can't both
+> have a "Standard" template. _Consequence of per-department:_ natural isolation, but
 > cross-department admin views show name collisions. Recommended: **unique per Department
 > among non-deleted rows.**
 
 > **`OPEN DECISION` — zero-asset templates.** Is a Template with no asset slots valid
-> (e.g. a fully static render)? *Consequence of allowing:* supports static intros/outros.
-> *Consequence of forbidding:* simpler Job creation (always has inputs).
+> (e.g. a fully static render)? _Consequence of allowing:_ supports static intros/outros.
+> _Consequence of forbidding:_ simpler Job creation (always has inputs).
 
 > **`OPEN DECISION` — template versioning.** Studio currently relies on per-Job snapshots
 > so Templates can be edited freely. An explicit version history for Templates (beyond
-> the audit log) is not planned. *Consequence of adding it later:* better authoring UX
-> (diff, rollback); *of not:* audit log + snapshots already cover correctness.
+> the audit log) is not planned. _Consequence of adding it later:_ better authoring UX
+> (diff, rollback); _of not:_ audit log + snapshots already cover correctness.

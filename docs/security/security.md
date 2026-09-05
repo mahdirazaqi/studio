@@ -5,13 +5,13 @@ Binding security requirements for Studio. Many are direct responses to
 
 ## 1. Authentication
 
-| Surface | Requirement |
-|---|---|
-| Web panel | Session-based auth. Only `ACTIVE` users authenticate. Sessions invalidated immediately on user disable or department archive. Session library = OPEN DECISION. |
-| Server Actions | Every action resolves and verifies the session before doing anything. No anonymous Server Action mutates state. |
-| Worker REST | **Every** endpoint requires a Worker service credential (ADR-0004). No unauthenticated worker endpoint — ever. Mechanism = OPEN DECISION (default: hashed API key as Bearer token). |
-| Telegram | Identity via phone-linked `User`. Webhook requests verified with Telegram's secret token. Unlinked / disabled users are refused. |
-| Health endpoints | No sensitive data; may be unauthenticated but must expose nothing about domain state. |
+| Surface          | Requirement                                                                                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web panel        | Session-based auth. Only `ACTIVE` users authenticate. Sessions invalidated immediately on user disable or department archive. Session library = OPEN DECISION.                      |
+| Server Actions   | Every action resolves and verifies the session before doing anything. No anonymous Server Action mutates state.                                                                     |
+| Worker REST      | **Every** endpoint requires a Worker service credential (ADR-0004). No unauthenticated worker endpoint — ever. Mechanism = OPEN DECISION (default: hashed API key as Bearer token). |
+| Telegram         | Identity via phone-linked `User`. Webhook requests verified with Telegram's secret token. Unlinked / disabled users are refused.                                                    |
+| Health endpoints | No sensitive data; may be unauthenticated but must expose nothing about domain state.                                                                                               |
 
 ## 2. Authorization
 
@@ -74,7 +74,7 @@ Binding security requirements for Studio. Many are direct responses to
   CPU/memory where possible (ADR-0015).
 - Any future need to shell out goes through one reviewed helper that **forbids** string
   commands by type.
-- Legacy built `` exec(`convert ${filepath} ...`) `` with a user-influenced `filepath`
+- Legacy built ``exec(`convert ${filepath} ...`)`` with a user-influenced `filepath`
   and a sanitizer that only stripped non-ASCII — a real command-injection hole. Do not
   reproduce.
 

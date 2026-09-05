@@ -40,10 +40,10 @@ From `qtical-backend-node/src/render/file` (see
 
 Every File has a `category`:
 
-| Category | Meaning | Deletion |
-|---|---|---|
-| `GALLERY_ASSET` | A **Persistent Gallery Asset** — intentionally kept for reuse across many Jobs/Templates. | Only by explicit user action, and only when **safe** (no active/required dependency). |
-| `JOB_ARTIFACT` | Produced by or attached to one specific Job (rendered video, screenshot, thumbnail, or a one-off input uploaded just for that Job). | May be **automatically physically deleted** after the owning Job reaches a completed state, per the retention design. |
+| Category        | Meaning                                                                                                                             | Deletion                                                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `GALLERY_ASSET` | A **Persistent Gallery Asset** — intentionally kept for reuse across many Jobs/Templates.                                           | Only by explicit user action, and only when **safe** (no active/required dependency).                                 |
+| `JOB_ARTIFACT`  | Produced by or attached to one specific Job (rendered video, screenshot, thumbnail, or a one-off input uploaded just for that Job). | May be **automatically physically deleted** after the owning Job reaches a completed state, per the retention design. |
 
 ### Deletion policy (ADR-0008)
 
@@ -61,8 +61,8 @@ Every File has a `category`:
   > deleted? Options: immediately on `UPLOADED`; after a retention window (e.g. 30 days);
   > keep the thumbnail forever but purge the full video after delivery; keep everything
   > until storage pressure. Also: does successful YouTube delivery make the local video
-  > redundant? *Consequence of aggressive cleanup:* low storage cost, but re-delivery /
-  > debugging a past render is impossible. *Consequence of long retention:* storage
+  > redundant? _Consequence of aggressive cleanup:_ low storage cost, but re-delivery /
+  > debugging a past render is impossible. _Consequence of long retention:_ storage
   > grows. Recommended starting point: **purge the full rendered video after successful
   > required delivery + a short grace window; keep screenshot + thumbnail longer;** exact
   > windows configurable.
@@ -70,6 +70,7 @@ Every File has a `category`:
 ### Gallery behavior
 
 Users can:
+
 - **Upload** files into their Department's gallery.
 - **Browse / search / filter** their Department's gallery (ADMIN: all).
 - **Preview** where applicable (image thumbnail, audio/video player).
@@ -85,29 +86,29 @@ file already exists.
 > **`OPEN DECISION` — dedup mechanism & scope.** Options: content hash (e.g. SHA-256) on
 > upload, matched within the Department; match on `(hash, department)` and return the
 > existing File instead of storing again; or just surface "a similar file exists" without
-> blocking. *Consequence of hard dedup:* storage savings, but two users "own" one file —
-> deletion/permission semantics need care. *Consequence of soft/advisory:* simpler, minor
+> blocking. _Consequence of hard dedup:_ storage savings, but two users "own" one file —
+> deletion/permission semantics need care. _Consequence of soft/advisory:_ simpler, minor
 > duplication. Recommended: **content-hash advisory + opt-in reuse**, with hard dedup as
 > a later optimization.
 
 ### Fields (conceptual — final schema in [../data/database.md](../data/database.md))
 
-| Field | Notes |
-|---|---|
-| `id` | |
-| `departmentId` | **New in Studio.** Required. Scopes visibility. |
-| `category` | `GALLERY_ASSET` \| `JOB_ARTIFACT`. |
-| `uploadedByUserId` | **Actually populated** (legacy never set it). Null for system-generated artifacts. |
-| `originalName` | Client-supplied name, for display only. |
-| `storedName` | **System-generated** (e.g. a UUID + extension). Never derived from user input. |
-| `storageKey` | Location in the storage adapter. |
-| `mimeType` | Validated against real content sniffing, not just the client header/extension. |
-| `kind` | `IMAGE` \| `AUDIO` \| `VIDEO` — derived and validated. |
-| `sizeBytes` | Enforced against a max (OPEN DECISION on limits). |
-| `contentHash` | For dedup / integrity. |
-| `width`, `height`, `durationSeconds` | Probed metadata where applicable (drives aspect-ratio checks). |
-| `ownerJobId` | For `JOB_ARTIFACT` — the Job it belongs to. |
-| `createdAt` | |
+| Field                                | Notes                                                                              |
+| ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `id`                                 |                                                                                    |
+| `departmentId`                       | **New in Studio.** Required. Scopes visibility.                                    |
+| `category`                           | `GALLERY_ASSET` \| `JOB_ARTIFACT`.                                                 |
+| `uploadedByUserId`                   | **Actually populated** (legacy never set it). Null for system-generated artifacts. |
+| `originalName`                       | Client-supplied name, for display only.                                            |
+| `storedName`                         | **System-generated** (e.g. a UUID + extension). Never derived from user input.     |
+| `storageKey`                         | Location in the storage adapter.                                                   |
+| `mimeType`                           | Validated against real content sniffing, not just the client header/extension.     |
+| `kind`                               | `IMAGE` \| `AUDIO` \| `VIDEO` — derived and validated.                             |
+| `sizeBytes`                          | Enforced against a max (OPEN DECISION on limits).                                  |
+| `contentHash`                        | For dedup / integrity.                                                             |
+| `width`, `height`, `durationSeconds` | Probed metadata where applicable (drives aspect-ratio checks).                     |
+| `ownerJobId`                         | For `JOB_ARTIFACT` — the Job it belongs to.                                        |
+| `createdAt`                          |                                                                                    |
 
 ### Upload validation
 

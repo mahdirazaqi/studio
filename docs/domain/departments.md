@@ -23,12 +23,12 @@ A **Department** is Studio's ownership and isolation boundary. It replaces the l
 
 ## Fields (conceptual)
 
-| Field | Notes |
-|---|---|
-| `id` | Referenced by all scoped resources — permanent. |
-| `name` | Unique, display name. |
-| `status` | `ACTIVE` \| (see deletion decision below). |
-| `createdAt`, `updatedAt` | |
+| Field                    | Notes                                           |
+| ------------------------ | ----------------------------------------------- |
+| `id`                     | Referenced by all scoped resources — permanent. |
+| `name`                   | Unique, display name.                           |
+| `status`                 | `ACTIVE` \| (see deletion decision below).      |
+| `createdAt`, `updatedAt` |                                                 |
 
 ## Resource assignment
 
@@ -37,9 +37,9 @@ A **Department** is Studio's ownership and isolation boundary. It replaces the l
     actor's `departmentId`.
   - An ADMIN creating a resource must specify the target Department.
 - **Moving a resource between Departments** is not a supported operation.
-  > **`OPEN DECISION` — cross-department move / reassignment.** *Consequence of "not
-  > supported":* simplest, no historical ambiguity. *Consequence of "ADMIN can
-  > reassign":* useful for reorganizations but complicates historical reporting (a Job's
+  > **`OPEN DECISION` — cross-department move / reassignment.** _Consequence of "not
+  > supported":_ simplest, no historical ambiguity. _Consequence of "ADMIN can
+  > reassign":_ useful for reorganizations but complicates historical reporting (a Job's
   > department could change after the fact) — if allowed, the change must be audited and
   > arguably snapshotted on the Job.
 
@@ -61,22 +61,24 @@ Every use case receives an `actor` context: `{ userId, role, departmentId }`.
 > delete path.
 >
 > Constraints that make this hard:
+>
 > - **Jobs are never deleted** (ADR-0005). A Department with historical Jobs cannot be
 >   cleanly removed without either keeping its data or violating that rule.
 > - Users are never deleted (ADR-0007); Templates are only soft-deleted (ADR-0006).
 >
 > Options and consequences:
-> | Option | Consequence |
-> |---|---|
-> | **Soft-deactivate only** (`status = ARCHIVED`) | Department stops accepting new resources/logins; all history stays queryable by ADMIN. Simple, safe, no data loss. Likely the default. |
-> | **Hard delete forbidden entirely** | Same as above but even the concept is absent. |
-> | **Hard delete with reassignment** | Requires moving/absorbing all Jobs/Templates/Files/Users into another Department first — contradicts "no cross-department move" unless that is also decided. High complexity. |
-> | **Hard delete with cascade** | Violates ADR-0005/0007. Not acceptable. |
+>
+> | Option                                         | Consequence                                                                                                                                                                   |
+> | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | **Soft-deactivate only** (`status = ARCHIVED`) | Department stops accepting new resources/logins; all history stays queryable by ADMIN. Simple, safe, no data loss. Likely the default.                                        |
+> | **Hard delete forbidden entirely**             | Same as above but even the concept is absent.                                                                                                                                 |
+> | **Hard delete with reassignment**              | Requires moving/absorbing all Jobs/Templates/Files/Users into another Department first — contradicts "no cross-department move" unless that is also decided. High complexity. |
+> | **Hard delete with cascade**                   | Violates ADR-0005/0007. Not acceptable.                                                                                                                                       |
 >
 > Recommended pending decision: **soft-deactivate (`ARCHIVED`) only.**
 
 ## Not a "Channel"
 
-The legacy term *Channel* refers to a connected **YouTube channel**, not a Department.
+The legacy term _Channel_ refers to a connected **YouTube channel**, not a Department.
 Studio keeps the YouTube-target concept in [../integrations/youtube.md](../integrations/youtube.md).
 A Department is purely an internal org/isolation unit.

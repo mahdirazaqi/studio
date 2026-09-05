@@ -4,7 +4,7 @@
 
 Studio is built in phases. **Do not run ahead of the current phase.**
 
-### Phase 0 — Documentation & architecture foundation *(current)*
+### Phase 0 — Documentation & architecture foundation _(complete)_
 
 **Goal:** a complete, consistent, AI-readable knowledge base so future work does not
 re-derive the architecture or re-introduce legacy defects.
@@ -53,22 +53,49 @@ re-derive the architecture or re-introduce legacy defects.
 - [x] `CLAUDE.md` created.
 - [x] OPEN DECISION items collected (`development/open-decisions.md`).
 
-### Phase 1+ (not started)
+### Phase 1 — Next.js foundation & application architecture _(complete)_
+
+**Goal:** a clean, production-ready application skeleton — no business features.
+
+**Delivered:**
+
+- Next.js 15 App Router + TypeScript (strict) + Tailwind v4 + shadcn/ui, on npm.
+- Theme system (Light / Dark / System) via next-themes + token-driven `globals.css`.
+- Dashboard shell: `(auth)` + `(dashboard)` route groups, collapsible sidebar, header
+  with breadcrumb + theme toggle, mobile off-canvas nav, placeholder feature routes.
+- Feature-based structure (`src/features/*` with README-documented scope).
+- Server/infra layer (`src/server/*`, all `server-only`): validated env, structured
+  logger + redaction, `AppError` model + `toPublicError`, `parseInput` validation,
+  `defineAction` (Server Actions), `defineRouteHandler` (REST), auth boundary
+  (`getCurrentUser`), authz boundary (`authorize`).
+- Error/loading/not-found boundaries at root, `(dashboard)`, and global levels.
+- ESLint server/client boundary guard, Prettier, Vitest (37 foundational tests),
+  `npm run check`.
+- `/api/health` — the only Route Handler.
+
+**Explicitly NOT in Phase 1:** any domain feature (Jobs/Templates/Files/Users/
+Departments/Telegram/Worker/YouTube), Prisma schema/models/migrations, the session
+backend, real forms, deployment.
+
+**Docs:** `architecture/{project-structure,tech-stack,server-actions,rest-architecture,
+server-client-boundary,authentication-boundary,error-handling,environment,logging}.md`,
+`frontend/theme.md`, ADR-0017/0018/0019.
+
+### Phase 2+ (not started)
 
 Sequencing is not finalized, but a sensible order:
 
-1. Project scaffold: Next.js app, Tailwind, shadcn/ui, Prisma, CI, `server/` primitives
-   (db, auth, authz, errors, clock, id), theme provider.
-2. Auth + Users + Departments (the authorization backbone).
+1. Database layer: Prisma + `@/server/db` singleton, first migration, `DATABASE_URL` env.
+2. Auth + Users + Departments (the authorization backbone; resolves OD-43, OD-05, OD-07).
 3. Templates (authoring + soft-delete + validation).
-4. Files / Gallery (upload, storage adapter, categories).
+4. Files / Gallery (upload, storage adapter, categories; resolves OD-42, OD-21).
 5. Jobs (creation, snapshot, state machine) + Worker API (atomic claim, auth,
-   progress/state/result, durable delivery scaffold).
+   progress/state/result, durable delivery scaffold; resolves OD-27, OD-40).
 6. YouTube delivery adapter.
 7. Telegram adapter + durable wizard state.
 8. Cleanup jobs, retention, hardening, observability.
 
-Each Phase 1+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
+Each Phase 2+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
 the product owner, implement behind the layering rules, test (unit + the integration
 tests listed in `conventions.md` §9), update the docs.
 

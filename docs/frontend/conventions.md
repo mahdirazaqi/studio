@@ -1,5 +1,11 @@
 # Frontend Conventions
 
+> **Phase 1 status.** The shell (root layout, `(auth)` + `(dashboard)` route groups,
+> sidebar, header, breadcrumb, mobile nav), the theme system, error/loading/not-found
+> boundaries, and shadcn/ui are implemented. Feature screens are placeholders. Details:
+> [theme.md](theme.md), [../architecture/server-client-boundary.md](../architecture/server-client-boundary.md),
+> [../architecture/error-handling.md](../architecture/error-handling.md).
+
 ## 1. Nature of the app
 
 - **Panel application only.** There is **no landing page**, no marketing site, no public
@@ -9,17 +15,17 @@
 
 ## 2. Stack
 
-| Concern | Choice |
-|---|---|
-| Framework | Next.js App Router |
-| Language | TypeScript (strict) |
-| UI | React — Server Components by default, Client Components only where interactivity requires |
-| Styling | Tailwind CSS |
-| Components | shadcn/ui (components copied into `src/components/ui`, owned by us) |
-| Icons | lucide-react (ships with shadcn/ui) |
-| Forms | React Hook Form + Zod resolver (Zod schema shared with the Server Action) |
-| Data mutations | **Server Actions** (never client `fetch` to an internal API) |
-| Data reads | Server Components calling read functions; `revalidate` / streaming for freshness |
+| Concern        | Choice                                                                                    |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| Framework      | Next.js App Router                                                                        |
+| Language       | TypeScript (strict)                                                                       |
+| UI             | React — Server Components by default, Client Components only where interactivity requires |
+| Styling        | Tailwind CSS                                                                              |
+| Components     | shadcn/ui (components copied into `src/components/ui`, owned by us)                       |
+| Icons          | lucide-react (ships with shadcn/ui)                                                       |
+| Forms          | React Hook Form + Zod resolver (intended; added with the first real form)                 |
+| Data mutations | **Server Actions** via `defineAction` (never client `fetch` to an internal API)           |
+| Data reads     | Server Components calling `read/` functions; `revalidate` / streaming for freshness       |
 
 ## 3. Direction & language
 
@@ -30,12 +36,12 @@
 
 ## 4. Theming
 
-- **Light**, **Dark**, and **System** (follow OS preference) — all three supported.
-- Implement with Tailwind's `dark` class strategy + a theme provider that resolves
-  `system` against `prefers-color-scheme` and persists the explicit choice.
-- All colors via design tokens / CSS variables (shadcn/ui convention). No hard-coded hex
-  in components.
-- Every screen must be verified in both light and dark.
+Implemented with **next-themes** (`attribute="class"`, `defaultTheme="system"`). Light /
+Dark / System all supported; System is the default and follows the OS until the user
+chooses explicitly. All colors are design tokens defined on `:root` and `.dark` in
+`src/app/globals.css` and mapped via Tailwind v4 `@theme inline` — **no hard-coded colors
+in components**. Every screen is verified in both light and dark. Full detail:
+[theme.md](theme.md).
 
 ## 5. Responsive & mobile
 
@@ -66,18 +72,38 @@
 
 ## 7. Forms & errors
 
-- One Zod schema per operation, imported by **both** the client form (RHF resolver) and
-  the Server Action (server-side re-validation — the client check is UX only).
-- Server Action returns a typed result: `{ ok: true, data }` or
-  `{ ok: false, error, fieldErrors? }`. Components render `fieldErrors` inline.
+- One Zod schema per operation (`features/<f>/schemas/`), imported by **both** the client
+  form (RHF resolver) and the Server Action (server-side re-validation via `parseInput` —
+  the client check is UX only).
+- A Server Action returns `ActionResult<T>`: `{ ok: true, data }` or
+  `{ ok: false, error }` where `error` is a `PublicError` carrying `fieldErrors?`.
+  Components branch on `result.ok` and render `result.error.fieldErrors` inline.
 - Error messages are user-facing English, actionable, and never leak internals
   (stack traces, SQL, ids of other departments).
 
-## 8. Screens in scope (later phases — not Phase 0)
+## 8. App shell (implemented in Phase 1)
+
+- **`src/app/layout.tsx`** — `<html lang="en" dir="ltr" suppressHydrationWarning>`, Geist
+  fonts as `--font-sans` / `--font-mono`, `ThemeProvider`, `Toaster`.
+- **`(dashboard)/layout.tsx`** — `SidebarProvider` (persists open state in a cookie) +
+  `AppSidebar` + `SidebarInset` (`AppHeader` + `<main>`).
+- **`components/layout/app-sidebar.tsx`** — collapsible icon sidebar, groups from
+  `@/lib/navigation`, active-route highlighting, "Soon" badges on placeholder routes.
+- **`components/layout/app-header.tsx`** — sidebar trigger, pathname breadcrumb, theme
+  toggle. Sticky, backdrop-blur.
+- **Mobile:** the shadcn sidebar switches to an off-canvas sheet below `md`; the trigger
+  is always visible in the header.
+- **`components/layout/page-shell.tsx`** — `PageShell` (max-width + padding) + `PageHeader`
+  (title/description/actions) used by every page.
+- **`components/layout/placeholder-page.tsx`** — the honest "not implemented yet" screen
+  for feature routes.
+
+## 9. Screens in scope (later phases)
 
 Jobs (list, detail with live state/progress, create wizard, cancel, retry), Templates
 (list, create/edit, disable, delete), File Gallery (grid, upload, preview, delete),
-Users (list, create, disable — MANAGER/ADMIN), Departments (ADMIN), sign-in, theme
-toggle, notifications.
+Users (list, create, disable — MANAGER/ADMIN), Departments (ADMIN), real sign-in,
+notifications.
 
-**Phase 0 builds none of these.** See [../development/workflow.md](../development/workflow.md).
+**Phase 1 builds none of these** — only the placeholder routes. See
+[../development/workflow.md](../development/workflow.md).

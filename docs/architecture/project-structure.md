@@ -1,128 +1,111 @@
 # Project Structure
 
-**`DECIDED`** in principle (feature-based, layered). Exact file names will settle during
-Phase 1; this page defines the shape and the responsibility of each layer.
+**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 1 tree.
 
-## 1. Top-level layout
+## 1. Repository layout
 
 ```
 studio/
 ├── CLAUDE.md
 ├── README.md
 ├── docs/
-├── prisma/
-│   ├── schema.prisma
-│   └── migrations/
 ├── public/
-├── src/
-│   ├── app/                      # Next.js App Router — presentation only
-│   │   ├── (auth)/               # sign-in etc. (no landing page)
-│   │   ├── (dashboard)/          # the panel; every route requires a session
-│   │   │   ├── jobs/
-│   │   │   ├── templates/
-│   │   │   ├── files/
-│   │   │   ├── users/
-│   │   │   └── departments/      # ADMIN-only area
-│   │   └── api/
-│   │       ├── worker/           # Render Worker REST (versioned, external)
-│   │       ├── telegram/         # Telegram webhook (if webhook mode)
-│   │       └── health/
-│   │
-│   ├── features/                 # one folder per module; the heart of the app
-│   │   ├── auth/
-│   │   ├── users/
-│   │   ├── departments/
-│   │   ├── files/
-│   │   ├── templates/
-│   │   ├── jobs/
-│   │   └── telegram/
-│   │
-│   ├── server/                   # cross-feature server-only building blocks
-│   │   ├── db/                   # Prisma client singleton
-│   │   ├── auth/                 # session read/verify, role/department helpers
-│   │   ├── authz/                # permission checks, department-scope guards
-│   │   ├── adapters/             # youtube/, telegram/, storage/, media/, clock/, id/
-│   │   ├── validation/           # shared Zod helpers
-│   │   └── errors/               # typed application errors → transport mapping
-│   │
-│   ├── components/               # shared UI (shadcn/ui wrappers, layout, primitives)
-│   ├── lib/                      # framework-agnostic pure utilities (client-safe)
-│   └── types/                    # shared type declarations
+├── src/                          see §2
+├── components.json               shadcn/ui config
+├── eslint.config.mjs             flat config + server/client boundary guard
+├── prettier.config.mjs
+├── next.config.ts
+├── postcss.config.mjs            @tailwindcss/postcss
+├── vitest.config.ts
+├── tsconfig.json                 strict + noUncheckedIndexedAccess + noImplicitOverride
+├── .env.example
+├── .editorconfig  .nvmrc  .gitignore  .prettierignore
+├── package.json                  npm; scripts: dev build start lint typecheck format test check
+└── package-lock.json
+```
+
+No `tailwind.config.*` — Tailwind v4 is configured in CSS (`src/app/globals.css`).
+No `prisma/` yet — the database layer lands with the first persistent feature (ADR-0002).
+
+## 2. `src/` tree (actual)
+
+```
+src/
+├── app/                          Next.js App Router — presentation & wiring only
+│   ├── layout.tsx                <html lang=en dir=ltr>, fonts, ThemeProvider, Toaster
+│   ├── globals.css               Tailwind v4 + design tokens (light + .dark)
+│   ├── error.tsx  global-error.tsx  not-found.tsx
+│   ├── (auth)/                   unauthenticated routes
+│   │   ├── layout.tsx
+│   │   └── sign-in/page.tsx      placeholder (auth is a later phase)
+│   ├── (dashboard)/              authenticated app shell (sidebar + header)
+│   │   ├── layout.tsx            SidebarProvider + AppSidebar + AppHeader
+│   │   ├── page.tsx              "/" overview
+│   │   ├── loading.tsx  error.tsx
+│   │   ├── jobs/  templates/  files/  users/  departments/   → PlaceholderPage
+│   └── api/
+│       └── health/route.ts       the only Route Handler in Phase 1
 │
-└── tests/ (or co-located *.test.ts)
+├── features/                     one folder per module (see features/README.md)
+│   ├── auth/  users/  departments/  jobs/  templates/  files/  telegram/
+│   └── (each currently: README.md describing scope + boundaries; no impl yet)
+│
+├── components/
+│   ├── ui/                       shadcn/ui primitives (owned, copied in)
+│   ├── theme/                    theme-provider, theme-toggle  ("use client")
+│   └── layout/                   app-sidebar, app-header, page-shell, placeholder-page
+│
+├── hooks/
+│   └── use-mobile.ts             (from shadcn, used by the sidebar)
+│
+├── lib/                          client-safe, dependency-light utilities
+│   ├── utils.ts                  cn()
+│   ├── roles.ts                  Role vocabulary (no server imports)
+│   ├── site-config.ts            app name / metadata
+│   └── navigation.ts             centralized nav definition + navigationForRole()
+│
+├── server/                      SERVER-ONLY infrastructure (every file imports "server-only")
+│   ├── env.ts                    validated environment (@t3-oss/env-nextjs + zod)
+│   ├── logger.ts                 structured logger + redaction
+│   ├── errors/                   app-error.ts (model) + index.ts (toPublicError mapping)
+│   ├── validation/              parseInput / safeParseInput / commonSchemas (zod)
+│   ├── actions/                 defineAction() + ActionResult<T>
+│   ├── api/                     defineRouteHandler() + healthResponse()
+│   ├── auth/                    current-user.ts — authentication BOUNDARY
+│   ├── authz/                   authorize() / requireRole / assertSameDepartment — BOUNDARY
+│   └── db/                      README only — Prisma client lands later
+│
+├── types/                       cross-cutting client-safe types (Maybe, Paginated, Result)
+│
+└── test/
+    └── stubs/empty-module.ts     vitest alias target for server-only/client-only
 ```
-
-### Notes on the starting structure from the brief
-
-The brief proposed `src/app`, `src/features`, `src/components`, `src/lib`, `src/server`,
-`src/types`. Studio adopts it with these clarifications:
-
-- **`features/`** holds each module's UI, Server Actions, use cases, repositories,
-  domain types, and validation — co-located. This is the primary place work happens.
-- **`server/`** holds only things shared *across* features (Prisma client, auth/session,
-  authz primitives, external adapters). Feature code imports from `server/`, never the
-  reverse.
-- **`lib/`** is for pure, dependency-light utilities that are safe on both client and
-  server. No Prisma, no `next/*` server APIs.
-- **`app/`** is presentation wiring only: route segments, layouts, loading/error UI, and
-  the thin `route.ts` handlers for external clients.
-
-## 2. Anatomy of a feature folder
-
-```
-features/jobs/
-├── ui/                       # Server + Client Components for job screens
-├── actions/                  # 'use server' entry points (thin)
-│   ├── create-job.action.ts
-│   ├── cancel-job.action.ts
-│   └── retry-job.action.ts
-├── use-cases/                # ALL business logic, transport-agnostic
-│   ├── create-job.ts
-│   ├── claim-next-job.ts     # used by the Worker Route Handler
-│   ├── report-progress.ts
-│   ├── change-state.ts
-│   ├── cancel-job.ts
-│   ├── retry-job.ts
-│   └── complete-and-deliver.ts
-├── domain/
-│   ├── job-state.ts          # state enum + allowed transitions
-│   ├── job.types.ts
-│   └── invariants.ts
-├── validation/               # Zod schemas per use case input
-├── repository/
-│   └── job.repository.ts     # the only Prisma access for jobs
-└── read/                     # read models / query functions for pages
-```
-
-The `templates`, `files`, `users`, `departments`, `auth`, `telegram` features follow the
-same anatomy (not every feature needs every folder).
 
 ## 3. Layer responsibilities
 
-| Layer | May depend on | Must not | Responsibilities |
-|---|---|---|---|
-| **`app/` (pages, layouts)** | `features/*/ui`, `features/*/read`, `server/auth` | Prisma, use cases' internals, business rules | Routing, layout, suspense/error boundaries, calling read functions & Server Actions |
-| **`app/api/**` (Route Handlers)** | `features/*/use-cases`, `server/auth`, `server/errors` | business logic, Prisma directly | Parse request, authenticate (service credential / session), validate, call use case, map to HTTP + status codes, API versioning |
-| **`features/*/actions` (Server Actions)** | `features/*/use-cases`, `server/auth`, feature `validation` | business logic, Prisma directly | `'use server'`, get session, validate input, call use case, return typed result / error |
-| **`features/*/use-cases`** | feature `domain`, feature `repository`, `server/authz`, `server/adapters`, `server/errors` | `next/*` request APIs, transport concerns, other features' repositories | Enforce authorization, enforce invariants & state machine, orchestrate repositories + adapters, transactions, emit domain events / schedule durable work |
-| **`features/*/domain`** | nothing (pure) | I/O of any kind | Types, enums, the state machine, pure invariant functions |
-| **`features/*/repository`** | `server/db` (Prisma), feature `domain` | business rules, authorization decisions (but **does** apply department-scope filters defensively) | CRUD + queries, mapping Prisma rows ↔ domain types, atomic operations (locking) |
-| **`features/*/read`** | `server/db` or repository, `server/auth` | mutations | Query functions/read models for pages; apply department scoping |
-| **`server/adapters/*`** | the external SDK/CLI | domain rules | Wrap one external system behind an interface; handle its errors/retries/timeouts |
-| **`components/`, `lib/`** | each other, React | Prisma, server-only APIs (for `lib/`) | Reusable UI; pure helpers |
+| Layer                                 | May import                                                                 | Must NOT                                                                      | Responsibility                                                                           |
+| ------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `app/` pages & layouts                | `features/*/ui`, `features/*/read`, `components/*`, `server/auth`          | Prisma, business rules                                                        | routing, layout, suspense/error boundaries, calling reads + actions                      |
+| `app/api/**` route handlers           | `server/api`, `features/*/use-cases`, feature `server/` auth               | business logic, Prisma directly                                               | parse + authenticate + validate + delegate + map to HTTP                                 |
+| `features/*/actions` (`"use server"`) | `server/actions`, `features/*/use-cases`, feature `schemas`                | business logic, Prisma directly                                               | `defineAction` wrappers — thin                                                           |
+| `features/*/use-cases`                | feature `domain` + `repository`, `server/authz`, `server/errors`, adapters | `next/*` request APIs, transport types, other features' internals             | authorize, enforce invariants + state machine, orchestrate, transactions                 |
+| `features/*/domain`                   | nothing (pure)                                                             | any I/O                                                                       | types, enums, state machines, invariant functions                                        |
+| `features/*/repository`               | `server/db`, feature `domain`                                              | business/authorization decisions (but applies dept-scope filters defensively) | CRUD + queries, row↔domain mapping, atomic ops                                           |
+| `features/*/read`                     | `server/db` or repository, `server/auth`                                   | mutations                                                                     | query functions / read models for pages (dept-scoped)                                    |
+| `components/`, `components/ui/`       | React, `lib/*`, `types/*`                                                  | `@/server/*`, `server-only` (**ESLint-enforced**)                             | reusable UI; receives data as props                                                      |
+| `lib/`, `types/`                      | each other, tiny libs                                                      | `@/server/*`, `next` server APIs                                              | pure client-safe helpers/types                                                           |
+| `server/*`                            | each other, the wrapped lib/SDK                                            | domain rules (in `env`/`logger`/`errors`)                                     | env, logging, error mapping, action/route conventions, auth & authz boundaries, adapters |
 
 ## 4. Cross-cutting conventions
 
-- **Prisma client**: a single instance from `server/db`. Never `new PrismaClient()` in
-  feature code.
-- **Time & IDs**: use `server/adapters/clock` and `server/adapters/id` so use cases are
-  deterministic in tests. No `new Date()` / `Math.random()` / `crypto.randomUUID()` in
-  use cases.
-- **Errors**: use cases throw typed errors from `server/errors` (`NotFoundError`,
-  `ForbiddenError`, `ConflictError`, `ValidationError`, …). Route Handlers and Server
-  Actions translate them; nothing else catches them.
-- **Department scoping**: every repository/read function that lists or fetches a scoped
-  entity takes an actor context and filters by department unless the actor is ADMIN.
-  This is defense in depth — the use case checks authorization first.
-- **No barrel files that cross layers.** A feature does not re-export another feature's
-  repository.
+- **`@/` → `src/`** path alias (tsconfig + eslint + vitest).
+- **`server-only`** guards every `src/server/*` module; ESLint blocks `@/server/*` and
+  `server-only` imports from `components/**` and `features/**/components|ui/**`.
+- **Prisma client**: single instance from `server/db` (when it exists); never
+  `new PrismaClient()` in feature code.
+- **Time & IDs** in use cases come from adapters (later), not `new Date()` /
+  `crypto.randomUUID()` directly.
+- **Errors**: use cases throw typed `AppError`s from `server/errors`; only the
+  action/route helpers catch and map them.
+- **Department scoping** is applied in use cases (authz) and defensively in
+  repositories/reads.

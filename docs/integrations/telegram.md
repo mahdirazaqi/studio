@@ -43,13 +43,14 @@ From `qtical-backend-node/src/render/telegrambot` (see
 ### Transport
 
 > **`OPEN DECISION` — webhook vs long-polling.**
+>
 > - **Webhook:** Telegram → `POST /api/worker/... ` style Route Handler under
 >   `app/api/telegram/webhook`. Stateless, scales with the app, no extra process. Needs a
 >   public HTTPS URL + a Telegram secret token on the webhook.
 > - **Long-polling:** a separate Node process/worker calls `getUpdates`. Simpler locally,
 >   but it is a second deployable and needs single-consumer coordination.
-> *Consequence:* webhook fits the "single Next.js deployable" model better. Recommended:
-> **webhook**, with the Telegram-provided secret token verified on every request.
+>   _Consequence:_ webhook fits the "single Next.js deployable" model better. Recommended:
+>   **webhook**, with the Telegram-provided secret token verified on every request.
 
 ### Layering
 
@@ -71,14 +72,14 @@ Telegram → (webhook Route Handler | polling worker)
 
 `TelegramWizardState` table (see [../data/database.md](../data/database.md)):
 
-| Field | Notes |
-|---|---|
-| `telegramUserId` | Unique key. |
-| `userId` | The linked Studio User. |
-| `flow` | `SINGLE_TRACK` \| `ALBUM`. |
-| `step` | Explicit step marker (e.g. `PICK_TEMPLATE`, `ASK_DELIVERY`, `FILL_SLOT`). |
-| `payload` | JSONB: chosen template id, delivery choice, per-slot collected values, album track count + expanded slots. |
-| `createdAt`, `updatedAt` | `updatedAt` drives TTL cleanup. |
+| Field                    | Notes                                                                                                      |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `telegramUserId`         | Unique key.                                                                                                |
+| `userId`                 | The linked Studio User.                                                                                    |
+| `flow`                   | `SINGLE_TRACK` \| `ALBUM`.                                                                                 |
+| `step`                   | Explicit step marker (e.g. `PICK_TEMPLATE`, `ASK_DELIVERY`, `FILL_SLOT`).                                  |
+| `payload`                | JSONB: chosen template id, delivery choice, per-slot collected values, album track count + expanded slots. |
+| `createdAt`, `updatedAt` | `updatedAt` drives TTL cleanup.                                                                            |
 
 - Every inbound message loads the row, advances it, saves it. Nothing is remembered
   between requests except through this row.
@@ -105,12 +106,12 @@ Telegram → (webhook Route Handler | polling worker)
 
 ### Flows (preserved conceptually)
 
-| Flow | Studio behavior |
-|---|---|
-| **Single Track** | Pick `ACTIVE` template in the user's department → if template has a YouTube target, ask deliver? → collect each slot (with **tolerance-based** aspect-ratio validation) → `createJob` (one job). |
-| **Album** | Pick template → ask track count → expand slots → build N job inputs → call `createJob` N times (or a dedicated `createAlbumJobs` use case) → all jobs linked by an `albumGroupId` (OPEN DECISION — is an album grouping entity wanted?). |
-| **List Jobs** | `listJobs` scoped to the user's department; tap for detail; Retry / Cancel buttons call the same authorized use cases. |
-| **Cancel All** | Bulk cancel **within the user's department** and only cancelable-state jobs. |
+| Flow             | Studio behavior                                                                                                                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Single Track** | Pick `ACTIVE` template in the user's department → if template has a YouTube target, ask deliver? → collect each slot (with **tolerance-based** aspect-ratio validation) → `createJob` (one job).                                         |
+| **Album**        | Pick template → ask track count → expand slots → build N job inputs → call `createJob` N times (or a dedicated `createAlbumJobs` use case) → all jobs linked by an `albumGroupId` (OPEN DECISION — is an album grouping entity wanted?). |
+| **List Jobs**    | `listJobs` scoped to the user's department; tap for detail; Retry / Cancel buttons call the same authorized use cases.                                                                                                                   |
+| **Cancel All**   | Bulk cancel **within the user's department** and only cancelable-state jobs.                                                                                                                                                             |
 
 ### File inputs from Telegram
 
@@ -137,12 +138,12 @@ Telegram → (webhook Route Handler | polling worker)
 
 ## 3. Improvements over legacy (summary)
 
-| Legacy | Studio |
-|---|---|
-| No permission enforcement | Full role + department authorization |
-| "Cancel All" = system-wide | Scoped to the user's department + cancelable jobs |
-| In-memory wizard state | Durable `TelegramWizardState` table + TTL |
-| Not horizontally scalable | Stateless adapter, webhook-friendly |
-| Emoji-coupled dispatch | Stable action codes |
-| Corrupt file records possible | Proper content-type validation on ingest |
-| Swallowed notification errors | Logged + surfaced |
+| Legacy                        | Studio                                            |
+| ----------------------------- | ------------------------------------------------- |
+| No permission enforcement     | Full role + department authorization              |
+| "Cancel All" = system-wide    | Scoped to the user's department + cancelable jobs |
+| In-memory wizard state        | Durable `TelegramWizardState` table + TTL         |
+| Not horizontally scalable     | Stateless adapter, webhook-friendly               |
+| Emoji-coupled dispatch        | Stable action codes                               |
+| Corrupt file records possible | Proper content-type validation on ingest          |
+| Swallowed notification errors | Logged + surfaced                                 |

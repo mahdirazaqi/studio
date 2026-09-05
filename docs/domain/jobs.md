@@ -17,7 +17,7 @@ From `qtical-backend-node/src/render/job` (see
   `retryJob`, `cancelJob`) + unauthenticated REST for the worker.
 - `title` auto-built by joining all `data`-type asset values with `" | "`.
 - `state`: integer enum `Queued(0) Fetched(1) Downloading(2) Started(3) InProgress(4)
-  Rendered(5) Uploading(6) Uploaded(7) Error(8) Cancel(9)`. `Downloading`/`Started`/
+Rendered(5) Uploading(6) Uploaded(7) Error(8) Cancel(9)`. `Downloading`/`Started`/
   `Uploading` were **never set by the backend** — only (presumably) by the worker;
   `changeStateJob` accepted **any integer** with no validation.
 - On `Rendered`: `renderedAt` set, Telegram DM + in-app system message. On `Uploaded`:
@@ -33,7 +33,7 @@ From `qtical-backend-node/src/render/job` (see
 - `retryJob`: **`findOneAndDelete`** the original (must be non-terminal, < 3 days old),
   then check upload cap, then `create` a new `Queued` job carrying `_createdBy`,
   `_template`, `title`, `workDir`, `assets`, `upload`, `retriedCount+1`, `_retriedBy`.
-  **Destructive**, and the cap check happens *after* the delete → possible total loss.
+  **Destructive**, and the cap check happens _after_ the delete → possible total loss.
   No activity-log entry emitted.
 - `cancelJob(ids[])`: bulk; skips jobs already in `Rendered/Uploading/Uploaded/Cancel`;
   sets `state=Cancel`, resets `duration`/`progress`, sets `canceledAt`.
@@ -63,16 +63,16 @@ From `qtical-backend-node/src/render/job` (see
 Proposed Studio states (names; internal representation TBD). Legacy mapping in
 [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).
 
-| State | Meaning | Set by |
-|---|---|---|
-| `QUEUED` | Created, waiting for a Worker. | Studio (create / retry) |
-| `CLAIMED` | An atomic claim assigned it to a Worker. | Studio (`claimNextJob`) |
-| `RENDERING` | Worker is actively rendering (covers legacy Downloading/Started/InProgress). | Worker |
-| `RENDERED` | Render finished; result file uploaded/attached. | Worker / Studio |
-| `DELIVERING` | Post-render delivery (YouTube/Telegram) in progress. | Studio |
-| `UPLOADED` | All required delivery succeeded. **Terminal (success).** | Studio |
-| `ERROR` | Render or delivery failed; carries a reason. | Worker / Studio |
-| `CANCELED` | Canceled by an operator. **Terminal.** | Studio |
+| State        | Meaning                                                                      | Set by                  |
+| ------------ | ---------------------------------------------------------------------------- | ----------------------- |
+| `QUEUED`     | Created, waiting for a Worker.                                               | Studio (create / retry) |
+| `CLAIMED`    | An atomic claim assigned it to a Worker.                                     | Studio (`claimNextJob`) |
+| `RENDERING`  | Worker is actively rendering (covers legacy Downloading/Started/InProgress). | Worker                  |
+| `RENDERED`   | Render finished; result file uploaded/attached.                              | Worker / Studio         |
+| `DELIVERING` | Post-render delivery (YouTube/Telegram) in progress.                         | Studio                  |
+| `UPLOADED`   | All required delivery succeeded. **Terminal (success).**                     | Studio                  |
+| `ERROR`      | Render or delivery failed; carries a reason.                                 | Worker / Studio         |
+| `CANCELED`   | Canceled by an operator. **Terminal.**                                       | Studio                  |
 
 Allowed transitions (proposed):
 
@@ -94,48 +94,48 @@ CANCELED  → (terminal)
   back to `QUEUED` (requeue) or to `ERROR`. Timeout policy = OPEN DECISION.
 
 > **`OPEN DECISION` — exact state set & whether the Worker reports fine-grained substates
-> (downloading/started).** *Consequence of collapsing into `RENDERING`:* simpler, but the
+> (downloading/started).** _Consequence of collapsing into `RENDERING`:_ simpler, but the
 > Worker currently sends numeric 2/3/4 — the Worker API must accept and map them.
-> *Consequence of keeping substates:* closer to legacy, more UI detail, larger state map.
+> _Consequence of keeping substates:_ closer to legacy, more UI detail, larger state map.
 > The compatibility matrix assumes the Worker API **accepts** legacy numeric states and
 > maps them; internal canonical states can still be the smaller set.
 
 ### Fields (conceptual — final schema in [../data/database.md](../data/database.md))
 
-| Field | Notes |
-|---|---|
-| `id` | Permanent. |
-| `departmentId` | Required. Set from creator's context. |
-| `createdByUserId` | Permanent reference. |
-| `templateId` | FK to the Template (kept resolvable forever — Template is soft-deleted only). |
-| `snapshot` | **Immutable.** Template render fields + asset-slot defs + resolved asset values at creation. Shape = OPEN DECISION (ADR-0010). |
-| `title` | Derived from `DATA` asset values at creation (legacy rule kept). Stored, not recomputed. |
-| `state` | From the state machine. |
-| `progress` | 0–100, from the Worker. |
-| `durationSeconds` | Rendered video duration, from the Worker. |
-| `deliverToYouTube` | Whether to publish to YouTube on completion. |
-| `deliverToTelegram` | Whether to DM the creator the file (default true if creator linked? OPEN DECISION). |
-| `retryOfJobId` | Nullable. Links a retry attempt to the Job it retried. |
-| `attemptNumber` | 1 for an original; `parent.attemptNumber + 1` for a retry. |
-| `retriedByUserId`, `retryReason` | On retry-created Jobs. |
-| `canceledByUserId`, `canceledAt`, `cancelReason` | On cancellation. |
-| `errorReason` | Human-readable failure reason (render or delivery). Surfaced in UI. |
-| `claimedAt`, `startedAt`, `renderedAt`, `deliveredAt`, `uploadedAt` | Timeline. |
-| `deliveryOutcomes` | Per-target result: `{ target, status, reason, at }`. |
-| `videoFileId`, `screenshotFileId`, `thumbnailFileId` | FKs to `File` rows (category `JOB_ARTIFACT`). May be null after artifact cleanup — the record stays coherent via the snapshot + timeline. |
-| `createdAt`, `updatedAt` | |
+| Field                                                               | Notes                                                                                                                                     |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                                | Permanent.                                                                                                                                |
+| `departmentId`                                                      | Required. Set from creator's context.                                                                                                     |
+| `createdByUserId`                                                   | Permanent reference.                                                                                                                      |
+| `templateId`                                                        | FK to the Template (kept resolvable forever — Template is soft-deleted only).                                                             |
+| `snapshot`                                                          | **Immutable.** Template render fields + asset-slot defs + resolved asset values at creation. Shape = OPEN DECISION (ADR-0010).            |
+| `title`                                                             | Derived from `DATA` asset values at creation (legacy rule kept). Stored, not recomputed.                                                  |
+| `state`                                                             | From the state machine.                                                                                                                   |
+| `progress`                                                          | 0–100, from the Worker.                                                                                                                   |
+| `durationSeconds`                                                   | Rendered video duration, from the Worker.                                                                                                 |
+| `deliverToYouTube`                                                  | Whether to publish to YouTube on completion.                                                                                              |
+| `deliverToTelegram`                                                 | Whether to DM the creator the file (default true if creator linked? OPEN DECISION).                                                       |
+| `retryOfJobId`                                                      | Nullable. Links a retry attempt to the Job it retried.                                                                                    |
+| `attemptNumber`                                                     | 1 for an original; `parent.attemptNumber + 1` for a retry.                                                                                |
+| `retriedByUserId`, `retryReason`                                    | On retry-created Jobs.                                                                                                                    |
+| `canceledByUserId`, `canceledAt`, `cancelReason`                    | On cancellation.                                                                                                                          |
+| `errorReason`                                                       | Human-readable failure reason (render or delivery). Surfaced in UI.                                                                       |
+| `claimedAt`, `startedAt`, `renderedAt`, `deliveredAt`, `uploadedAt` | Timeline.                                                                                                                                 |
+| `deliveryOutcomes`                                                  | Per-target result: `{ target, status, reason, at }`.                                                                                      |
+| `videoFileId`, `screenshotFileId`, `thumbnailFileId`                | FKs to `File` rows (category `JOB_ARTIFACT`). May be null after artifact cleanup — the record stays coherent via the snapshot + timeline. |
+| `createdAt`, `updatedAt`                                            |                                                                                                                                           |
 
 ### Job assets
 
 Each resolved asset on a Job (part of / alongside the snapshot):
 
-| Field | Notes |
-|---|---|
-| `slotName` | Matches a Template asset `name`. |
-| `kind` | `DATA` \| `IMAGE` \| `AUDIO` \| `VIDEO` \| `SCRIPT` (script injected). |
-| `composition`, `layer` | Passed through to the Worker. |
-| `text` | For `DATA`. |
-| `fileRef` | For file kinds: the file path/reference the Worker should use, **captured at creation**. Plus enough identifying metadata (original name, mime, size, and the source `File.id` if it was a gallery asset) that the Job stays meaningful even if the File row is later deleted. |
+| Field                  | Notes                                                                                                                                                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `slotName`             | Matches a Template asset `name`.                                                                                                                                                                                                                                               |
+| `kind`                 | `DATA` \| `IMAGE` \| `AUDIO` \| `VIDEO` \| `SCRIPT` (script injected).                                                                                                                                                                                                         |
+| `composition`, `layer` | Passed through to the Worker.                                                                                                                                                                                                                                                  |
+| `text`                 | For `DATA`.                                                                                                                                                                                                                                                                    |
+| `fileRef`              | For file kinds: the file path/reference the Worker should use, **captured at creation**. Plus enough identifying metadata (original name, mime, size, and the source `File.id` if it was a gallery asset) that the Job stays meaningful even if the File row is later deleted. |
 
 ### Creation
 
@@ -177,8 +177,8 @@ thing this explicitly fixes.
 - Eligibility: original Job is in `ERROR` (or `CANCELED`? OPEN DECISION) **and** within
   the retry age window.
   > **`OPEN DECISION` — retry age window.** Legacy used **3 days from creation**. Keep,
-  > change, or drop? *Consequence of keeping 3 days:* familiar, bounds worker/queue
-  > churn. *Consequence of dropping the limit:* operators can always retry old failures,
+  > change, or drop? _Consequence of keeping 3 days:_ familiar, bounds worker/queue
+  > churn. _Consequence of dropping the limit:_ operators can always retry old failures,
   > but a very old snapshot may reference deleted files. Recommended: **keep a window,
   > default 3–7 days, configurable.**
 - Creates a **new** Job:
@@ -209,8 +209,8 @@ stand-in for the YouTube Data API quota.
 > **`OPEN DECISION` — upload cap model.** Decide: (a) the value, (b) the scope
 > (global / per-Department / per-YouTube-target), (c) the window (UTC day?), (d) whether
 > it is configurable, (e) behavior when exceeded (reject at creation — legacy — vs.
-> queue-and-defer). *Consequence of global:* simplest, protects a single shared API
-> quota, but one department can starve others. *Consequence of per-target:* aligns with
+> queue-and-defer). _Consequence of global:_ simplest, protects a single shared API
+> quota, but one department can starve others. _Consequence of per-target:_ aligns with
 > the real YouTube quota which is per project/channel, fairer, more config. Recommended
 > starting point: **per-YouTube-target daily cap, configurable, reject at creation with a
 > clear message**, pending confirmation of how the YouTube quota is actually structured.

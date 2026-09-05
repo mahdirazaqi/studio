@@ -2,26 +2,44 @@
 
 ## 1. Language & tooling
 
-- **TypeScript strict mode** on. No `any` without a written reason. Prefer `unknown` +
-  narrowing.
-- ESLint + Prettier; CI fails on lint errors and format drift.
-- Node LTS; package manager choice = OPEN DECISION (pin one, commit the lockfile).
-- Path alias `@/` → `src/`.
+- **TypeScript strict mode** on, plus `noUncheckedIndexedAccess` and `noImplicitOverride`.
+  `@typescript-eslint/no-explicit-any` is an **error** — no `any` without a written reason.
+  Prefer `unknown` + narrowing.
+- **npm** (bundled with Node 20, `npm >= 10`). `package-lock.json` committed; use
+  `npm ci` in CI. ADR-0018.
+- **Node** ≥ 20.9 (`.nvmrc` = 20).
+- ESLint 9 (flat config) + Prettier 3. CI fails on lint errors and format drift.
+- Path alias `@/` → `src/` (tsconfig + eslint + vitest).
+
+### Scripts
+
+| Command                                   | What                                                         |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| `npm run dev`                             | dev server                                                   |
+| `npm run build` / `npm run start`         | production build / serve                                     |
+| `npm run lint` / `npm run lint:fix`       | ESLint                                                       |
+| `npm run typecheck`                       | `tsc --noEmit`                                               |
+| `npm run format` / `npm run format:check` | Prettier                                                     |
+| `npm run test` / `npm run test:watch`     | Vitest                                                       |
+| `npm run check`                           | lint + typecheck + format:check + test (run before every PR) |
 
 ## 2. Layering discipline (enforced by convention + lint where possible)
 
-See [../architecture/project-structure.md](../architecture/project-structure.md) for the
-full table. Hard rules:
+See [../architecture/project-structure.md](../architecture/project-structure.md) and
+[../architecture/server-client-boundary.md](../architecture/server-client-boundary.md)
+for the full tables. Hard rules:
 
+- **UI components never import `@/server/*` or `server-only`** — ESLint-enforced for
+  `src/components/**` and `src/features/**/components|ui/**`. Data comes in as props.
 - **Components / pages never import a repository or Prisma.**
-- **Server Actions and Route Handlers never contain business logic** — they validate and
-  delegate to a use case.
+- **Server Actions (`defineAction`) and Route Handlers (`defineRouteHandler`) never
+  contain business logic** — they validate and delegate to a use case.
 - **Use cases never import `next/*` request APIs** or transport types.
-- **Only repositories import the Prisma client** (`server/db`).
-- **Use cases get time and ids from adapters** (`server/adapters/clock`, `.../id`), never
-  `new Date()` / `crypto.randomUUID()` directly.
+- **Only repositories import the Prisma client** (`@/server/db`).
+- **Use cases get time and ids from adapters**, not `new Date()` / `crypto.randomUUID()`.
+- **`process.env` is read only in `@/server/env`; logging only via `@/server/logger`.**
 - A feature does not import another feature's internals; cross-feature needs go through a
-  published use case or a `server/` primitive.
+  published use case or a `@/server/*` primitive.
 
 ## 3. Naming
 
@@ -34,19 +52,25 @@ full table. Hard rules:
 
 ## 4. Errors
 
-- Use cases throw typed errors from `server/errors`: `NotFoundError`, `ForbiddenError`,
-  `ValidationError`, `ConflictError`, `DependencyError` (e.g. file in use),
-  `StateTransitionError`.
-- Route Handlers map them to status codes (`404`, `403`/`404`, `422`, `409`, `409`,
-  `409`). Server Actions map them to `{ ok: false, error }`.
+See [../architecture/error-handling.md](../architecture/error-handling.md).
+
+- Use cases **throw** typed `AppError`s from `@/server/errors` via the constructors
+  (`notFoundError()`, `forbiddenError()`, `validationError()`, `conflictError()`,
+  `businessRuleError()`, `dependencyError()`, …). Discriminated by `kind`.
+- Only `defineAction` / `defineRouteHandler` catch — via `toPublicError`. Actions →
+  `{ ok: false, error }`; Route Handlers → `AppError.httpStatus` + `{ error, requestId }`.
+- `internal` errors never expose their message; the `cause` is logged, not returned.
 - Never let a raw Prisma error or stack trace reach a client (legacy leaked `E11000` and
-  `CastError` as 500s — K9, K16).
+  `CastError` as 500s — K9, K16). Repositories translate known DB errors.
 
 ## 5. Validation
 
-- One Zod schema per use-case input, in `features/<f>/validation`.
-- Both the Server Action / Route Handler **and** (optionally) the client form use it.
-- Server-side validation is authoritative and non-optional.
+- One Zod schema per use-case input, in `features/<f>/schemas/`.
+- Parse at every boundary with `parseInput` (from `@/server/validation`) — Server Actions,
+  Route Handlers, and (later) the Telegram adapter. A failure throws a `validation`
+  `AppError` with `fieldErrors`.
+- The client form may reuse the same schema for UX, but **server-side validation is
+  authoritative and non-optional**.
 
 ## 6. Authorization
 
@@ -64,6 +88,7 @@ full table. Hard rules:
 ## 8. Security (always)
 
 Follow [../security/security.md](../security/security.md). The recurring ones:
+
 - No `child_process.exec` with a string — `execFile`/`spawn` + arg array only.
 - No user input in filesystem paths or storage keys.
 - Validate file uploads by content type + size; generated stored names.
@@ -71,12 +96,18 @@ Follow [../security/security.md](../security/security.md). The recurring ones:
 
 ## 9. Testing
 
+- **Vitest.** Test files are `*.test.ts` co-located with the code. `server-only` /
+  `client-only` are aliased to an empty stub (`vitest.config.ts`) so server modules are
+  testable.
+- **Phase 1** covers the foundation only: `cn`, roles, the navigation filter, the error
+  model and `toPublicError` (verified no-leak), `parseInput`, and logger redaction.
 - **Unit tests** for every use case (happy path + authorization failures + invariant
   violations) and for the Job state-machine transition map.
 - **Integration tests** for: the atomic job claim under concurrency, the Worker API
   endpoints (auth + validation + state mapping), retry non-destructiveness, historical
   integrity (edit template / delete file → old job still opens).
 - Adapters mocked in use-case tests; real Postgres (test container) for integration.
+- No E2E in Phase 1.
 - The legacy module had **zero tests** (K28) — Studio does not repeat that.
 
 ## 10. Commits & branches
@@ -89,6 +120,7 @@ Follow [../security/security.md](../security/security.md). The recurring ones:
 ## 11. Documentation as part of "done"
 
 A change is not done until:
+
 - the relevant `docs/` page reflects the new behavior,
 - any new architectural decision is in `docs/architecture/decisions.md`,
 - any new unknown is in `docs/development/open-decisions.md`,

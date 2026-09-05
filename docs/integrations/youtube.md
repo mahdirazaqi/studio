@@ -14,7 +14,7 @@ From `qtical-backend-node/src/render/job/job.service.ts` (`uploadJobToYoutube`) 
   `_channel`**.
 - After the Worker uploads the rendered `.mp4`:
   - `YoutubeapiService.insertVideo(token, videoStream, job.title, template.description,
-    tags)` — **privacy forced to `private`, `madeForKids: false`, hard-coded**.
+tags)` — **privacy forced to `private`, `madeForKids: false`, hard-coded**.
   - `YoutubeapiService.setVideoThumbnail(token, screenshotStream, videoId)`.
   - Tags = `Template.tags` with `{{layer}}` placeholders substituted from the Job's
     `data` asset values; any tag still containing an unresolved `{{...}}` is dropped.
@@ -30,18 +30,18 @@ From `qtical-backend-node/src/render/job/job.service.ts` (`uploadJobToYoutube`) 
 
 The legacy `Channel` concept becomes a **`YouTubeTarget`** in Studio:
 
-| Field | Notes |
-|---|---|
-| `id` | |
-| `name` | Display name of the connected channel. |
-| `youtubeChannelId` | The actual YouTube channel id. |
-| OAuth credential | Access + refresh token, auto-refreshed; stored encrypted at rest. |
-| `status` | `CONNECTED` \| `DISCONNECTED` \| `ERROR`. |
-| `departmentId`? | **OPEN DECISION** — see below. |
+| Field              | Notes                                                             |
+| ------------------ | ----------------------------------------------------------------- |
+| `id`               |                                                                   |
+| `name`             | Display name of the connected channel.                            |
+| `youtubeChannelId` | The actual YouTube channel id.                                    |
+| OAuth credential   | Access + refresh token, auto-refreshed; stored encrypted at rest. |
+| `status`           | `CONNECTED` \| `DISCONNECTED` \| `ERROR`.                         |
+| `departmentId`?    | **OPEN DECISION** — see below.                                    |
 
-> **`OPEN DECISION` — is a YouTubeTarget department-scoped or global?** *Consequence of
-> department-scoped:* a department manages its own channels; clean isolation; matches the
-> rest of the model. *Consequence of global (ADMIN-managed):* fewer OAuth connections to
+> **`OPEN DECISION` — is a YouTubeTarget department-scoped or global?** _Consequence of
+> department-scoped:_ a department manages its own channels; clean isolation; matches the
+> rest of the model. _Consequence of global (ADMIN-managed):_ fewer OAuth connections to
 > maintain, but any department could publish to any channel. Recommended:
 > **department-scoped**, ADMIN may also manage all.
 
@@ -74,8 +74,8 @@ The legacy `Channel` concept becomes a **`YouTubeTarget`** in Studio:
 > **`OPEN DECISION` — privacy status & metadata configurability.** Legacy hard-coded
 > `private` + `madeForKids: false`. Should Studio expose privacy (`private` / `unlisted`
 > / `public`), publish-at scheduling, category, `madeForKids`, per Template or per Job?
-> *Consequence of keeping hard-coded `private`:* safe default, matches legacy, less UI.
-> *Consequence of configurable:* real publishing workflow, but more validation + more
+> _Consequence of keeping hard-coded `private`:_ safe default, matches legacy, less UI.
+> _Consequence of configurable:_ real publishing workflow, but more validation + more
 > ways to get it wrong. Recommended: **default `private`, allow `unlisted`/`public` as a
 > Template-level setting**, defer scheduling.
 

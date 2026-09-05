@@ -25,31 +25,31 @@ summaries.
 
 ## Analysis document — section index
 
-| § | Topic |
-|---|---|
-| 0 | TL;DR — the module is a *control plane*, not a renderer |
-| 1 | Complete file inventory + dead-code status |
-| 2 | NestJS component inventory, guards, DI |
-| 3 | Data models — `Template`, `TemplateAsset`, `Job`, `JobAsset`, `File`, enums |
-| 4 | Relationships (and the lack of real FKs on job→file) |
-| 5 | DTOs and the fact that `class-validator` decorators are **not wired to run** |
-| 6 | Every REST + GraphQL endpoint, with auth status |
-| 7 | Service logic, method by method (`JobService`, `TemplateService`, `FileService`, `TelegrambotService`) |
-| 8 | End-to-end execution flows (create→render→deliver, Telegram, retry, cancel) |
-| 9 | Database interaction patterns (no transactions, N+1-adjacent, sequential count) |
-| 10 | External services (Mongo, Redis, ffmpeg, ImageMagick, Telegram, YouTube, disk) |
-| 11 | Environment variables |
-| 12 | Queues / events / async |
-| 13 | The rendering lifecycle as implemented (post-processing only) |
-| 14 | Error handling (swallowed / unhandled) |
-| 15 | Authentication & authorization per surface |
-| 16 | Constants / magic numbers (cap = 3, retry = 3 days, screenshot at 4s, …) |
-| 17 | Dependency graph |
-| 18 | **Business rules — explicit statements** (18 of them) |
-| 19 | **Hidden / implicit behavior** |
-| 20 / 22 | **Potential problems / technical debt** (Critical → Low) |
-| 21 / 23 | Testing (there is none) / source-of-truth classification |
-| 24 | Final architecture summary |
+| §       | Topic                                                                                                  |
+| ------- | ------------------------------------------------------------------------------------------------------ |
+| 0       | TL;DR — the module is a _control plane_, not a renderer                                                |
+| 1       | Complete file inventory + dead-code status                                                             |
+| 2       | NestJS component inventory, guards, DI                                                                 |
+| 3       | Data models — `Template`, `TemplateAsset`, `Job`, `JobAsset`, `File`, enums                            |
+| 4       | Relationships (and the lack of real FKs on job→file)                                                   |
+| 5       | DTOs and the fact that `class-validator` decorators are **not wired to run**                           |
+| 6       | Every REST + GraphQL endpoint, with auth status                                                        |
+| 7       | Service logic, method by method (`JobService`, `TemplateService`, `FileService`, `TelegrambotService`) |
+| 8       | End-to-end execution flows (create→render→deliver, Telegram, retry, cancel)                            |
+| 9       | Database interaction patterns (no transactions, N+1-adjacent, sequential count)                        |
+| 10      | External services (Mongo, Redis, ffmpeg, ImageMagick, Telegram, YouTube, disk)                         |
+| 11      | Environment variables                                                                                  |
+| 12      | Queues / events / async                                                                                |
+| 13      | The rendering lifecycle as implemented (post-processing only)                                          |
+| 14      | Error handling (swallowed / unhandled)                                                                 |
+| 15      | Authentication & authorization per surface                                                             |
+| 16      | Constants / magic numbers (cap = 3, retry = 3 days, screenshot at 4s, …)                               |
+| 17      | Dependency graph                                                                                       |
+| 18      | **Business rules — explicit statements** (18 of them)                                                  |
+| 19      | **Hidden / implicit behavior**                                                                         |
+| 20 / 22 | **Potential problems / technical debt** (Critical → Low)                                               |
+| 21 / 23 | Testing (there is none) / source-of-truth classification                                               |
+| 24      | Final architecture summary                                                                             |
 
 ## How Studio uses this
 

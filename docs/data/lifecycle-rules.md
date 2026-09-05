@@ -5,16 +5,16 @@ The single reference for what can be deleted, when, and how. These rules are **b
 
 ## Summary table
 
-| Entity | Hard delete | Soft delete | Lifecycle mechanism | Why |
-|---|---|---|---|---|
-| **Job** | ❌ never | ❌ never | State machine (`CANCELED`, `ERROR` are states, not deletions) | Permanent audit / history / reporting record. |
-| **Template** | ❌ never | ✅ yes (`status=DELETED` / `deletedAt`) | Soft delete; row retained forever | Historical Jobs must resolve their Template. |
-| **User** | ❌ never | ➖ status only (`ACTIVE`/`DISABLED`) | Disable / re-enable | Historical records reference the User. |
-| **Department** | ❌ (pending OPEN DECISION) | ➖ archive (`status=ARCHIVED`) recommended | Archive | Contains never-deletable Jobs. |
-| **File — Gallery Asset** | ✅ when safe | ❌ | Explicit delete, dependency-checked | Media is costly; history doesn't depend on the row. |
-| **File — Job Artifact** | ✅ automatically when safe | ❌ | Retention policy after Job completion | Transient output; snapshot retains context. |
-| **TelegramWizardState** | ✅ by TTL | ❌ | Expiry sweep of stale rows | Ephemeral conversation state. |
-| **AuditEntry** | ➖ (retention = OPEN DECISION) | ❌ | Long retention | Compliance / forensics. |
+| Entity                   | Hard delete                    | Soft delete                                | Lifecycle mechanism                                           | Why                                                 |
+| ------------------------ | ------------------------------ | ------------------------------------------ | ------------------------------------------------------------- | --------------------------------------------------- |
+| **Job**                  | ❌ never                       | ❌ never                                   | State machine (`CANCELED`, `ERROR` are states, not deletions) | Permanent audit / history / reporting record.       |
+| **Template**             | ❌ never                       | ✅ yes (`status=DELETED` / `deletedAt`)    | Soft delete; row retained forever                             | Historical Jobs must resolve their Template.        |
+| **User**                 | ❌ never                       | ➖ status only (`ACTIVE`/`DISABLED`)       | Disable / re-enable                                           | Historical records reference the User.              |
+| **Department**           | ❌ (pending OPEN DECISION)     | ➖ archive (`status=ARCHIVED`) recommended | Archive                                                       | Contains never-deletable Jobs.                      |
+| **File — Gallery Asset** | ✅ when safe                   | ❌                                         | Explicit delete, dependency-checked                           | Media is costly; history doesn't depend on the row. |
+| **File — Job Artifact**  | ✅ automatically when safe     | ❌                                         | Retention policy after Job completion                         | Transient output; snapshot retains context.         |
+| **TelegramWizardState**  | ✅ by TTL                      | ❌                                         | Expiry sweep of stale rows                                    | Ephemeral conversation state.                       |
+| **AuditEntry**           | ➖ (retention = OPEN DECISION) | ❌                                         | Long retention                                                | Compliance / forensics.                             |
 
 ## Jobs — never deleted
 
@@ -78,16 +78,17 @@ If (1) or (2) fails, deletion is **blocked** with a clear reason.
   `null` (or a tombstone flag) after cleanup; the Job stays coherent.
 
 > **`OPEN DECISION` — Job Artifact retention specifics.**
+>
 > - Delete the full rendered video immediately after successful required delivery, or
 >   after N days?
 > - Keep screenshot/thumbnail longer than the video (cheap, useful for the UI)?
 > - Does successful YouTube delivery make the local copy redundant enough to purge?
 > - Grace period for `ERROR`/`CANCELED` jobs before purging their artifacts (to allow
 >   debugging / retry)?
-> *Consequence of aggressive:* minimal storage, but no re-delivery and harder debugging.
-> *Consequence of conservative:* storage grows with every render.
-> Recommended starting point: **video purged after successful required delivery + 7-day
-> grace; screenshot + thumbnail kept 90 days; all windows configurable.**
+>   _Consequence of aggressive:_ minimal storage, but no re-delivery and harder debugging.
+>   _Consequence of conservative:_ storage grows with every render.
+>   Recommended starting point: **video purged after successful required delivery + 7-day
+>   grace; screenshot + thumbnail kept 90 days; all windows configurable.**
 
 > **`OPEN DECISION` — one-off Telegram/upload inputs.** An input file uploaded solely for
 > one Job (e.g. a Telegram-downloaded image) — is it a `JOB_ARTIFACT` (purgeable) or does
@@ -104,6 +105,7 @@ If (1) or (2) fails, deletion is **blocked** with a clear reason.
 ## Cleanup jobs
 
 Studio needs scheduled maintenance tasks (mechanism = the background-work OPEN DECISION):
+
 - Expire stale `TelegramWizardState` rows.
 - Purge eligible `JOB_ARTIFACT` files per the retention policy.
 - (Optionally) requeue/error out Jobs stuck in `CLAIMED`/`RENDERING` past a Worker

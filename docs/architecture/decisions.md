@@ -18,6 +18,7 @@ Server Components, Server Actions, Route Handlers). One deployable containing fr
 backend.
 
 **Consequences.**
+
 - No separate API service to operate; the UI and domain logic ship together.
 - Server Components/Actions remove most hand-rolled endpoint + DTO + client-fetch code.
 - External clients (Worker) are served by a small set of Route Handlers.
@@ -36,6 +37,7 @@ integrity, non-atomic job claiming, and embedded documents for assets.
 **Decision.** Studio uses PostgreSQL with Prisma. No MongoDB, no Mongoose.
 
 **Consequences.**
+
 - Real transactions for multi-step writes (retry, delivery outcome).
 - Row-level locking (`FOR UPDATE SKIP LOCKED`) enables atomic job claiming.
 - Foreign keys + explicit lifecycle rules protect historical integrity.
@@ -59,6 +61,7 @@ mutations use Server Actions. No internal REST endpoints for panel features. Eve
 Action is thin and calls a use case that performs authorization and business rules.
 
 **Consequences.**
+
 - Less boilerplate; authorization stays server-side by construction.
 - Client components get data via server components or server actions, not `fetch`.
 - Genuinely external needs still use REST (ADR-0004).
@@ -79,11 +82,12 @@ needs minimal changes. **Every Worker endpoint is authenticated** with a service
 credential. Route Handlers are thin and call the same use cases as the rest of the app.
 
 **Consequences.**
+
 - The Worker must send a credential (mechanism = OPEN DECISION: static API key vs signed
   request vs mTLS). This is the one deliberate breaking change from legacy.
 - Endpoint shapes stay close to legacy (`jobs/next` ≈ `jobs/fetch`, progress/state/
   duration/result) so the Worker's changes are limited to auth + minor path/version.
-- The REST surface is explicitly *not* a general API — only what the Worker needs, plus
+- The REST surface is explicitly _not_ a general API — only what the Worker needs, plus
   input-file upload.
 
 **Status:** DECIDED (surface & auth requirement). Credential mechanism: OPEN DECISION.
@@ -100,6 +104,7 @@ forever. Cancellation and failure are **states**, not deletions. Retry creates a
 linked to the original via `retryOfJobId`.
 
 **Consequences.**
+
 - Job storage grows monotonically; archival/partitioning is a scaling concern for later
   (OPEN DECISION), not a deletion mechanism.
 - Every historical Job must remain fully readable — drives ADR-0009 and ADR-0010.
@@ -120,9 +125,10 @@ Templates disappear from creation pickers but remain resolvable for historical J
 admin views.
 
 **Consequences.**
+
 - No hard-delete path for Templates in the API.
-- "Disabled" and "deleted" are distinct: *disabled* = hidden from new-job creation but
-  otherwise intact; *deleted* = also removed from management lists, kept only for history.
+- "Disabled" and "deleted" are distinct: _disabled_ = hidden from new-job creation but
+  otherwise intact; _deleted_ = also removed from management lists, kept only for history.
 - Template name uniqueness must account for soft-deleted rows (OPEN DECISION: unique
   among non-deleted only, or globally).
 
@@ -139,6 +145,7 @@ operation. A disabled user cannot authenticate or act, but all historical refere
 remain valid.
 
 **Consequences.**
+
 - "Remove a user" in the UI means "disable".
 - Re-enabling is possible.
 - Personal-data / GDPR-style erasure, if ever required, needs a separate deliberate
@@ -156,12 +163,14 @@ inputs/outputs. But some files are a deliberately curated reusable library.
 **Decision.** Files do **not** get soft deletion. A File may be **physically deleted**
 (row + bytes) when doing so breaks no active or required dependency. Every File has a
 category:
+
 - **Persistent Gallery Asset** — kept until an authorized user explicitly deletes it, and
   only when safe.
 - **Job Artifact** — tied to a specific Job; may be automatically physically deleted
   after that Job reaches a completed state, per the file lifecycle design.
 
 **Consequences.**
+
 - Historical Jobs must not depend on a File row still existing to remain readable — they
   rely on snapshots (ADR-0010). A deleted input File may leave a "missing media"
   indicator, never a broken record.
@@ -183,6 +192,7 @@ combination of ADR-0005/0006/0007/0008 plus snapshots (ADR-0010) must guarantee 
 historical Job ever shows missing Template, missing User, or destroyed asset context.
 
 **Consequences.**
+
 - Any feature that could break an old Job's readability is rejected or redesigned.
 - Foreign keys alone are not accepted as sufficient (see ADR-0010).
 
@@ -192,8 +202,8 @@ historical Job ever shows missing Template, missing User, or destroyed asset con
 
 ## ADR-0010 — Jobs carry an immutable snapshot of their creation context
 
-**Context.** A Job's meaning depends on the Template definition and asset values *at the
-time it was created*. Templates get edited; Files get deleted.
+**Context.** A Job's meaning depends on the Template definition and asset values _at the
+time it was created_. Templates get edited; Files get deleted.
 
 **Decision.** At creation time a Job stores an **immutable snapshot** containing at least:
 the Template's render-relevant fields (composition, source, output, description, tags,
@@ -203,6 +213,7 @@ served from this snapshot. Later edits to the Template or deletion of a File do 
 change the snapshot.
 
 **Consequences.**
+
 - The exact snapshot shape (columns vs JSONB, how much File metadata to copy, whether to
   also copy bytes for critical inputs) is an **OPEN DECISION** — see
   [../data/historical-integrity.md](../data/historical-integrity.md).
@@ -225,6 +236,7 @@ the application layer and defensively in repositories/read functions. See
 [../domain/authorization.md](../domain/authorization.md).
 
 **Consequences.**
+
 - Every list/detail query is department-filtered unless the actor is ADMIN.
 - Telegram-linked users are subject to the identical checks.
 - Department **deletion** policy is an OPEN DECISION (data isolation makes it non-trivial
@@ -239,12 +251,13 @@ the application layer and defensively in repositories/read functions. See
 **Context.** A detailed analysis of the legacy render module exists
 ([../legacy/render-module-analysis.md](../legacy/render-module-analysis.md)).
 
-**Decision.** Legacy behavior informs *what* Studio should do for the business. Legacy
-code, schema, and structure do **not** constrain *how* Studio does it. Known legacy
+**Decision.** Legacy behavior informs _what_ Studio should do for the business. Legacy
+code, schema, and structure do **not** constrain _how_ Studio does it. Known legacy
 defects (see [../legacy/known-issues.md](../legacy/known-issues.md)) must not be carried
 forward for compatibility.
 
 **Consequences.**
+
 - No legacy code is copied or migrated.
 - Where legacy behavior seems important but Studio requirements are silent, it is
   recorded as an OPEN DECISION with the consequence of each choice, not silently kept or
@@ -267,6 +280,7 @@ transitions are rejected. The concrete state set is specified in
 [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).
 
 **Consequences.**
+
 - The Worker cannot corrupt job state.
 - Legacy numeric states are mapped to named Studio states at the Worker API boundary for
   compatibility.
@@ -288,6 +302,7 @@ telegram user id, with an explicit step, a partial-input payload, and timestamps
 cleanup. The Telegram adapter is otherwise stateless.
 
 **Consequences.**
+
 - Studio can be restarted / horizontally scaled without losing user progress.
 - A cleanup job expires stale wizard rows.
 - The adapter holds no business logic and no session memory.
@@ -307,6 +322,7 @@ paths, timeouts, and bounded resource use. Stored filenames are system-generated
 derived from user input.
 
 **Consequences.**
+
 - Media adapters take structured arguments, not command strings.
 - Any future shell-out goes through a reviewed helper that forbids string commands.
 
@@ -325,8 +341,91 @@ Job never silently stalls: it reaches `UPLOADED`, or `ERROR` with a reason, or i
 awaiting/retrying delivery.
 
 **Consequences.**
+
 - Needs the background-work mechanism (OPEN DECISION) — a queue, an outbox table + poller,
   or scheduled task.
 - Failure reasons are surfaced to operators, not just logged.
 
 **Status:** DECIDED (requirement). Mechanism: OPEN DECISION.
+
+---
+
+## ADR-0017 — Framework & stack version baseline (Phase 1)
+
+**Context.** Phase 1 builds the application skeleton. The dev/CI environment runs
+**Node.js 20.20** (Next 16 requires Node ≥ 20.9 but is very new and defaults to
+Turbopack; some tooling still targets Node 22). A coherent, well-understood version set
+is preferable to bleeding edge for a foundation.
+
+**Decision.** Pin the stack to:
+
+- **Next.js 15.5.x** (App Router), **React 19.1**, **TypeScript 5.9** (strict, plus
+  `noUncheckedIndexedAccess` and `noImplicitOverride`).
+- **Tailwind CSS v4** (CSS-first config, no `tailwind.config`), **shadcn/ui** ("new-york",
+  neutral), **lucide-react** as the single icon library, **next-themes** for theming,
+  **sonner** for toasts.
+- **Zod 4** for validation, **@t3-oss/env-nextjs** for env, **Vitest 3** for tests,
+  **ESLint 9** (flat config) + **Prettier 3**.
+
+**Consequences.**
+
+- Runs on Node 20; upgrading to Next 16 is a deliberate later step.
+- Exact versions live in `package.json` / `package-lock.json`;
+  `docs/architecture/tech-stack.md` tracks the summary.
+- One icon library only — mixing is disallowed.
+
+**Status:** DECIDED (Phase 1 baseline; revisit when the runtime moves to Node 22).
+
+---
+
+## ADR-0018 — npm is the package manager
+
+**Context.** OPEN DECISION OD-44 (package manager). The Phase 1 brief initially suggested
+pnpm; the project owner chose **npm** — it ships with Node, needs no Corepack setup, and
+the project has no monorepo/workspace needs that would favor pnpm.
+
+**Decision.** **npm** (bundled with Node 20, `npm >= 10`). `package-lock.json` is
+committed. No `packageManager` field / Corepack. All scripts and docs use `npm run …`.
+
+**Consequences.**
+
+- CI and contributors use `npm ci` / `npm install`; `pnpm` / `yarn` are not used.
+- `engines` pins `node >= 20.9` and `npm >= 10`.
+- OD-44 is resolved.
+
+**Status:** DECIDED. Resolves OD-44. (Superseded the initial pnpm choice before any
+commit relied on it.)
+
+---
+
+## ADR-0019 — Application conventions: actions, route handlers, errors, boundary
+
+**Context.** Phase 1 must establish repeatable conventions so features are built
+consistently and can't accidentally violate the architecture.
+
+**Decision.** The following are the project conventions, implemented in `src/server/*`:
+
+- **Server Actions** go through `defineAction` and return `ActionResult<T>` — never throw
+  to the client. ([server-actions.md](server-actions.md))
+- **Route Handlers** go through `defineRouteHandler` — `authenticate` is mandatory,
+  input is Zod-validated, errors map to `AppError.httpStatus`.
+  ([rest-architecture.md](rest-architecture.md))
+- **Errors** use one `AppError` class discriminated by `kind`; `toPublicError` is the
+  only thing that crosses a trust boundary; internal errors never leak.
+  ([error-handling.md](error-handling.md))
+- **Server/client boundary** is ESLint-enforced: UI components cannot import `@/server/*`
+  or `server-only`. ([server-client-boundary.md](server-client-boundary.md))
+- **Auth** and **authz** are boundaries in `@/server/auth` and `@/server/authz`; Phase 1
+  has no session backend and `getCurrentUser()` returns `null` by design.
+  ([authentication-boundary.md](authentication-boundary.md),
+  [../domain/authorization.md](../domain/authorization.md))
+- **Env** is read only through `@/server/env`; **logging** only through `@/server/logger`
+  (with redaction). ([environment.md](environment.md), [logging.md](logging.md))
+
+**Consequences.**
+
+- Feature code is thin at the edges and testable in the middle.
+- New transports (Telegram) reuse the same use cases and error mapping.
+- Deviations are visible in review (and often in lint).
+
+**Status:** DECIDED.

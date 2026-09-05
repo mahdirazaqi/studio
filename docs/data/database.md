@@ -10,26 +10,26 @@ carried over.
 
 ## 1. Entities
 
-| Entity | Deletion | Department-scoped | Notes |
-|---|---|---|---|
-| `Department` | Archive only (deletion = OPEN DECISION) | — (is the scope) | Tenancy boundary. |
-| `User` | Never (status `ACTIVE`/`DISABLED`) | yes (`departmentId`) | Referenced forever by Jobs/Templates/Files/audit. |
-| `Template` | Soft (`status`/`deletedAt`) | yes | Render recipe + asset slots. Row kept forever. |
-| `TemplateAsset` | With its Template (soft) | via Template | Slot definitions. Could be rows or JSON on Template — see below. |
-| `Job` | **Never** | yes | Permanent record. Carries an immutable snapshot. |
-| `JobAsset` | With its Job (never) | via Job | Resolved values. Rows or JSON on the Job — see below. |
-| `File` | Hard delete when safe | yes | `GALLERY_ASSET` or `JOB_ARTIFACT`. |
-| `TelegramWizardState` | Expired by TTL cleanup | via linked User | Durable Telegram conversation state (ADR-0014). |
-| `AuditEntry` | Never (retention = OPEN DECISION) | yes | Who did what, when. |
-| `WorkerCredential` | Revoke (status) | — | Service credential(s) for the Worker (mechanism = OPEN DECISION). |
-| `YouTubeTarget` | Revoke / disconnect | OPEN DECISION (dept-scoped?) | Connected YouTube channel + OAuth tokens. Legacy `Channel`. |
-| `DeliveryOutcome` | With its Job (never) | via Job | Per-target delivery result. Rows or JSON on the Job. |
-| `UploadQuotaUsage` (maybe) | Rolling / TTL | per cap scope | Backs the upload cap if not computed on the fly. |
+| Entity                     | Deletion                                | Department-scoped            | Notes                                                             |
+| -------------------------- | --------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
+| `Department`               | Archive only (deletion = OPEN DECISION) | — (is the scope)             | Tenancy boundary.                                                 |
+| `User`                     | Never (status `ACTIVE`/`DISABLED`)      | yes (`departmentId`)         | Referenced forever by Jobs/Templates/Files/audit.                 |
+| `Template`                 | Soft (`status`/`deletedAt`)             | yes                          | Render recipe + asset slots. Row kept forever.                    |
+| `TemplateAsset`            | With its Template (soft)                | via Template                 | Slot definitions. Could be rows or JSON on Template — see below.  |
+| `Job`                      | **Never**                               | yes                          | Permanent record. Carries an immutable snapshot.                  |
+| `JobAsset`                 | With its Job (never)                    | via Job                      | Resolved values. Rows or JSON on the Job — see below.             |
+| `File`                     | Hard delete when safe                   | yes                          | `GALLERY_ASSET` or `JOB_ARTIFACT`.                                |
+| `TelegramWizardState`      | Expired by TTL cleanup                  | via linked User              | Durable Telegram conversation state (ADR-0014).                   |
+| `AuditEntry`               | Never (retention = OPEN DECISION)       | yes                          | Who did what, when.                                               |
+| `WorkerCredential`         | Revoke (status)                         | —                            | Service credential(s) for the Worker (mechanism = OPEN DECISION). |
+| `YouTubeTarget`            | Revoke / disconnect                     | OPEN DECISION (dept-scoped?) | Connected YouTube channel + OAuth tokens. Legacy `Channel`.       |
+| `DeliveryOutcome`          | With its Job (never)                    | via Job                      | Per-target delivery result. Rows or JSON on the Job.              |
+| `UploadQuotaUsage` (maybe) | Rolling / TTL                           | per cap scope                | Backs the upload cap if not computed on the fly.                  |
 
 > **`OPEN DECISION` — assets & outcomes: related rows vs JSONB.** Template asset slots,
 > resolved Job assets, and delivery outcomes can each be **child tables** or **JSONB
-> columns**. *Consequence of child tables:* queryable, FK integrity, standard.
-> *Consequence of JSONB:* trivially part of the immutable Job snapshot, fewer joins, but
+> columns**. _Consequence of child tables:_ queryable, FK integrity, standard.
+> _Consequence of JSONB:_ trivially part of the immutable Job snapshot, fewer joins, but
 > weaker constraints. Likely answer: **Template assets = child rows; the Job's snapshot =
 > JSONB (immutable copy); delivery outcomes = child rows or JSONB.** Confirm in Phase 1.
 
@@ -65,22 +65,22 @@ JobAsset *───0/1 File         (input file ref; nullable / may be deleted �
 
 ## 3. Constraints & indexes (requirements)
 
-| Requirement | Rationale |
-|---|---|
-| `User.email` unique | Login identity. |
-| `User.telegramUserId` unique when not null | One Telegram account ↔ one User. |
-| `Department.name` unique | |
-| `Template.name` unique **per department among non-deleted** *(OPEN DECISION — see templates.md)* | Avoid confusing pickers. |
-| `TemplateAsset (templateId, name)` unique | Slot names unique within a template. |
-| FK `Job.templateId` → `Template.id`, **no cascade delete** (Template can't be hard-deleted anyway) | Historical resolvability. |
-| FK `Job.retryOfJobId` → `Job.id`, nullable, no cascade | Retry lineage. |
-| Index `Job (departmentId, state, createdAt)` | Department-scoped lists + the atomic claim query. |
-| Partial index for the claim query on `state = QUEUED` ordered by `createdAt` | Fast `FOR UPDATE SKIP LOCKED`. |
-| Index `Job (createdByUserId)`, `Job (templateId)` | Common filters. |
-| Index `File (departmentId, category, createdAt)` | Gallery browsing. |
-| Index `File.contentHash` | Dedup. |
-| Index `AuditEntry (departmentId, createdAt)`, `(targetType, targetId)` | Audit queries. |
-| `TelegramWizardState (telegramUserId)` unique; index on `updatedAt` | Lookup + TTL sweep. |
+| Requirement                                                                                        | Rationale                                         |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `User.email` unique                                                                                | Login identity.                                   |
+| `User.telegramUserId` unique when not null                                                         | One Telegram account ↔ one User.                  |
+| `Department.name` unique                                                                           |                                                   |
+| `Template.name` unique **per department among non-deleted** _(OPEN DECISION — see templates.md)_   | Avoid confusing pickers.                          |
+| `TemplateAsset (templateId, name)` unique                                                          | Slot names unique within a template.              |
+| FK `Job.templateId` → `Template.id`, **no cascade delete** (Template can't be hard-deleted anyway) | Historical resolvability.                         |
+| FK `Job.retryOfJobId` → `Job.id`, nullable, no cascade                                             | Retry lineage.                                    |
+| Index `Job (departmentId, state, createdAt)`                                                       | Department-scoped lists + the atomic claim query. |
+| Partial index for the claim query on `state = QUEUED` ordered by `createdAt`                       | Fast `FOR UPDATE SKIP LOCKED`.                    |
+| Index `Job (createdByUserId)`, `Job (templateId)`                                                  | Common filters.                                   |
+| Index `File (departmentId, category, createdAt)`                                                   | Gallery browsing.                                 |
+| Index `File.contentHash`                                                                           | Dedup.                                            |
+| Index `AuditEntry (departmentId, createdAt)`, `(targetType, targetId)`                             | Audit queries.                                    |
+| `TelegramWizardState (telegramUserId)` unique; index on `updatedAt`                                | Lookup + TTL sweep.                               |
 
 ## 4. Atomic job claim
 
@@ -104,6 +104,7 @@ RETURNING *;
 ## 5. Transactions
 
 Use a transaction for every multi-step write:
+
 - **Create Job**: reserve/verify upload-cap slot + insert Job (+ assets) atomically.
 - **Retry**: cap check + insert new Job + lineage link, atomically; original untouched.
 - **Complete + deliver**: attach result + create artifact rows + set state + enqueue

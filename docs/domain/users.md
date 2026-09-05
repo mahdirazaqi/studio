@@ -19,25 +19,25 @@ A **User** is a person who operates Studio, through the web panel or the Telegra
 
 ## Fields (conceptual — final schema in [../data/database.md](../data/database.md))
 
-| Field | Notes |
-|---|---|
-| `id` | Stable primary key; referenced by Jobs, Templates, audit entries, retries — forever. |
-| `email` | Unique. Login identifier. |
-| `fullName` | Display name. |
-| `phone` | Used to link a Telegram account (match on phone). Optional. |
-| `passwordHash` | If password auth is used. Auth mechanism = OPEN DECISION. |
-| `role` | `USER` \| `MANAGER` \| `ADMIN`. |
-| `departmentId` | Required. |
-| `status` | `ACTIVE` \| `DISABLED`. |
-| `telegramUserId` | Nullable. Set when the user links Telegram. Unique when set. |
-| `createdAt`, `updatedAt` | |
-| `disabledAt`, `disabledByUserId` | Audit of the disable action. |
+| Field                            | Notes                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| `id`                             | Stable primary key; referenced by Jobs, Templates, audit entries, retries — forever. |
+| `email`                          | Unique. Login identifier.                                                            |
+| `fullName`                       | Display name.                                                                        |
+| `phone`                          | Used to link a Telegram account (match on phone). Optional.                          |
+| `passwordHash`                   | If password auth is used. Auth mechanism = OPEN DECISION.                            |
+| `role`                           | `USER` \| `MANAGER` \| `ADMIN`.                                                      |
+| `departmentId`                   | Required.                                                                            |
+| `status`                         | `ACTIVE` \| `DISABLED`.                                                              |
+| `telegramUserId`                 | Nullable. Set when the user links Telegram. Unique when set.                         |
+| `createdAt`, `updatedAt`         |                                                                                      |
+| `disabledAt`, `disabledByUserId` | Audit of the disable action.                                                         |
 
 > **`OPEN DECISION` — ADMIN and Departments.** An ADMIN still has a `departmentId` for
 > their "home" department, but their authority is system-wide. Whether ADMIN can exist
 > without a department, and whether there is a special "system" department, is undecided.
-> *Consequence of "ADMIN needs a home department":* simpler model, every user is
-> scoped somewhere. *Consequence of "ADMIN is department-less":* needs null handling on
+> _Consequence of "ADMIN needs a home department":_ simpler model, every user is
+> scoped somewhere. _Consequence of "ADMIN is department-less":_ needs null handling on
 > `departmentId` everywhere.
 
 ## Telegram linkage
@@ -53,7 +53,7 @@ A **User** is a person who operates Studio, through the web panel or the Telegra
   permissions.
 
 > **`OPEN DECISION` — ambiguous / no phone match.** If zero or multiple Users share the
-> phone number, what happens? *Options:* reject with a generic message (legacy behavior,
+> phone number, what happens? _Options:_ reject with a generic message (legacy behavior,
 > safe); require an admin to link manually; support an invite/claim token flow.
 
 ## Creation
@@ -62,9 +62,9 @@ A **User** is a person who operates Studio, through the web panel or the Telegra
 - **ADMIN** can create Users in any Department with any role.
 - A **USER** cannot create Users.
 
-> **`OPEN DECISION` — can a MANAGER create another MANAGER?** *Consequence of yes:*
+> **`OPEN DECISION` — can a MANAGER create another MANAGER?** _Consequence of yes:_
 > managers can fully delegate; risk of privilege sprawl within a department.
-> *Consequence of no:* only ADMIN mints managers; tighter control, more admin load.
+> _Consequence of no:_ only ADMIN mints managers; tighter control, more admin load.
 
 ## Disabling
 

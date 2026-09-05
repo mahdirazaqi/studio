@@ -24,39 +24,47 @@ Studio replaces the `src/render` module of the legacy NestJS backend
 
 ## 2. Where the documentation lives
 
-| Area | Path |
-|---|---|
-| Documentation index | [`docs/README.md`](docs/README.md) |
-| Glossary | [`docs/glossary.md`](docs/glossary.md) |
-| Architecture overview | [`docs/architecture/overview.md`](docs/architecture/overview.md) |
-| Server Actions vs REST boundaries | [`docs/architecture/boundaries.md`](docs/architecture/boundaries.md) |
-| Project / folder structure | [`docs/architecture/project-structure.md`](docs/architecture/project-structure.md) |
-| Data flow | [`docs/architecture/data-flow.md`](docs/architecture/data-flow.md) |
-| Tech stack | [`docs/architecture/tech-stack.md`](docs/architecture/tech-stack.md) |
-| Architecture Decision Records (ADRs) | [`docs/architecture/decisions.md`](docs/architecture/decisions.md) |
-| Domain: Users | [`docs/domain/users.md`](docs/domain/users.md) |
-| Domain: Departments | [`docs/domain/departments.md`](docs/domain/departments.md) |
-| Domain: Files / Gallery | [`docs/domain/files.md`](docs/domain/files.md) |
-| Domain: Templates | [`docs/domain/templates.md`](docs/domain/templates.md) |
-| Domain: Jobs | [`docs/domain/jobs.md`](docs/domain/jobs.md) |
-| Authorization model | [`docs/domain/authorization.md`](docs/domain/authorization.md) |
-| Database direction & entities | [`docs/data/database.md`](docs/data/database.md) |
-| Data lifecycle rules | [`docs/data/lifecycle-rules.md`](docs/data/lifecycle-rules.md) |
-| Historical data integrity | [`docs/data/historical-integrity.md`](docs/data/historical-integrity.md) |
-| Worker REST API | [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md) |
-| Telegram integration | [`docs/integrations/telegram.md`](docs/integrations/telegram.md) |
-| YouTube integration | [`docs/integrations/youtube.md`](docs/integrations/youtube.md) |
-| Security requirements | [`docs/security/security.md`](docs/security/security.md) |
-| Legacy system overview | [`docs/legacy/overview.md`](docs/legacy/overview.md) |
-| Legacy render module — reading guide | [`docs/legacy/render-module.md`](docs/legacy/render-module.md) |
-| Legacy render module (deep analysis) | [`docs/legacy/render-module-analysis.md`](docs/legacy/render-module-analysis.md) |
-| Legacy known issues | [`docs/legacy/known-issues.md`](docs/legacy/known-issues.md) |
-| Legacy → Studio mapping | [`docs/legacy/legacy-vs-studio.md`](docs/legacy/legacy-vs-studio.md) |
-| Compatibility matrix | [`docs/legacy/compatibility-matrix.md`](docs/legacy/compatibility-matrix.md) |
-| Frontend conventions | [`docs/frontend/conventions.md`](docs/frontend/conventions.md) |
-| Development conventions | [`docs/development/conventions.md`](docs/development/conventions.md) |
-| Development workflow | [`docs/development/workflow.md`](docs/development/workflow.md) |
-| **OPEN DECISION register** | [`docs/development/open-decisions.md`](docs/development/open-decisions.md) |
+| Area                                 | Path                                                                                           |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Documentation index                  | [`docs/README.md`](docs/README.md)                                                             |
+| Glossary                             | [`docs/glossary.md`](docs/glossary.md)                                                         |
+| Architecture overview                | [`docs/architecture/overview.md`](docs/architecture/overview.md)                               |
+| Server Actions vs REST boundaries    | [`docs/architecture/boundaries.md`](docs/architecture/boundaries.md)                           |
+| Project / folder structure           | [`docs/architecture/project-structure.md`](docs/architecture/project-structure.md)             |
+| Tech stack & versions                | [`docs/architecture/tech-stack.md`](docs/architecture/tech-stack.md)                           |
+| Server Actions convention            | [`docs/architecture/server-actions.md`](docs/architecture/server-actions.md)                   |
+| REST Route Handler convention        | [`docs/architecture/rest-architecture.md`](docs/architecture/rest-architecture.md)             |
+| Server / Client component boundary   | [`docs/architecture/server-client-boundary.md`](docs/architecture/server-client-boundary.md)   |
+| Authentication boundary              | [`docs/architecture/authentication-boundary.md`](docs/architecture/authentication-boundary.md) |
+| Error handling & error model         | [`docs/architecture/error-handling.md`](docs/architecture/error-handling.md)                   |
+| Environment configuration            | [`docs/architecture/environment.md`](docs/architecture/environment.md)                         |
+| Logging                              | [`docs/architecture/logging.md`](docs/architecture/logging.md)                                 |
+| Data flow                            | [`docs/architecture/data-flow.md`](docs/architecture/data-flow.md)                             |
+| Architecture Decision Records (ADRs) | [`docs/architecture/decisions.md`](docs/architecture/decisions.md)                             |
+| Domain: Users                        | [`docs/domain/users.md`](docs/domain/users.md)                                                 |
+| Domain: Departments                  | [`docs/domain/departments.md`](docs/domain/departments.md)                                     |
+| Domain: Files / Gallery              | [`docs/domain/files.md`](docs/domain/files.md)                                                 |
+| Domain: Templates                    | [`docs/domain/templates.md`](docs/domain/templates.md)                                         |
+| Domain: Jobs                         | [`docs/domain/jobs.md`](docs/domain/jobs.md)                                                   |
+| Authorization model                  | [`docs/domain/authorization.md`](docs/domain/authorization.md)                                 |
+| Database direction & entities        | [`docs/data/database.md`](docs/data/database.md)                                               |
+| Data lifecycle rules                 | [`docs/data/lifecycle-rules.md`](docs/data/lifecycle-rules.md)                                 |
+| Historical data integrity            | [`docs/data/historical-integrity.md`](docs/data/historical-integrity.md)                       |
+| Worker REST API                      | [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md)                           |
+| Telegram integration                 | [`docs/integrations/telegram.md`](docs/integrations/telegram.md)                               |
+| YouTube integration                  | [`docs/integrations/youtube.md`](docs/integrations/youtube.md)                                 |
+| Security requirements                | [`docs/security/security.md`](docs/security/security.md)                                       |
+| Legacy system overview               | [`docs/legacy/overview.md`](docs/legacy/overview.md)                                           |
+| Legacy render module — reading guide | [`docs/legacy/render-module.md`](docs/legacy/render-module.md)                                 |
+| Legacy render module (deep analysis) | [`docs/legacy/render-module-analysis.md`](docs/legacy/render-module-analysis.md)               |
+| Legacy known issues                  | [`docs/legacy/known-issues.md`](docs/legacy/known-issues.md)                                   |
+| Legacy → Studio mapping              | [`docs/legacy/legacy-vs-studio.md`](docs/legacy/legacy-vs-studio.md)                           |
+| Compatibility matrix                 | [`docs/legacy/compatibility-matrix.md`](docs/legacy/compatibility-matrix.md)                   |
+| Frontend conventions                 | [`docs/frontend/conventions.md`](docs/frontend/conventions.md)                                 |
+| Theme system                         | [`docs/frontend/theme.md`](docs/frontend/theme.md)                                             |
+| Development conventions              | [`docs/development/conventions.md`](docs/development/conventions.md)                           |
+| Development workflow                 | [`docs/development/workflow.md`](docs/development/workflow.md)                                 |
+| **OPEN DECISION register**           | [`docs/development/open-decisions.md`](docs/development/open-decisions.md)                     |
 
 The legacy repository is at `/home/mahdirazaqi/Projects/qtical-backend-node`
 (module of interest: `src/render`).
@@ -97,7 +105,7 @@ Studio requirements are silent, record it as an **OPEN DECISION** (rule §9).
 - **The legacy system is a behavioral reference, not an architectural source of truth.**
   Never copy legacy code, schemas, or services into Studio.
 - **Layering:** `UI (Server / Client Components)` → `Server Action` → `Application
-  Service / Use Case` → `Repository (Prisma)`. External clients enter through a
+Service / Use Case` → `Repository (Prisma)`. External clients enter through a
   `Route Handler` instead of a Server Action, then join the same service layer.
 - **The UI contains no business logic.** Business rules live in the application/domain
   layer and are reachable identically from Server Actions, Route Handlers, and the
@@ -114,15 +122,24 @@ Studio requirements are silent, record it as an **OPEN DECISION** (rule §9).
   [`docs/domain/authorization.md`](docs/domain/authorization.md).
 - **No process-local state** for anything that must survive a restart or scale
   horizontally (this killed the legacy Telegram wizard). Durable state → PostgreSQL.
+- **Server/client boundary:** UI components must not import `@/server/*` or `server-only`
+  (ESLint-enforced). Default to Server Components; `"use client"` only at interactive
+  leaves. See [`docs/architecture/server-client-boundary.md`](docs/architecture/server-client-boundary.md).
+- **Conventions are code, not prose:** Server Actions go through `defineAction`
+  (`@/server/actions`), Route Handlers through `defineRouteHandler` (`@/server/api`),
+  errors are `AppError` + `toPublicError` (`@/server/errors`), input is `parseInput`
+  (`@/server/validation`), env is `@/server/env`, logs are `@/server/logger`. Follow the
+  existing pattern; see the architecture docs above.
+- **`process.env` is read only in `@/server/env`.** Never elsewhere.
 
 ## 6. Data lifecycle rules (critical)
 
-| Entity | Deletion policy |
-|---|---|
-| **Job** | **Never deleted.** No hard delete, no soft delete. Permanent historical record. Retry creates a **new** Job linked to the original. |
-| **Template** | **Soft-delete only** (`deletedAt` / status). Row stays forever so historical Jobs resolve their Template. Hidden from pickers when deleted/disabled. |
-| **User** | **Never deleted.** `active` / `disabled` status. Historical records keep referencing the User. |
-| **File** | **Hard delete allowed when safe.** Two categories: *Persistent Gallery Assets* (kept until explicitly deleted) and *Job Artifacts* (may be auto-deleted after the Job completes). A file may be deleted only when no active/required dependency breaks. |
+| Entity       | Deletion policy                                                                                                                                                                                                                                         |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Job**      | **Never deleted.** No hard delete, no soft delete. Permanent historical record. Retry creates a **new** Job linked to the original.                                                                                                                     |
+| **Template** | **Soft-delete only** (`deletedAt` / status). Row stays forever so historical Jobs resolve their Template. Hidden from pickers when deleted/disabled.                                                                                                    |
+| **User**     | **Never deleted.** `active` / `disabled` status. Historical records keep referencing the User.                                                                                                                                                          |
+| **File**     | **Hard delete allowed when safe.** Two categories: _Persistent Gallery Assets_ (kept until explicitly deleted) and _Job Artifacts_ (may be auto-deleted after the Job completes). A file may be deleted only when no active/required dependency breaks. |
 
 Full detail: [`docs/data/lifecycle-rules.md`](docs/data/lifecycle-rules.md).
 
@@ -189,11 +206,26 @@ shadcn/ui. **LTR**, **English** UI and messages. Responsive with an excellent mo
 experience. **Light / Dark / System** themes. Full detail:
 [`docs/frontend/conventions.md`](docs/frontend/conventions.md).
 
-## 13. Phase 0 status
+## 13. Phase status
 
-This repository is currently at **Phase 0 — documentation & architecture foundation
-only**. No application features are implemented. Do **not** start Phase 1 (feature
-implementation) unless explicitly asked. See
+- **Phase 0 (documentation & architecture foundation) — complete.**
+- **Phase 1 (Next.js foundation & application skeleton) — complete.** The app runs
+  (`npm run dev`), builds (`npm run build`), and passes `npm run check` (lint + typecheck +
+  format + 37 tests). Dashboard shell, theme system, feature-based structure, and the
+  `@/server/*` conventions (env, logging, errors, validation, actions, REST, auth/authz
+  boundaries) are in place. **No business features, no Prisma schema, no session
+  backend.**
+
+Do **not** start the next phase (database layer, then Auth/Users/Departments, then the
+domain features) unless explicitly asked. See
 [`docs/development/workflow.md`](docs/development/workflow.md) for phase boundaries and
 [`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
 remains undecided.
+
+### Quick start
+
+```
+npm install       # Node >= 20.9, npm >= 10
+npm run dev       # http://localhost:3000
+npm run check     # lint + typecheck + format:check + test
+```
