@@ -32,6 +32,31 @@ export const env = createEnv({
      * Optional in development.
      */
     APP_URL: z.url().optional(),
+
+    /**
+     * PostgreSQL connection string (Prisma). Required — Phase 2 introduces the
+     * persistent data layer (ADR-0002). See docs/architecture/database.md.
+     */
+    DATABASE_URL: z
+      .string()
+      .min(1, "DATABASE_URL is required (see .env.example)."),
+
+    /** Name of the session cookie (docs/architecture/authentication.md, ADR-0020). */
+    SESSION_COOKIE_NAME: z.string().min(1).default("studio_session"),
+
+    /** How long an issued session stays valid before the user must sign in again. */
+    SESSION_DURATION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+
+    /**
+     * Local development seed (`prisma/seed.ts`) only — never read by the running
+     * application. All optional; when unset the seed creates the development
+     * Department but skips creating an admin user. Never a real/production
+     * credential — see .env.example.
+     */
+    SEED_DEPARTMENT_NAME: z.string().min(1).optional(),
+    SEED_ADMIN_EMAIL: z.email().optional(),
+    SEED_ADMIN_PASSWORD: z.string().min(8).optional(),
+    SEED_ADMIN_NAME: z.string().min(1).optional(),
   },
 
   client: {
@@ -47,6 +72,13 @@ export const env = createEnv({
     NODE_ENV: process.env.NODE_ENV,
     LOG_LEVEL: process.env.LOG_LEVEL,
     APP_URL: process.env.APP_URL,
+    DATABASE_URL: process.env.DATABASE_URL,
+    SESSION_COOKIE_NAME: process.env.SESSION_COOKIE_NAME,
+    SESSION_DURATION_DAYS: process.env.SESSION_DURATION_DAYS,
+    SEED_DEPARTMENT_NAME: process.env.SEED_DEPARTMENT_NAME,
+    SEED_ADMIN_EMAIL: process.env.SEED_ADMIN_EMAIL,
+    SEED_ADMIN_PASSWORD: process.env.SEED_ADMIN_PASSWORD,
+    SEED_ADMIN_NAME: process.env.SEED_ADMIN_NAME,
   },
 
   /** Treat empty strings as undefined so blank .env lines don't pass validation. */

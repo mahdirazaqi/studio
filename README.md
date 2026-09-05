@@ -13,41 +13,52 @@ authorization), **not** a port.
 
 - **Phase 0** — documentation & architecture foundation — **complete**.
 - **Phase 1** — Next.js foundation & application skeleton — **complete**.
-  No business features, no database schema, no session backend yet.
+- **Phase 2** — database & authentication — **complete**. PostgreSQL + Prisma, a real
+  DB-backed session mechanism, bcrypt password hashing, sign-in/sign-out, and a genuinely
+  protected dashboard. No full authorization matrix, no user/department management UI, no
+  domain features (Jobs/Templates/Files/Worker/Telegram/YouTube) yet.
 
 ## Getting started
 
 ```bash
-npm install          # Node >= 20.9, npm >= 10
-npm run dev          # http://localhost:3000
+npm install                # Node >= 20.9, npm >= 10
+cp .env.example .env       # set DATABASE_URL to a real local PostgreSQL — see below
+npm run db:migrate         # apply database migrations
+npm run db:seed            # optional: seed a dev Department (+ ADMIN if configured)
+npm run dev                # http://localhost:3000
 ```
 
-| Command                                                                  | What                                   |
-| ------------------------------------------------------------------------ | -------------------------------------- |
-| `npm run dev` / `npm run build` / `npm run start`                        | dev / production build / serve         |
-| `npm run lint` · `npm run typecheck` · `npm run format` · `npm run test` | individual checks                      |
-| `npm run check`                                                          | all of the above — run before every PR |
+Need a local Postgres? See [`docs/development/database.md`](docs/development/database.md)
+for a one-command disposable container and the full migration/seed workflow.
 
-Environment: copy `.env.example` to `.env`. All Phase 1 variables are optional; a missing
-**required** variable (added in later phases) fails startup with a clear message.
+| Command                                                                  | What                                      |
+| ------------------------------------------------------------------------ | ----------------------------------------- |
+| `npm run dev` / `npm run build` / `npm run start`                        | dev / production build / serve            |
+| `npm run lint` · `npm run typecheck` · `npm run format` · `npm run test` | individual checks                         |
+| `npm run check`                                                          | all of the above — run before every PR    |
+| `npm run db:migrate` / `npm run db:seed` / `npm run db:studio`           | Prisma migrate / seed / local GUI browser |
+
+Environment: copy `.env.example` to `.env`. `DATABASE_URL` is required as of Phase 2; a
+missing **required** variable fails startup with a clear message.
 
 ## Stack
 
 Next.js 15 · React 19 · TypeScript (strict) · Tailwind CSS v4 · shadcn/ui · next-themes ·
-Zod · Vitest · ESLint 9 · Prettier · npm. PostgreSQL + Prisma arrive with the first
-persistent feature. See [`docs/architecture/tech-stack.md`](docs/architecture/tech-stack.md).
+Zod · Vitest · ESLint 9 · Prettier · npm · **PostgreSQL + Prisma** · **bcrypt**. See
+[`docs/architecture/tech-stack.md`](docs/architecture/tech-stack.md).
 
 ## Project layout
 
 ```
+prisma/         schema.prisma, migrations/, seed.ts
 src/
 ├── app/          App Router — (auth) + (dashboard) route groups, /api/health
-├── features/     one folder per module (auth, users, departments, jobs,
-│                 templates, files, telegram) — README-documented, no impl yet
+├── features/     one folder per module — auth & users (implemented, Phase 2),
+│                 departments, jobs, templates, files, telegram (README only, no impl yet)
 ├── components/   ui/ (shadcn), theme/, layout/ (sidebar, header, shells)
 ├── lib/          client-safe utilities (cn, roles, navigation, site-config)
 ├── server/       server-only: env, logger, errors, validation, actions, api,
-│                 auth boundary, authz boundary, db (README)
+│                 auth (session/password/current-user), authz boundary, db (Prisma client)
 └── types/        cross-cutting client-safe types
 ```
 
@@ -71,6 +82,8 @@ docs/
 │   ├── rest-architecture.md       defineRouteHandler convention
 │   ├── server-client-boundary.md  Server vs Client Components
 │   ├── authentication-boundary.md Where the current user is resolved
+│   ├── authentication.md          Session mechanism, login/logout flow (ADR-0020)
+│   ├── database.md                Prisma client, schema decisions, migrations
 │   ├── error-handling.md          AppError model & error boundaries
 │   ├── environment.md             Validated env configuration
 │   ├── logging.md                 Structured logging & redaction
@@ -101,5 +114,6 @@ docs/
 └── development/
     ├── conventions.md             Coding conventions
     ├── workflow.md                Phases & dev workflow
+    ├── database.md                Local setup, migrate/seed commands, troubleshooting
     └── open-decisions.md          OPEN DECISION register
 ```

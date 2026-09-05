@@ -306,11 +306,11 @@ _Where:_ [../architecture/tech-stack.md](../architecture/tech-stack.md).
 Local disk behind a volume / S3-compatible object storage / other. Access only via
 `server/adapters/storage`.
 
-### OD-43 — Session / auth library
+### OD-43 — Session / auth library — ✅ RESOLVED (ADR-0020)
 
-_Where:_ [../architecture/tech-stack.md](../architecture/tech-stack.md), [../domain/users.md](../domain/users.md), [../architecture/authentication-boundary.md](../architecture/authentication-boundary.md).
-Concrete session mechanism for human login. The **boundary** is in place
-(`@/server/auth/current-user`); only the backend behind it is undecided.
+Custom, DB-backed opaque-token sessions (httpOnly cookie, SHA-256 hash stored in a
+`Session` table) + bcrypt password hashing. No NextAuth/Auth.js, no JWT. See
+[../architecture/authentication.md](../architecture/authentication.md) and ADR-0020.
 
 ---
 
@@ -321,9 +321,10 @@ Concrete session mechanism for human login. The **boundary** is in place
 **npm** (bundled with Node 20, `npm >= 10`; `package-lock.json` committed; no Corepack,
 no `packageManager` field). All scripts and docs use `npm run …`.
 
-### OD-45 — Prisma table/column naming
+### OD-45 — Prisma table/column naming — ✅ RESOLVED (ADR-0021)
 
-Keep Prisma defaults or `@@map` to snake_case.
+Tables `@@map`ped to lowercase snake_case plural (`"users"`, `"sessions"`); columns keep
+Prisma's default (camelCase, matching the field name). See ADR-0021.
 
 ### OD-46 — Personal-data erasure (GDPR-style)
 

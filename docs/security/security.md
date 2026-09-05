@@ -5,13 +5,13 @@ Binding security requirements for Studio. Many are direct responses to
 
 ## 1. Authentication
 
-| Surface          | Requirement                                                                                                                                                                         |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Web panel        | Session-based auth. Only `ACTIVE` users authenticate. Sessions invalidated immediately on user disable or department archive. Session library = OPEN DECISION.                      |
-| Server Actions   | Every action resolves and verifies the session before doing anything. No anonymous Server Action mutates state.                                                                     |
-| Worker REST      | **Every** endpoint requires a Worker service credential (ADR-0004). No unauthenticated worker endpoint — ever. Mechanism = OPEN DECISION (default: hashed API key as Bearer token). |
-| Telegram         | Identity via phone-linked `User`. Webhook requests verified with Telegram's secret token. Unlinked / disabled users are refused.                                                    |
-| Health endpoints | No sensitive data; may be unauthenticated but must expose nothing about domain state.                                                                                               |
+| Surface          | Requirement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web panel        | **Implemented, Phase 2.** Custom DB-backed session (opaque token, httpOnly cookie, SHA-256 hash stored server-side — ADR-0020, [../architecture/authentication.md](../architecture/authentication.md)). Only `ACTIVE` users authenticate — enforced by the same lookup that resolves the session, so disabling a user invalidates every session on the next request. Passwords hashed with bcrypt (`bcryptjs`, cost 12). Department archive doesn't exist yet (OD-07 open) so that half is not yet applicable. |
+| Server Actions   | Every action resolves and verifies the session before doing anything. No anonymous Server Action mutates state.                                                                                                                                                                                                                                                                                                                                                                                                |
+| Worker REST      | **Every** endpoint requires a Worker service credential (ADR-0004). No unauthenticated worker endpoint — ever. Mechanism = OPEN DECISION (default: hashed API key as Bearer token).                                                                                                                                                                                                                                                                                                                            |
+| Telegram         | Identity via phone-linked `User`. Webhook requests verified with Telegram's secret token. Unlinked / disabled users are refused.                                                                                                                                                                                                                                                                                                                                                                               |
+| Health endpoints | No sensitive data; may be unauthenticated but must expose nothing about domain state.                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ## 2. Authorization
 
@@ -88,8 +88,11 @@ Binding security requirements for Studio. Many are direct responses to
 
 ## 9. Secret management
 
-- Secrets (DB URL, Worker credential, Telegram bot token, YouTube OAuth client secret,
-  session secret) come from **environment / a secret manager**, never the repo.
+- Secrets (DB URL, Worker credential, Telegram bot token, YouTube OAuth client secret)
+  come from **environment / a secret manager**, never the repo. There is deliberately no
+  session-signing secret to manage — sessions are opaque DB-backed tokens, not signed
+  JWTs (ADR-0020); tampering with a session cookie fails a hash lookup rather than
+  needing a secret to detect.
 - `.env` files are git-ignored; only `.env.example` with **placeholder** values is
   committed.
 - OAuth tokens for YouTube targets are **encrypted at rest**.
@@ -142,7 +145,9 @@ Binding security requirements for Studio. Many are direct responses to
 
 - Historical integrity (ADR-0009/0010) is also a security property: an audit record you
   can't trust to be complete is worthless.
-- YouTube OAuth tokens, session secrets, Worker keys: encrypted / hashed as noted above.
+- YouTube OAuth tokens, Worker keys: encrypted / hashed as noted above. Session tokens:
+  hashed (SHA-256) at rest, same reasoning as a password hash — a database read alone
+  never yields a usable session.
 - PII is minimal (name, email, phone). No user deletion → if legal erasure is ever
   required, design anonymization deliberately (OPEN DECISION).
 

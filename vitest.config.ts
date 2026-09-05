@@ -19,5 +19,15 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.{test,spec}.ts"],
     globals: false,
+    env: {
+      // Unit tests never touch a real database (repositories/session are
+      // mocked); this only satisfies `@/server/env`'s required-variable check
+      // so importing server modules doesn't fail validation in the test
+      // environment. See docs/architecture/environment.md.
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test:test@localhost:5432/test",
+      SESSION_COOKIE_NAME: "studio_session",
+      SESSION_DURATION_DAYS: "30",
+    },
   },
 });

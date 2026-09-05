@@ -429,3 +429,65 @@ consistently and can't accidentally violate the architecture.
 - Deviations are visible in review (and often in lint).
 
 **Status:** DECIDED.
+
+---
+
+## ADR-0020 — Custom DB-backed session authentication (no NextAuth/Auth.js, no JWT)
+
+**Context.** OPEN DECISION OD-43 left the human session mechanism unresolved. Phase 2
+needs a real one. Candidates considered: NextAuth/Auth.js, a stateless signed JWT, and a
+custom opaque-token session backed by a database table.
+
+**Decision.** Sessions are custom and DB-backed
+([authentication.md](authentication.md)): a random opaque token is set in an httpOnly,
+`sameSite=lax` cookie; the server stores only the SHA-256 hash of that token, alongside
+`userId` and `expiresAt`, in a `Session` table. A request is authenticated by hashing the
+cookie value and looking up the hash. Passwords are hashed with bcrypt (`bcryptjs`, cost
+12). No NextAuth/Auth.js is introduced; no JWT is used for the session itself.
+
+**Consequences.**
+
+- **Immediate revocation.** Logout deletes the row. Disabling a user (a later phase) takes
+  effect on every existing session on the very next request, because `resolveSession`
+  joins `User.status` on every lookup — no separate blocklist or revocation sweep, unlike
+  a stateless JWT.
+- **No `SESSION_SECRET`.** Tampering with the cookie fails the hash lookup; it cannot forge
+  a session, so there is no signing key to manage, rotate, or leak.
+- **A DB read per request** to resolve identity, mitigated by React `cache()` de-duping it
+  once per request. Acceptable for a panel application; would need revisiting for a
+  very-high-QPS API surface (not Studio's shape).
+- **No third-party auth framework** to configure around this project's existing
+  `defineAction`/`AppError`/`@/server/env` conventions — the whole flow is a handful of
+  small, readable modules under `@/server/auth` and `src/features/auth`, consistent with
+  Studio's general preference (Server Actions over a framework, a custom error model over
+  a library's) rather than an exception to it.
+- Resolves **OD-43**.
+
+**Status:** DECIDED.
+
+---
+
+## ADR-0021 — Prisma table naming: `@@map` to lowercase snake_case plural; columns stay camelCase
+
+**Context.** OPEN DECISION OD-45 left Prisma naming unresolved. The first real schema
+(Department, User, Session) needed an answer.
+
+**Decision.** Every Prisma model maps its table name to lowercase snake_case plural via
+`@@map` (`User` → `"users"`, `Session` → `"sessions"`). Column names are **not**
+individually mapped — they keep Prisma's default, which matches the model's camelCase
+field name exactly (`passwordHash`, `departmentId`, `createdAt`, ...).
+
+**Consequences.**
+
+- Table names read as ordinary Postgres identifiers a DBA or a raw SQL query would expect,
+  without needing `"quoted"` mixed-case names.
+- Columns stay camelCase (quoted identifiers in raw SQL, e.g. `"passwordHash"`) — the
+  common, low-friction default for a Prisma + TypeScript codebase where the model fields
+  are what application code actually reads. Full snake_case columns were considered and
+  rejected as extra `@map(...)` noise on every field for a benefit (consistency with a
+  hypothetical direct-SQL consumer) Studio doesn't have — there is no other, non-Prisma
+  service reading this database.
+- Every future model follows the same rule: `@@map` the table, leave columns alone.
+- Resolves **OD-45**.
+
+**Status:** DECIDED.

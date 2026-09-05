@@ -4,6 +4,10 @@ import { cache } from "react";
 
 import { unauthenticatedError } from "@/server/errors/app-error";
 import { logger } from "@/server/logger";
+import {
+  getSessionTokenFromCookies,
+  resolveSession,
+} from "@/server/auth/session";
 import type { Role } from "@/lib/roles";
 
 export type { Role };
@@ -11,25 +15,27 @@ export type { Role };
 /**
  * AUTHENTICATION BOUNDARY.
  *
- * This module is the single place the current principal is resolved. Session
- * handling itself is implemented in a later phase (see
- * docs/architecture/authentication-boundary.md and OPEN DECISION OD-43).
+ * This module is the single place the current principal is resolved. See
+ * docs/architecture/authentication-boundary.md and
+ * docs/architecture/authentication.md (ADR-0020) for the session mechanism
+ * behind it (`@/server/auth/session`).
  *
- * Until then `getCurrentUser()` always resolves to `null` (no session backend
- * exists yet). This is a real, honest boundary — not a fake user. Feature code
- * and route handlers already call `getCurrentUser()` / `requireUser()`, so when
- * the session backend is added, nothing else has to change.
+ * `getCurrentUser()` reads the session cookie, resolves it against the
+ * `Session`/`User` tables, and returns `null` for anything that isn't a valid
+ * session belonging to an `ACTIVE` user — no cookie, an expired/unknown
+ * token, or a `DISABLED` user all resolve to `null`. This is why disabling a
+ * user (a later phase's feature) invalidates their access immediately even
+ * though old session rows may still exist: this lookup filters on status
+ * every time.
  *
  * DO NOT:
  *   - fabricate a user here
- *   - read auth state anywhere else
+ *   - read auth state anywhere else (only this module touches the cookie/DB
+ *     for identity — see `@/server/auth/session`)
  *   - hard-code authorization decisions (that is `@/server/authz`)
  */
 
-/**
- * The authenticated principal. Shape is intentionally minimal for Phase 1 and
- * will be backed by the real `User` record once the Users feature exists.
- */
+/** The authenticated principal, backed by the real `User` record. */
 export interface CurrentUser {
   id: string;
   role: Role;
@@ -43,9 +49,19 @@ export interface CurrentUser {
  * valid session. De-duplicated per request via React `cache`.
  */
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
-  // TODO(phase-auth): resolve the session cookie -> User record.
-  // Deliberately returns null until the session backend is implemented.
-  return null;
+  const token = await getSessionTokenFromCookies();
+  if (!token) return null;
+
+  const sessionUser = await resolveSession(token);
+  if (!sessionUser) return null;
+
+  return {
+    id: sessionUser.id,
+    role: sessionUser.role,
+    departmentId: sessionUser.departmentId,
+    displayName: sessionUser.fullName,
+    email: sessionUser.email,
+  };
 });
 
 /**

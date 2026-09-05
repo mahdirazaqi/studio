@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { redirect } from "next/navigation";
 
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -9,28 +8,26 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getCurrentUser } from "@/server/auth/current-user";
+import { SignInForm } from "@/features/auth/components/sign-in-form";
 
 export const metadata: Metadata = { title: "Sign in" };
 
-/**
- * Placeholder sign-in route. Authentication is implemented in a later phase
- * (see docs/architecture/authentication-boundary.md, OPEN DECISION OD-43).
- * This page only validates the (auth) route group and layout — there is no
- * fake login form.
- */
-export default function SignInPage() {
+export default async function SignInPage() {
+  // Already signed in — no reason to show the form again.
+  const user = await getCurrentUser();
+  if (user) redirect("/");
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Sign in</CardTitle>
         <CardDescription>
-          Authentication is not implemented yet. It arrives in a later phase.
+          Sign in with your Studio account to continue.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Button asChild className="w-full">
-          <Link href="/">Continue to the app</Link>
-        </Button>
+        <SignInForm />
       </CardContent>
     </Card>
   );

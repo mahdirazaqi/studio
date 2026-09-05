@@ -36,6 +36,9 @@ Studio replaces the `src/render` module of the legacy NestJS backend
 | REST Route Handler convention        | [`docs/architecture/rest-architecture.md`](docs/architecture/rest-architecture.md)             |
 | Server / Client component boundary   | [`docs/architecture/server-client-boundary.md`](docs/architecture/server-client-boundary.md)   |
 | Authentication boundary              | [`docs/architecture/authentication-boundary.md`](docs/architecture/authentication-boundary.md) |
+| Authentication (implementation)      | [`docs/architecture/authentication.md`](docs/architecture/authentication.md)                   |
+| Database (Prisma/PostgreSQL)         | [`docs/architecture/database.md`](docs/architecture/database.md)                               |
+| Database workflow (local dev)        | [`docs/development/database.md`](docs/development/database.md)                                 |
 | Error handling & error model         | [`docs/architecture/error-handling.md`](docs/architecture/error-handling.md)                   |
 | Environment configuration            | [`docs/architecture/environment.md`](docs/architecture/environment.md)                         |
 | Logging                              | [`docs/architecture/logging.md`](docs/architecture/logging.md)                                 |
@@ -116,10 +119,32 @@ Service / Use Case` → `Repository (Prisma)`. External clients enter through a
   Do **not** build internal REST endpoints for UI features.
 - **REST exists only for external clients** with a stable HTTP contract — at minimum the
   Render Worker. See [`docs/architecture/boundaries.md`](docs/architecture/boundaries.md).
-- **Database is PostgreSQL + Prisma.** No MongoDB / Mongoose. See ADR-0002.
+- **Database is PostgreSQL + Prisma.** No MongoDB / Mongoose. See ADR-0002. Implemented as
+  of Phase 2 (`prisma/schema.prisma`, `src/server/db`) — see
+  [`docs/architecture/database.md`](docs/architecture/database.md). **Prisma is
+  server-only**: only feature repositories (`src/features/<feature>/repository/*.ts`)
+  import `@/server/db`; nothing else imports `@prisma/client` or constructs a
+  `PrismaClient`.
 - **Every scoped resource carries a `departmentId`** and every query is department-scoped
   at the repository/service layer (ADMIN bypasses). See
   [`docs/domain/authorization.md`](docs/domain/authorization.md).
+- **Authentication is implemented (Phase 2); full authorization is not (Phase 3).**
+  `getCurrentUser()` / `requireUser()` (`@/server/auth/current-user`) resolve a real,
+  DB-backed session — see [`docs/architecture/authentication.md`](docs/architecture/authentication.md)
+  (ADR-0020). `@/server/authz`'s `authorize()` still only allows ADMIN, exactly as Phase 1
+  left it, until Phase 3 implements the real capability matrix. **Never bypass the
+  authentication boundary**: identity is read only through `@/server/auth/*` (never read
+  cookies/sessions elsewhere), and a use case's authorization decision is never skipped
+  just because the caller "already checked."
+- **Every User belongs to exactly one Department; roles are `USER` / `MANAGER` /
+  `ADMIN`.** Users are **never deleted** — `status` is `ACTIVE` or `DISABLED`, and a
+  `DISABLED` user cannot authenticate (enforced by the session-resolution query itself, so
+  disabling takes effect on every existing session immediately, not just new logins).
+- **Passwords and session internals are server-only and never exposed.** Password hashes
+  (`@/server/auth/password`, bcrypt via `bcryptjs`) and raw session tokens
+  (`@/server/auth/session`) are never logged, never returned to a client component, and
+  never leave `@/server/auth` / the `features/auth` and `features/users` repository layer
+  that specifically needs them for the credential check.
 - **No process-local state** for anything that must survive a restart or scale
   horizontally (this killed the legacy Telegram wizard). Durable state → PostgreSQL.
 - **Server/client boundary:** UI components must not import `@/server/*` or `server-only`
@@ -138,7 +163,7 @@ Service / Use Case` → `Repository (Prisma)`. External clients enter through a
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Job**      | **Never deleted.** No hard delete, no soft delete. Permanent historical record. Retry creates a **new** Job linked to the original.                                                                                                                     |
 | **Template** | **Soft-delete only** (`deletedAt` / status). Row stays forever so historical Jobs resolve their Template. Hidden from pickers when deleted/disabled.                                                                                                    |
-| **User**     | **Never deleted.** `active` / `disabled` status. Historical records keep referencing the User.                                                                                                                                                          |
+| **User**     | **Never deleted.** `status` is `ACTIVE` / `DISABLED` (implemented, Phase 2). A `DISABLED` user cannot authenticate. Historical records keep referencing the User.                                                                                       |
 | **File**     | **Hard delete allowed when safe.** Two categories: _Persistent Gallery Assets_ (kept until explicitly deleted) and _Job Artifacts_ (may be auto-deleted after the Job completes). A file may be deleted only when no active/required dependency breaks. |
 
 Full detail: [`docs/data/lifecycle-rules.md`](docs/data/lifecycle-rules.md).
@@ -209,15 +234,20 @@ experience. **Light / Dark / System** themes. Full detail:
 ## 13. Phase status
 
 - **Phase 0 (documentation & architecture foundation) — complete.**
-- **Phase 1 (Next.js foundation & application skeleton) — complete.** The app runs
-  (`npm run dev`), builds (`npm run build`), and passes `npm run check` (lint + typecheck +
-  format + 37 tests). Dashboard shell, theme system, feature-based structure, and the
-  `@/server/*` conventions (env, logging, errors, validation, actions, REST, auth/authz
-  boundaries) are in place. **No business features, no Prisma schema, no session
-  backend.**
+- **Phase 1 (Next.js foundation & application skeleton) — complete.** Dashboard shell,
+  theme system, feature-based structure, and the `@/server/*` conventions (env, logging,
+  errors, validation, actions, REST, auth/authz boundaries) are in place.
+- **Phase 2 (database & authentication) — complete.** PostgreSQL + Prisma
+  (`Department`, `User`, `Session`), a real DB-backed session mechanism (ADR-0020), bcrypt
+  password hashing, sign-in/sign-out (`features/auth`), and a genuinely protected
+  dashboard (`(dashboard)/layout.tsx` redirects unauthenticated/disabled sessions to
+  `/sign-in`). The app runs (`npm run dev`), builds (`npm run build`), and passes
+  `npm run check` (lint + typecheck + format + tests). **Still no full authorization
+  matrix, no user/department management UI, no domain features (Jobs/Templates/Files/
+  Worker/Telegram/YouTube).**
 
-Do **not** start the next phase (database layer, then Auth/Users/Departments, then the
-domain features) unless explicitly asked. See
+Do **not** start the next phase (the full authorization matrix, then Users/Departments
+management, then the domain features) unless explicitly asked. See
 [`docs/development/workflow.md`](docs/development/workflow.md) for phase boundaries and
 [`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
 remains undecided.
@@ -225,7 +255,13 @@ remains undecided.
 ### Quick start
 
 ```
-npm install       # Node >= 20.9, npm >= 10
-npm run dev       # http://localhost:3000
-npm run check     # lint + typecheck + format:check + test
+npm install                    # Node >= 20.9, npm >= 10 (also runs `prisma generate`)
+cp .env.example .env           # set DATABASE_URL to a real local PostgreSQL
+npm run db:migrate             # apply migrations
+npm run db:seed                # optional: seed a dev Department (+ ADMIN if configured)
+npm run dev                    # http://localhost:3000
+npm run check                  # lint + typecheck + format:check + test
 ```
+
+See [`docs/development/database.md`](docs/development/database.md) for local Postgres
+setup and the full migration/seed workflow.

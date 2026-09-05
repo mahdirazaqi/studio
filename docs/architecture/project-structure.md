@@ -1,6 +1,6 @@
 # Project Structure
 
-**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 1 tree.
+**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 2 tree.
 
 ## 1. Repository layout
 
@@ -10,6 +10,8 @@ studio/
 ├── README.md
 ├── docs/
 ├── public/
+├── prisma/                       schema.prisma, migrations/, seed.ts (Phase 2, ADR-0002)
+├── prisma.config.ts              Prisma CLI config (schema path, seed command)
 ├── src/                          see §2
 ├── components.json               shadcn/ui config
 ├── eslint.config.mjs             flat config + server/client boundary guard
@@ -20,12 +22,11 @@ studio/
 ├── tsconfig.json                 strict + noUncheckedIndexedAccess + noImplicitOverride
 ├── .env.example
 ├── .editorconfig  .nvmrc  .gitignore  .prettierignore
-├── package.json                  npm; scripts: dev build start lint typecheck format test check
+├── package.json                  npm; scripts: dev build start lint typecheck format test check db:*
 └── package-lock.json
 ```
 
 No `tailwind.config.*` — Tailwind v4 is configured in CSS (`src/app/globals.css`).
-No `prisma/` yet — the database layer lands with the first persistent feature (ADR-0002).
 
 ## 2. `src/` tree (actual)
 
@@ -37,18 +38,22 @@ src/
 │   ├── error.tsx  global-error.tsx  not-found.tsx
 │   ├── (auth)/                   unauthenticated routes
 │   │   ├── layout.tsx
-│   │   └── sign-in/page.tsx      placeholder (auth is a later phase)
+│   │   └── sign-in/page.tsx      real sign-in form; redirects to "/" if already authenticated
 │   ├── (dashboard)/              authenticated app shell (sidebar + header)
-│   │   ├── layout.tsx            SidebarProvider + AppSidebar + AppHeader
+│   │   ├── layout.tsx            getCurrentUser() guard + redirect; SidebarProvider + AppSidebar + AppHeader
 │   │   ├── page.tsx              "/" overview
 │   │   ├── loading.tsx  error.tsx
 │   │   ├── jobs/  templates/  files/  users/  departments/   → PlaceholderPage
 │   └── api/
-│       └── health/route.ts       the only Route Handler in Phase 1
+│       └── health/route.ts       the only Route Handler
 │
 ├── features/                     one folder per module (see features/README.md)
-│   ├── auth/  users/  departments/  jobs/  templates/  files/  telegram/
-│   └── (each currently: README.md describing scope + boundaries; no impl yet)
+│   ├── auth/                     IMPLEMENTED (Phase 2) — schemas/, use-cases/
+│   │                             (sign-in, sign-out), actions/, components/ (form, sign-out menu item)
+│   ├── users/                    partial (Phase 2) — domain/, repository/ (auth's
+│   │                             credential lookup only; management is a later phase)
+│   ├── departments/  jobs/  templates/  files/  telegram/
+│   └── (each of these: README.md describing scope + boundaries; no impl yet)
 │
 ├── components/
 │   ├── ui/                       shadcn/ui primitives (owned, copied in)
@@ -71,9 +76,9 @@ src/
 │   ├── validation/              parseInput / safeParseInput / commonSchemas (zod)
 │   ├── actions/                 defineAction() + ActionResult<T>
 │   ├── api/                     defineRouteHandler() + healthResponse()
-│   ├── auth/                    current-user.ts — authentication BOUNDARY
-│   ├── authz/                   authorize() / requireRole / assertSameDepartment — BOUNDARY
-│   └── db/                      README only — Prisma client lands later
+│   ├── auth/                    current-user.ts (BOUNDARY) + session.ts + password.ts — real session backend (ADR-0020)
+│   ├── authz/                   authorize() / requireRole / assertSameDepartment — BOUNDARY (still Phase 1 policy: ADMIN-only; Phase 3 adds the real matrix)
+│   └── db/                      index.ts — the single PrismaClient instance
 │
 ├── types/                       cross-cutting client-safe types (Maybe, Paginated, Result)
 │

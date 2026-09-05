@@ -7,7 +7,17 @@ lifecycle, and Telegram-account linkage.
 means disable. Every user belongs to exactly one Department and has one role
 (`USER` / `MANAGER` / `ADMIN`).
 
-**Not built yet.** Depends on the database layer (ADR-0002) and the auth feature.
+**Status: partial (Phase 2).** The `User` model exists
+([`prisma/schema.prisma`](../../../prisma/schema.prisma), documented in
+[`docs/architecture/database.md`](../../../docs/architecture/database.md)), but this
+feature folder only has what the `auth` feature needs to authenticate a login:
 
-Will contain: `use-cases/` (create, disable, re-enable, change role, link Telegram),
-`actions/`, `schemas/`, `repository/`, `read/`, `domain/` (User type, status), `components/`.
+- `domain/user.ts` — pure domain types (`SafeUser`, `UserStatus`). No I/O.
+- `repository/user-repository.ts` — `findUserCredentialByEmail`, the one query the sign-in
+  use case needs. It is the only place `passwordHash` is read outside a migration/seed —
+  callers other than `features/auth` should never need it and should not add a new call
+  site that returns it.
+
+**Not built yet:** user creation, disable/re-enable, role change, listing, Telegram
+linking — the full CRUD/management surface. This is a later phase; the repository grows
+with it (see `docs/domain/users.md` for the target field set and permission rules).

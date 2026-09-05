@@ -17,21 +17,22 @@ A **User** is a person who operates Studio, through the web panel or the Telegra
 - A User may be **linked to a Telegram account** (see below). The link is identity only;
   it grants no extra privileges.
 
-## Fields (conceptual — final schema in [../data/database.md](../data/database.md))
+## Fields (final schema: [`prisma/schema.prisma`](../../prisma/schema.prisma); rationale:
 
-| Field                            | Notes                                                                                |
-| -------------------------------- | ------------------------------------------------------------------------------------ |
-| `id`                             | Stable primary key; referenced by Jobs, Templates, audit entries, retries — forever. |
-| `email`                          | Unique. Login identifier.                                                            |
-| `fullName`                       | Display name.                                                                        |
-| `phone`                          | Used to link a Telegram account (match on phone). Optional.                          |
-| `passwordHash`                   | If password auth is used. Auth mechanism = OPEN DECISION.                            |
-| `role`                           | `USER` \| `MANAGER` \| `ADMIN`.                                                      |
-| `departmentId`                   | Required.                                                                            |
-| `status`                         | `ACTIVE` \| `DISABLED`.                                                              |
-| `telegramUserId`                 | Nullable. Set when the user links Telegram. Unique when set.                         |
-| `createdAt`, `updatedAt`         |                                                                                      |
-| `disabledAt`, `disabledByUserId` | Audit of the disable action.                                                         |
+[../architecture/database.md](../architecture/database.md))
+
+**Implemented (Phase 2):** `id`, `email` (unique login identifier), `fullName`,
+`passwordHash`, `role`, `departmentId` (required), `status`, `createdAt`, `updatedAt`. See
+[../architecture/authentication.md](../architecture/authentication.md) for how
+`passwordHash`/`status` gate login.
+
+**Not yet implemented** — added when the feature that needs them lands:
+
+| Field                            | Notes                                                        | Lands with                   |
+| -------------------------------- | ------------------------------------------------------------ | ---------------------------- |
+| `phone`                          | Used to link a Telegram account (match on phone). Optional.  | Telegram integration         |
+| `telegramUserId`                 | Nullable. Set when the user links Telegram. Unique when set. | Telegram integration         |
+| `disabledAt`, `disabledByUserId` | Audit of the disable action.                                 | User management / disable UI |
 
 > **`OPEN DECISION` — ADMIN and Departments.** An ADMIN still has a `departmentId` for
 > their "home" department, but their authority is system-wide. Whether ADMIN can exist
@@ -39,6 +40,12 @@ A **User** is a person who operates Studio, through the web panel or the Telegra
 > _Consequence of "ADMIN needs a home department":_ simpler model, every user is
 > scoped somewhere. _Consequence of "ADMIN is department-less":_ needs null handling on
 > `departmentId` everywhere.
+>
+> **Phase 2 schema note:** `User.departmentId` is a required (`NOT NULL`) column for
+> every role, including `ADMIN` — the "every user has exactly one Department" reading of
+> CLAUDE.md §5. This isn't a final ruling on whether ADMIN's department carries any
+> special meaning beyond "home"; it only means the schema doesn't need nullable-department
+> handling. Revisit if a concrete requirement needs a department-less ADMIN.
 
 ## Telegram linkage
 

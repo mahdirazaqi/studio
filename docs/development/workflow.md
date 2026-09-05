@@ -81,12 +81,47 @@ backend, real forms, deployment.
 server-client-boundary,authentication-boundary,error-handling,environment,logging}.md`,
 `frontend/theme.md`, ADR-0017/0018/0019.
 
-### Phase 2+ (not started)
+### Phase 2 — Database & authentication _(complete)_
+
+**Goal:** a real persistent data layer and real authenticated sessions — no full
+authorization matrix, no user/department management UI yet.
+
+**Delivered:**
+
+- PostgreSQL + Prisma (`prisma/schema.prisma`, `src/server/db` singleton,
+  `DATABASE_URL` required in `@/server/env`, initial migration applied and verified
+  against a real Postgres instance). ADR-0002 (already decided) now has code behind it.
+- `Department` (id, name, timestamps) and `User` (id, email, fullName, passwordHash, role,
+  status, departmentId, timestamps) models. `User.departmentId` is `onDelete: Restrict` —
+  Postgres refuses to delete a Department with Users, with no delete feature needed to
+  enforce it.
+- `Session` model + a custom, DB-backed session mechanism: opaque bearer token in an
+  httpOnly cookie, only its SHA-256 hash stored server-side (ADR-0020 — resolves OD-43).
+- bcrypt password hashing (`bcryptjs`), with a timing-safe path for unknown emails.
+- Sign-in / sign-out: `features/auth` (schemas, use cases, Server Actions, a real sign-in
+  form) on top of `@/server/auth/{session,password,current-user}`.
+- `(dashboard)/layout.tsx` now genuinely protects every route under it
+  (`getCurrentUser()` + `redirect`); the sidebar shows the real signed-in user and a
+  working sign-out control; `(auth)/sign-in` redirects an already-authenticated visitor.
+- Prisma seed (`prisma/seed.ts`, `npm run db:seed`) for a local dev Department + optional
+  admin user, driven entirely by env vars — no hard-coded credential.
+- ADR-0021 resolves OD-45 (Prisma naming: `@@map` tables to snake_case, columns default).
+- Docs: `architecture/{database,authentication}.md`, `development/database.md`, and
+  updates to `authentication-boundary.md`, `domain/{users,departments}.md`,
+  `data/database.md`, `security/security.md`, `tech-stack.md`, `project-structure.md`.
+
+**Explicitly NOT in Phase 2:** the full authorization matrix (`@/server/authz` still
+allows ADMIN only, exactly as Phase 1 left it), department isolation enforcement, user
+management (create/disable/role-change) or department management UI, Templates, Jobs,
+Files, Worker API, Telegram, YouTube, rate limiting on login.
+
+### Phase 3+ (not started)
 
 Sequencing is not finalized, but a sensible order:
 
-1. Database layer: Prisma + `@/server/db` singleton, first migration, `DATABASE_URL` env.
-2. Auth + Users + Departments (the authorization backbone; resolves OD-43, OD-05, OD-07).
+1. Full authorization matrix + department isolation enforcement (the backbone Phase 2's
+   `Actor`/`CurrentUser` shapes were built for; resolves OD-05, OD-07's enforcement side).
+2. User management (create/disable/role-change) + Department management.
 3. Templates (authoring + soft-delete + validation).
 4. Files / Gallery (upload, storage adapter, categories; resolves OD-42, OD-21).
 5. Jobs (creation, snapshot, state machine) + Worker API (atomic claim, auth,

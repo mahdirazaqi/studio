@@ -5,31 +5,34 @@ and `package-lock.json` for the resolved tree.
 
 ## Decided & installed
 
-| Concern               | Choice                                                                     | Version                        | Notes / ADR                                                                           |
-| --------------------- | -------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------- |
-| Framework             | **Next.js** (App Router)                                                   | `15.5.x`                       | Pinned to 15 for Node 20 compatibility — ADR-0001, ADR-0017.                          |
-| Runtime               | **Node.js**                                                                | `>= 20.9` (dev on 20.20)       | `.nvmrc` = 20.                                                                        |
-| Language              | **TypeScript** (strict + `noUncheckedIndexedAccess`, `noImplicitOverride`) | `5.9.x`                        |                                                                                       |
-| UI runtime            | **React** (Server + Client Components)                                     | `19.1.0`                       |                                                                                       |
-| Styling               | **Tailwind CSS v4** (CSS-first config, `@tailwindcss/postcss`)             | `4.x`                          | No `tailwind.config`; tokens in `globals.css`.                                        |
-| Components            | **shadcn/ui** ("new-york", neutral, RSC)                                   | CLI `shadcn@2.x`               | Components copied into `src/components/ui`. Radix via the unified `radix-ui` package. |
-| Icons                 | **lucide-react**                                                           | `0.5xx`                        | Single icon library. ADR-0017.                                                        |
-| Theme                 | **next-themes**                                                            | `0.4.x`                        | Light / Dark / System — [../frontend/theme.md](../frontend/theme.md).                 |
-| Toasts                | **sonner** (via shadcn)                                                    | `2.x`                          |                                                                                       |
-| Package manager       | **npm**                                                                    | `>= 10` (bundled with Node 20) | Resolves OPEN DECISION OD-44. ADR-0018. `package-lock.json` committed.                |
-| Internal mutations    | **Server Actions** (`defineAction`)                                        | —                              | ADR-0003, [server-actions.md](server-actions.md).                                     |
-| External Worker comms | **REST Route Handlers** (`defineRouteHandler`, versioned, authenticated)   | —                              | ADR-0004, [rest-architecture.md](rest-architecture.md).                               |
-| Env validation        | **@t3-oss/env-nextjs** + **Zod**                                           | `0.13.x` / `zod 4.x`           | [environment.md](environment.md).                                                     |
-| Input validation      | **Zod**                                                                    | `4.x`                          | `parseInput` at every boundary.                                                       |
-| Lint                  | **ESLint** (flat config) + `eslint-config-next` + `eslint-config-prettier` | `9.x` / `15.5.x`               | Custom `no-restricted-imports` guard for the server/client boundary.                  |
-| Format                | **Prettier** + `prettier-plugin-tailwindcss`                               | `3.x`                          |                                                                                       |
-| Tests                 | **Vitest**                                                                 | `3.x`                          | Foundational unit tests only in Phase 1.                                              |
+| Concern               | Choice                                                                     | Version                            | Notes / ADR                                                                                                                               |
+| --------------------- | -------------------------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework             | **Next.js** (App Router)                                                   | `15.5.x`                           | Pinned to 15 for Node 20 compatibility — ADR-0001, ADR-0017.                                                                              |
+| Runtime               | **Node.js**                                                                | `>= 20.9` (dev on 20.20)           | `.nvmrc` = 20.                                                                                                                            |
+| Language              | **TypeScript** (strict + `noUncheckedIndexedAccess`, `noImplicitOverride`) | `5.9.x`                            |                                                                                                                                           |
+| UI runtime            | **React** (Server + Client Components)                                     | `19.1.0`                           |                                                                                                                                           |
+| Styling               | **Tailwind CSS v4** (CSS-first config, `@tailwindcss/postcss`)             | `4.x`                              | No `tailwind.config`; tokens in `globals.css`.                                                                                            |
+| Components            | **shadcn/ui** ("new-york", neutral, RSC)                                   | CLI `shadcn@2.x`                   | Components copied into `src/components/ui`. Radix via the unified `radix-ui` package.                                                     |
+| Icons                 | **lucide-react**                                                           | `0.5xx`                            | Single icon library. ADR-0017.                                                                                                            |
+| Theme                 | **next-themes**                                                            | `0.4.x`                            | Light / Dark / System — [../frontend/theme.md](../frontend/theme.md).                                                                     |
+| Toasts                | **sonner** (via shadcn)                                                    | `2.x`                              |                                                                                                                                           |
+| Package manager       | **npm**                                                                    | `>= 10` (bundled with Node 20)     | Resolves OPEN DECISION OD-44. ADR-0018. `package-lock.json` committed.                                                                    |
+| Database              | **PostgreSQL + Prisma**                                                    | Postgres 16 (dev); Prisma `6.19.x` | ADR-0002; [database.md](database.md). Pinned to Prisma 6 (not the newly-released 7) for the same Node-20/stability reasoning as ADR-0017. |
+| Password hashing      | **bcrypt** via `bcryptjs`                                                  | `3.x`                              | Pure JS, no native build step. [authentication.md](authentication.md), ADR-0020.                                                          |
+| Authentication        | Custom DB-backed sessions (opaque token, httpOnly cookie)                  | —                                  | ADR-0020, [authentication.md](authentication.md). No NextAuth/Auth.js, no JWT.                                                            |
+| Internal mutations    | **Server Actions** (`defineAction`)                                        | —                                  | ADR-0003, [server-actions.md](server-actions.md).                                                                                         |
+| External Worker comms | **REST Route Handlers** (`defineRouteHandler`, versioned, authenticated)   | —                                  | ADR-0004, [rest-architecture.md](rest-architecture.md).                                                                                   |
+| Env validation        | **@t3-oss/env-nextjs** + **Zod**                                           | `0.13.x` / `zod 4.x`               | [environment.md](environment.md).                                                                                                         |
+| Input validation      | **Zod**                                                                    | `4.x`                              | `parseInput` at every boundary.                                                                                                           |
+| Lint                  | **ESLint** (flat config) + `eslint-config-next` + `eslint-config-prettier` | `9.x` / `15.5.x`                   | Custom `no-restricted-imports` guard for the server/client boundary.                                                                      |
+| Format                | **Prettier** + `prettier-plugin-tailwindcss`                               | `3.x`                              |                                                                                                                                           |
+| Tests                 | **Vitest**                                                                 | `3.x`                              | Foundational unit tests only in Phase 1.                                                                                                  |
 
-## Database (not installed yet)
+## Database
 
-**PostgreSQL + Prisma** (ADR-0002) — added with the first persistent feature. No
-`prisma/` directory or `@prisma/client` in Phase 1. See
-[../data/database.md](../data/database.md) and `src/server/db/README.md`.
+**PostgreSQL + Prisma** (ADR-0002) — installed in Phase 2 with the first persistent
+models (`Department`, `User`, `Session`). See [database.md](database.md) and
+[../data/database.md](../data/database.md).
 
 ## Media tooling (not installed yet)
 
@@ -49,7 +52,7 @@ features.
 
 ## Deferred / still open
 
-See [../development/open-decisions.md](../development/open-decisions.md): session library
-(OD-43), object storage backend (OD-42), background-job mechanism (OD-40), Telegram
-webhook vs polling (OD-34), Worker credential scheme (OD-27), rate-limiting layer (OD-41),
-Prisma naming (OD-45).
+See [../development/open-decisions.md](../development/open-decisions.md): object storage
+backend (OD-42), background-job mechanism (OD-40), Telegram webhook vs polling (OD-34),
+Worker credential scheme (OD-27), rate-limiting layer (OD-41). Session library (OD-43) and
+Prisma naming (OD-45) are resolved — ADR-0020, ADR-0021.

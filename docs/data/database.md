@@ -3,28 +3,32 @@
 **`DECIDED`** — PostgreSQL + Prisma (ADR-0002). MongoDB / Mongoose from legacy is **not**
 carried over.
 
-> **Phase 0 scope note.** This page documents the **conceptual** data model and the
-> constraints it must satisfy. The final `prisma/schema.prisma` is **not** written in
-> Phase 0. Do not create Prisma models yet except where strictly needed to validate a
-> documented decision.
+> **Phase 0 scope note.** This page documents the **conceptual** data model for
+> everything below. `Department`, `User`, and `Session` moved from conceptual to
+> **implemented** in Phase 2 — see [`prisma/schema.prisma`](../../prisma/schema.prisma),
+> [../architecture/database.md](../architecture/database.md), and
+> [../architecture/authentication.md](../architecture/authentication.md). Everything else
+> in the table below is still conceptual only; do not create Prisma models for it except
+> where strictly needed to validate a documented decision.
 
 ## 1. Entities
 
-| Entity                     | Deletion                                | Department-scoped            | Notes                                                             |
-| -------------------------- | --------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
-| `Department`               | Archive only (deletion = OPEN DECISION) | — (is the scope)             | Tenancy boundary.                                                 |
-| `User`                     | Never (status `ACTIVE`/`DISABLED`)      | yes (`departmentId`)         | Referenced forever by Jobs/Templates/Files/audit.                 |
-| `Template`                 | Soft (`status`/`deletedAt`)             | yes                          | Render recipe + asset slots. Row kept forever.                    |
-| `TemplateAsset`            | With its Template (soft)                | via Template                 | Slot definitions. Could be rows or JSON on Template — see below.  |
-| `Job`                      | **Never**                               | yes                          | Permanent record. Carries an immutable snapshot.                  |
-| `JobAsset`                 | With its Job (never)                    | via Job                      | Resolved values. Rows or JSON on the Job — see below.             |
-| `File`                     | Hard delete when safe                   | yes                          | `GALLERY_ASSET` or `JOB_ARTIFACT`.                                |
-| `TelegramWizardState`      | Expired by TTL cleanup                  | via linked User              | Durable Telegram conversation state (ADR-0014).                   |
-| `AuditEntry`               | Never (retention = OPEN DECISION)       | yes                          | Who did what, when.                                               |
-| `WorkerCredential`         | Revoke (status)                         | —                            | Service credential(s) for the Worker (mechanism = OPEN DECISION). |
-| `YouTubeTarget`            | Revoke / disconnect                     | OPEN DECISION (dept-scoped?) | Connected YouTube channel + OAuth tokens. Legacy `Channel`.       |
-| `DeliveryOutcome`          | With its Job (never)                    | via Job                      | Per-target delivery result. Rows or JSON on the Job.              |
-| `UploadQuotaUsage` (maybe) | Rolling / TTL                           | per cap scope                | Backs the upload cap if not computed on the fly.                  |
+| Entity                         | Deletion                                | Department-scoped            | Notes                                                                                                                                |
+| ------------------------------ | --------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `Department` **(implemented)** | Archive only (deletion = OPEN DECISION) | — (is the scope)             | Tenancy boundary. `id`, `name`, timestamps only so far.                                                                              |
+| `User` **(implemented)**       | Never (status `ACTIVE`/`DISABLED`)      | yes (`departmentId`)         | Referenced forever by Jobs/Templates/Files/audit. `phone`/`telegramUserId`/disable-audit fields not added yet (see domain/users.md). |
+| `Session` **(implemented)**    | Row deleted on logout/expiry            | via linked User              | Auth session (ADR-0020) — not in the original Phase 0 model; added for login.                                                        |
+| `Template`                     | Soft (`status`/`deletedAt`)             | yes                          | Render recipe + asset slots. Row kept forever.                                                                                       |
+| `TemplateAsset`                | With its Template (soft)                | via Template                 | Slot definitions. Could be rows or JSON on Template — see below.                                                                     |
+| `Job`                          | **Never**                               | yes                          | Permanent record. Carries an immutable snapshot.                                                                                     |
+| `JobAsset`                     | With its Job (never)                    | via Job                      | Resolved values. Rows or JSON on the Job — see below.                                                                                |
+| `File`                         | Hard delete when safe                   | yes                          | `GALLERY_ASSET` or `JOB_ARTIFACT`.                                                                                                   |
+| `TelegramWizardState`          | Expired by TTL cleanup                  | via linked User              | Durable Telegram conversation state (ADR-0014).                                                                                      |
+| `AuditEntry`                   | Never (retention = OPEN DECISION)       | yes                          | Who did what, when.                                                                                                                  |
+| `WorkerCredential`             | Revoke (status)                         | —                            | Service credential(s) for the Worker (mechanism = OPEN DECISION).                                                                    |
+| `YouTubeTarget`                | Revoke / disconnect                     | OPEN DECISION (dept-scoped?) | Connected YouTube channel + OAuth tokens. Legacy `Channel`.                                                                          |
+| `DeliveryOutcome`              | With its Job (never)                    | via Job                      | Per-target delivery result. Rows or JSON on the Job.                                                                                 |
+| `UploadQuotaUsage` (maybe)     | Rolling / TTL                           | per cap scope                | Backs the upload cap if not computed on the fly.                                                                                     |
 
 > **`OPEN DECISION` — assets & outcomes: related rows vs JSONB.** Template asset slots,
 > resolved Job assets, and delivery outcomes can each be **child tables** or **JSONB

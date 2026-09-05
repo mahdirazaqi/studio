@@ -27,6 +27,8 @@ conventions. If you are an AI agent, read [`../CLAUDE.md`](../CLAUDE.md) first.
 - [rest-architecture.md](architecture/rest-architecture.md) — `defineRouteHandler` convention
 - [server-client-boundary.md](architecture/server-client-boundary.md) — Server vs Client Components, ESLint guard
 - [authentication-boundary.md](architecture/authentication-boundary.md) — where the current user is resolved
+- [authentication.md](architecture/authentication.md) — session mechanism, login/logout flow, password hashing (ADR-0020)
+- [database.md](architecture/database.md) — Prisma client, schema decisions, migrations, seeding
 - [error-handling.md](architecture/error-handling.md) — `AppError` model, boundaries, UI error pages
 - [environment.md](architecture/environment.md) — validated env configuration
 - [logging.md](architecture/logging.md) — structured logging + redaction
@@ -76,6 +78,7 @@ conventions. If you are an AI agent, read [`../CLAUDE.md`](../CLAUDE.md) first.
 
 - [conventions.md](development/conventions.md)
 - [workflow.md](development/workflow.md) — phases, definition of done
+- [database.md](development/database.md) — local setup, migration/seed commands, troubleshooting
 - [open-decisions.md](development/open-decisions.md) — **the OPEN DECISION register**
 
 ## Document status conventions

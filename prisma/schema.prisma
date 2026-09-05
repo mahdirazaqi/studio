@@ -1,0 +1,103 @@
+// Studio — Prisma schema.
+//
+// Phase 2 scope only: Department, User, Session. See docs/data/database.md and
+// docs/architecture/decisions.md (ADR-0002, ADR-0007, ADR-0011, ADR-0020) for the
+// decisions behind this shape. Do not add speculative models here — later phases
+// (Templates, Jobs, Files, ...) add their own schema when those features land.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Studio's three fixed roles (docs/domain/authorization.md). No per-action custom
+/// roles — a new role is a new ADR, not a new enum value added casually.
+enum UserRole {
+  USER
+  MANAGER
+  ADMIN
+}
+
+/// Users are never deleted (ADR-0007). This is the entire lifecycle.
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+/// The tenancy / isolation boundary (ADR-0011, docs/domain/departments.md).
+///
+/// Deletion is an OPEN DECISION (OD-07) and is deliberately NOT implemented — there
+/// is no delete path in the application, and `User.departmentId` is a required,
+/// `onDelete: Restrict` foreign key, so the database itself refuses to remove a
+/// Department that still has Users, even via a manual/administrative query.
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@map("departments")
+}
+
+/// A Studio operator (docs/domain/users.md, ADR-0007).
+///
+/// Only the fields Phase 2 needs exist here. `phone`, `telegramUserId`,
+/// `disabledAt`/`disabledByUserId` etc. are documented as future fields in
+/// docs/domain/users.md and are added when the features that need them
+/// (Telegram linking, user management/disable UI) are implemented — adding them
+/// now would be speculative schema.
+model User {
+  id           String     @id @default(cuid())
+  /// Unique login identifier. Lookups are case-sensitive at the DB level; the
+  /// application normalizes to lowercase before every read/write (see
+  /// features/auth, features/users).
+  email        String     @unique
+  fullName     String
+  /// Never read/logged/exposed outside the auth feature's credential check.
+  passwordHash String
+  role         UserRole   @default(USER)
+  status       UserStatus @default(ACTIVE)
+
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  sessions Session[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Indexed: department-scoped listing/authorization is the dominant future query
+  // pattern (ADR-0011). `email` already has an index via its unique constraint.
+  // No separate `role` index — cardinality is 3, not selective enough to justify
+  // one on its own; add a composite (departmentId, role) later if a real query
+  // needs it.
+  @@index([departmentId])
+  @@map("users")
+}
+
+/// A signed-in session (docs/architecture/decisions.md ADR-0020).
+///
+/// The cookie holds an opaque random token; only its SHA-256 hash is stored here,
+/// so a database read alone can never yield a usable session token. A session is
+/// valid only while `expiresAt` is in the future AND the linked User is `ACTIVE` —
+/// so disabling a User (a later phase's feature) takes effect on every existing
+/// session immediately, with no separate revocation sweep required.
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("sessions")
+}

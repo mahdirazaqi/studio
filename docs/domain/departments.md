@@ -21,14 +21,20 @@ A **Department** is Studio's ownership and isolation boundary. It replaces the l
      actor's department unless the actor is ADMIN).
 - **The UI filtering by department is never the enforcement mechanism.**
 
-## Fields (conceptual)
+## Fields (implemented, Phase 2 — [`prisma/schema.prisma`](../../prisma/schema.prisma))
 
 | Field                    | Notes                                           |
 | ------------------------ | ----------------------------------------------- |
 | `id`                     | Referenced by all scoped resources — permanent. |
 | `name`                   | Unique, display name.                           |
-| `status`                 | `ACTIVE` \| (see deletion decision below).      |
 | `createdAt`, `updatedAt` |                                                 |
+
+No `status` field yet — see "Department deletion" below: adding a status enum ahead of
+OD-07 being decided would be speculative (a column with exactly one value ever used).
+`User.departmentId` is a required foreign key with `onDelete: Restrict`, so Postgres
+itself refuses to delete a Department that still has Users, even with no application
+delete path at all and no decision yet on OD-07 —
+[../architecture/database.md](../architecture/database.md) has the detail.
 
 ## Resource assignment
 
