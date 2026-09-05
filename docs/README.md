@@ -30,6 +30,7 @@ conventions. If you are an AI agent, read [`../CLAUDE.md`](../CLAUDE.md) first.
 - [authentication.md](architecture/authentication.md) — session mechanism, login/logout flow, password hashing (ADR-0020)
 - [authorization.md](architecture/authorization.md) — capability registry, department scope, escalation protection (ADR-0022/0023)
 - [database.md](architecture/database.md) — Prisma client, schema decisions, migrations, seeding
+- [files.md](architecture/files.md) — storage adapter, upload/deletion lifecycle, content delivery (ADR-0024/0025/0026)
 - [error-handling.md](architecture/error-handling.md) — `AppError` model, boundaries, UI error pages
 - [environment.md](architecture/environment.md) — validated env configuration
 - [logging.md](architecture/logging.md) — structured logging + redaction

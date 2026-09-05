@@ -49,6 +49,9 @@ The single reference for what can be deleted, when, and how. These rules are **b
 
 ## Files — hard delete when safe
 
+**Implemented, Phase 4** (`features/files/use-cases/delete-file.ts`, ADR-0025) — see
+[../architecture/files.md](../architecture/files.md) for the mechanism.
+
 ### "Safe to delete" definition
 
 A File may be physically deleted (row + bytes) only when **all** hold:
@@ -62,6 +65,16 @@ A File may be physically deleted (row + bytes) only when **all** hold:
    name/type/size intact.
 
 If (1) or (2) fails, deletion is **blocked** with a clear reason.
+
+> **Phase 4 status:** rule (1) has no Job model to check against yet —
+> `assertNoActiveJobDependencies` is a documented no-op today, not a stand-in
+> implementation; a future Jobs feature fills in the actual query (ADR-0025). Rule (3) is
+> already fully true by construction, independent of Jobs existing, because Studio never
+> made a historical record depend on a live File row in the first place.
+>
+> The delete order itself is decided regardless of (1): the database row is deleted
+> **before** the storage bytes, so a failure partway through leaves an orphaned storage
+> object (harmless, logged) rather than a database row pointing at missing bytes.
 
 ### Gallery Assets
 

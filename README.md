@@ -19,8 +19,12 @@ authorization), **not** a port.
 - **Phase 3** — authorization & department isolation — **complete**. A real capability
   registry (role floor per capability + department scope), `/users` (MANAGER+) and
   `/departments` (ADMIN) protected server-side, and a role-escalation/self-modification
-  policy prepared for the future user-management feature. No user/department management
-  UI, no domain features (Templates/Jobs/Files/Worker/Telegram/YouTube) yet.
+  policy prepared for the future user-management feature.
+- **Phase 4** — File Gallery & storage lifecycle — **complete**. Upload/browse/search/
+  preview/delete for department-scoped media assets, a swappable storage adapter (local
+  disk today), real content-type sniffing, and the historical-integrity contract future
+  Job/Template features must follow. No user/department management UI, no Templates, no
+  Jobs, no Worker/Telegram/YouTube yet.
 
 ## Getting started
 
@@ -56,13 +60,16 @@ Zod · Vitest · ESLint 9 · Prettier · npm · **PostgreSQL + Prisma** · **bcr
 ```
 prisma/         schema.prisma, migrations/, seed.ts
 src/
-├── app/          App Router — (auth) + (dashboard) route groups, /api/health
-├── features/     one folder per module — auth (Phase 2) & users (Phase 2/3) implemented,
-│                 departments, jobs, templates, files, telegram (README only, no impl yet)
+├── app/          App Router — (auth) + (dashboard) route groups, /api/health,
+│                 /api/files/[fileId] (authenticated binary content delivery)
+├── features/     one folder per module — auth (Phase 2), users (Phase 2/3, partial),
+│                 files (Phase 4) implemented; departments (partial, Phase 4);
+│                 jobs, templates, telegram (README only, no impl yet)
 ├── components/   ui/ (shadcn), theme/, layout/ (sidebar, header, shells, forbidden page)
 ├── lib/          client-safe utilities (cn, roles, navigation, site-config)
 ├── server/       server-only: env, logger, errors, validation, actions, api,
-│                 auth (session/password/current-user), authz (capability registry), db
+│                 auth (session/password/current-user), authz (capability registry), db,
+│                 adapters/storage (StorageAdapter, local disk), media (probe)
 └── types/        cross-cutting client-safe types
 ```
 
@@ -89,6 +96,7 @@ docs/
 │   ├── authentication.md          Session mechanism, login/logout flow (ADR-0020)
 │   ├── authorization.md           Capability registry, department scope (ADR-0022/0023)
 │   ├── database.md                Prisma client, schema decisions, migrations
+│   ├── files.md                   Storage adapter, upload/deletion lifecycle (ADR-0024/0025/0026)
 │   ├── error-handling.md          AppError model & error boundaries
 │   ├── environment.md             Validated env configuration
 │   ├── logging.md                 Structured logging & redaction

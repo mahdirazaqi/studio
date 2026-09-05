@@ -48,6 +48,14 @@ export const env = createEnv({
     SESSION_DURATION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
     /**
+     * Filesystem root for the local storage adapter (docs/architecture/files.md,
+     * ADR-0024). Relative paths resolve against the process working directory.
+     * Must be outside `public/` — files are served only through the
+     * authenticated `/api/files/[fileId]` route, never as static assets.
+     */
+    STORAGE_LOCAL_DIR: z.string().min(1).default(".data/storage"),
+
+    /**
      * Local development seed (`prisma/seed.ts`) only — never read by the running
      * application. All optional; when unset the seed creates the development
      * Department but skips creating an admin user. Never a real/production
@@ -75,6 +83,7 @@ export const env = createEnv({
     DATABASE_URL: process.env.DATABASE_URL,
     SESSION_COOKIE_NAME: process.env.SESSION_COOKIE_NAME,
     SESSION_DURATION_DAYS: process.env.SESSION_DURATION_DAYS,
+    STORAGE_LOCAL_DIR: process.env.STORAGE_LOCAL_DIR,
     SEED_DEPARTMENT_NAME: process.env.SEED_DEPARTMENT_NAME,
     SEED_ADMIN_EMAIL: process.env.SEED_ADMIN_EMAIL,
     SEED_ADMIN_PASSWORD: process.env.SEED_ADMIN_PASSWORD,

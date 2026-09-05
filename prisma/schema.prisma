@@ -1,9 +1,10 @@
 // Studio — Prisma schema.
 //
-// Phase 2 scope only: Department, User, Session. See docs/data/database.md and
-// docs/architecture/decisions.md (ADR-0002, ADR-0007, ADR-0011, ADR-0020) for the
-// decisions behind this shape. Do not add speculative models here — later phases
-// (Templates, Jobs, Files, ...) add their own schema when those features land.
+// Phase 2: Department, User, Session. Phase 4: File. See docs/data/database.md and
+// docs/architecture/decisions.md (ADR-0002, ADR-0007, ADR-0008, ADR-0011, ADR-0020,
+// ADR-0024, ADR-0025) for the decisions behind this shape. Do not add speculative
+// models here — later phases (Templates, Jobs, ...) add their own schema when those
+// features land.
 
 generator client {
   provider = "prisma-client-js"
@@ -41,6 +42,7 @@ model Department {
   updatedAt DateTime @updatedAt
 
   users User[]
+  files File[]
 
   @@map("departments")
 }
@@ -67,7 +69,8 @@ model User {
   departmentId String
   department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
 
-  sessions Session[]
+  sessions      Session[]
+  uploadedFiles File[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -100,4 +103,78 @@ model Session {
 
   @@index([userId])
   @@map("sessions")
+}
+
+/// docs/domain/files.md. `GALLERY_ASSET` is the only category any Phase 4 code path
+/// creates — `JOB_ARTIFACT` exists so the enum doesn't need a breaking change when
+/// the Jobs feature lands (ADR-0024), not because anything produces one yet.
+enum FileCategory {
+  GALLERY_ASSET
+  JOB_ARTIFACT
+}
+
+/// Derived from sniffed content, not trusted client input. Drives the allow-list and
+/// per-kind size limit in `features/files/domain/file-types.ts`.
+enum FileKind {
+  IMAGE
+  AUDIO
+  VIDEO
+}
+
+/// An uploaded media asset (docs/domain/files.md, ADR-0008, ADR-0024, ADR-0025).
+///
+/// Hard-deleted when safe — there is no soft delete and no `deletedAt`. Historical
+/// integrity does not rely on this row surviving: a future Job copies the metadata it
+/// needs into its own immutable snapshot at creation time (ADR-0010); this row is only
+/// the live, deletable Gallery/artifact copy. See ADR-0025 for the exact contract a
+/// future Job/Template feature must follow before this model's deletion behavior can
+/// be trusted with real dependents.
+model File {
+  id String @id @default(cuid())
+
+  departmentId String
+  department   Department   @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  category     FileCategory @default(GALLERY_ASSET)
+  kind         FileKind
+
+  /// Client-supplied, display-only. Never used to build a storage path or a shell
+  /// command (ADR-0015, Security Requirements §6/§8).
+  originalName String
+  /// System-generated (`<uuid>.<ext>`) — never derived from `originalName`.
+  storedName   String
+  /// Opaque location in the storage adapter (ADR-0024). Never sent to the client;
+  /// the browser only ever knows this row's `id` and reaches bytes through the
+  /// authenticated `/api/files/[fileId]` route, which re-resolves `storageKey`
+  /// server-side after an authorization check on every request.
+  storageKey   String       @unique
+
+  /// Sniffed from the actual bytes (`file-type`), not the client's declared
+  /// Content-Type — see `@/server/media`.
+  mimeType String
+  sizeBytes Int
+  /// SHA-256 hex digest of the bytes. Advisory-dedup groundwork only in Phase 4
+  /// (OD-20 stays open) — nothing blocks or auto-merges on a match yet.
+  contentHash String
+
+  /// Probed for `IMAGE` only (cheap, pure-JS via `image-size`). Left `null` for
+  /// `AUDIO`/`VIDEO` — duration probing needs `ffprobe`, which Phase 4 deliberately
+  /// does not introduce (out of scope; see docs/domain/files.md).
+  width  Int?
+  height Int?
+
+  /// Null for a system-generated artifact (not reachable until Jobs exist).
+  uploadedByUserId String?
+  uploadedBy       User?   @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Gallery listing (the dominant query: one department's persistent assets, newest
+  // first) and the kind filter both need departmentId first for the planner to use
+  // either index from the same leading column.
+  @@index([departmentId, category, createdAt])
+  @@index([departmentId, kind])
+  // Advisory dedup lookup (OD-20): "does this department already have this hash".
+  @@index([departmentId, contentHash])
+  @@map("files")
 }

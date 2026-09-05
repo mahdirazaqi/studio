@@ -1,6 +1,6 @@
 # Project Structure
 
-**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 3 tree.
+**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 4 tree.
 
 ## 1. Repository layout
 
@@ -10,7 +10,7 @@ studio/
 ├── README.md
 ├── docs/
 ├── public/
-├── prisma/                       schema.prisma, migrations/, seed.ts (Phase 2, ADR-0002)
+├── prisma/                       schema.prisma, migrations/, seed.ts (Phase 2 + 4, ADR-0002)
 ├── prisma.config.ts              Prisma CLI config (schema path, seed command)
 ├── src/                          see §2
 ├── components.json               shadcn/ui config
@@ -43,11 +43,14 @@ src/
 │   │   ├── layout.tsx            getCurrentUser() guard + redirect; SidebarProvider + AppSidebar + AppHeader
 │   │   ├── page.tsx              "/" overview — filtered to navigationForRole(user.role)
 │   │   ├── loading.tsx  error.tsx
-│   │   ├── jobs/  templates/  files/  → PlaceholderPage
+│   │   ├── jobs/  templates/     → PlaceholderPage
+│   │   ├── files/                → IMPLEMENTED (Phase 4) — real gallery page
 │   │   ├── users/                → role-gated (MANAGER+) PlaceholderPage or ForbiddenPage
 │   │   └── departments/          → role-gated (ADMIN) PlaceholderPage or ForbiddenPage
 │   └── api/
-│       └── health/route.ts       the only Route Handler
+│       ├── health/route.ts       health check
+│       └── files/[fileId]/route.ts   binary content delivery (Phase 4) — plain handler,
+│                                     not defineRouteHandler; see boundaries.md
 │
 ├── features/                     one folder per module (see features/README.md)
 │   ├── auth/                     IMPLEMENTED (Phase 2) — schemas/, use-cases/
@@ -55,7 +58,13 @@ src/
 │   ├── users/                    partial (Phase 2/3) — domain/, repository/ (auth's
 │   │                             credential lookup only), use-cases/authorize-user-management.ts
 │   │                             (Phase 3 — policy only, no mutation/UI yet)
-│   ├── departments/  jobs/  templates/  files/  telegram/
+│   ├── departments/               partial (Phase 4) — repository/ + read/ (two ADMIN-only
+│   │                             reads for the upload form's department picker; no
+│   │                             management CRUD yet)
+│   ├── files/                     IMPLEMENTED (Phase 4) — domain/, schemas/, repository/,
+│   │                             use-cases/ (upload, list, get, delete, authorize-*),
+│   │                             actions/, components/ (form, toolbar, card, delete button)
+│   ├── jobs/  templates/  telegram/
 │   └── (each of these: README.md describing scope + boundaries; no impl yet)
 │
 ├── components/
@@ -84,7 +93,9 @@ src/
 │   ├── authz/                   authorize() / requireRole / assertSameDepartment /
 │   │                             assertDepartmentScopeOrNotFound / departmentScopeFilter
 │   │                             — BOUNDARY, real capability registry (ADR-0022, Phase 3)
-│   └── db/                      index.ts — the single PrismaClient instance
+│   ├── db/                      index.ts — the single PrismaClient instance
+│   ├── adapters/storage/        StorageAdapter interface + LocalStorageAdapter (ADR-0024, Phase 4)
+│   └── media/                   probe.ts — sniffContentType / probeImageDimensions / hashContent (Phase 4)
 │
 ├── types/                       cross-cutting client-safe types (Maybe, Paginated, Result)
 │

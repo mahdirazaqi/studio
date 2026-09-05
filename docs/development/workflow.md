@@ -154,19 +154,61 @@ departmentId? })`), replacing the Phase 1 ADMIN-only placeholder — role floor 
 the authorization policy for them), Templates, Jobs, Files, Worker API, Telegram,
 YouTube, rendering. **No database schema changes were required.**
 
-### Phase 4+ (not started)
+### Phase 4 — File Gallery & storage lifecycle _(complete)_
+
+**Goal:** the File domain — upload, catalog, browse, preview, and safe deletion of media
+assets — plus the storage/historical-integrity infrastructure later Job/Template features
+build on. No Template/Job/Worker/Telegram implementation.
+
+**Delivered:**
+
+- `File` model (`GALLERY_ASSET` | `JOB_ARTIFACT` category, `IMAGE`/`AUDIO`/`VIDEO` kind,
+  department-scoped, hard-deleted when safe — never soft-deleted) — ADR-0024/0025/0026.
+- `StorageAdapter` interface (`@/server/adapters/storage`) + a local-disk implementation;
+  swappable for S3-compatible storage later without an application-layer change (OD-42's
+  interface half resolved).
+- Upload lifecycle: real content-type sniffing (`file-type`, never the client's declared
+  MIME type), the exact legacy allow-list (JPG/PNG/WEBP/MP3/MP4) with new per-kind size
+  limits (25/100/500 MB — resolves OD-21), image dimension probing, SHA-256 content
+  hashing with an advisory (non-blocking) duplicate notice, and storage/database
+  write-failure compensation (orphan cleanup on a failed DB write).
+- Deletion: database row before storage bytes; a USER may delete only their own upload,
+  MANAGER/ADMIN any file in scope; a documented (not-yet-real) Job-dependency hook
+  (`assertNoActiveJobDependencies`) for the Jobs phase to fill in.
+- `/api/files/[fileId]` — session-authenticated, department-scoped, byte-range-capable
+  binary content delivery; a deliberate, narrow, documented exception to "no internal REST"
+  (docs/architecture/boundaries.md).
+- File Gallery UI: upload form (with an ADMIN-only cross-department picker), search +
+  kind filter (URL-driven, server-scoped), responsive grid, image/audio/video preview,
+  pagination, permission-aware delete control.
+- The historical-integrity contract a future Job/Template feature must follow to keep a
+  deleted File from ever breaking a historical record — written out concretely, not left
+  as a Phase 0 intention (ADR-0025).
+- Docs: `architecture/files.md`; updates to `domain/files.md`, `data/{lifecycle-rules,
+historical-integrity,database}.md`, `security/security.md`, `architecture/{tech-stack,
+boundaries,project-structure}.md`, `open-decisions.md` (OD-21 resolved; OD-19/20/42
+  annotated).
+
+**Explicitly NOT in Phase 4:** Template implementation, Job implementation, Worker REST
+API, Telegram Bot, YouTube, rendering/transcoding (ffmpeg/ImageMagick), audio/video
+duration probing, a real dedup/reuse UI, scheduled artifact cleanup (nothing produces a
+`JOB_ARTIFACT` yet). **No new speculative tables** — `File` is the only addition.
+
+### Phase 5+ (not started)
 
 Sequencing is not finalized, but a sensible order:
 
 1. User management (create/disable/role-change) + Department management — wires
    Phase 3's `authorize-user-management.ts` policy to real repositories/Server Actions/UI.
 2. Templates (authoring + soft-delete + validation; resolves OD-04, OD-09, OD-10).
-3. Files / Gallery (upload, storage adapter, categories; resolves OD-42, OD-21).
-4. Jobs (creation, snapshot, state machine) + Worker API (atomic claim, auth,
-   progress/state/result, durable delivery scaffold; resolves OD-03, OD-27, OD-40).
-5. YouTube delivery adapter.
-6. Telegram adapter + durable wizard state.
-7. Cleanup jobs, retention, hardening, observability.
+3. Jobs (creation, snapshot, state machine) + Worker API (atomic claim, auth,
+   progress/state/result, durable delivery scaffold; resolves OD-03, OD-19, OD-27, OD-40)
+   — wires Phase 4's `assertNoActiveJobDependencies` hook and `JOB_ARTIFACT` category to
+   real Job rows.
+4. YouTube delivery adapter.
+5. Telegram adapter + durable wizard state.
+6. Cleanup jobs, retention, hardening, observability (resolves OD-18, OD-20's remaining
+   half).
 
 Each Phase 4+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
 the product owner, implement behind the layering rules, test (unit + the integration

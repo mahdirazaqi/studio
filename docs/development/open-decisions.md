@@ -192,7 +192,8 @@ screenshot + thumbnail 90 days; all configurable.
 ### OD-19 — One-off Telegram/upload inputs: artifact or promotable?
 
 _Where:_ [../data/lifecycle-rules.md](../data/lifecycle-rules.md).
-**Recommendation:** default `JOB_ARTIFACT`, explicit "save to gallery" action.
+**Recommendation:** default `JOB_ARTIFACT`, explicit "save to gallery" action. Still open
+— no Job/Telegram feature exists yet to make this choice concrete.
 
 ### OD-20 — File dedup mechanism & scope
 
@@ -200,11 +201,16 @@ _Where:_ [../domain/files.md](../domain/files.md).
 Content-hash hard dedup (return existing) vs advisory ("similar file exists") vs none.
 **Recommendation:** content-hash advisory + opt-in reuse; hard dedup later.
 
-### OD-21 — Allowed file types & size limits
+**Phase 4 status:** the groundwork is implemented — `contentHash` is computed and stored
+on every upload, and an in-department match surfaces as a non-blocking notice. Still
+open: no "reuse this file instead" UI, no merge/hard-dedup path.
 
-_Where:_ [../domain/files.md](../domain/files.md), [../security/security.md](../security/security.md).
-Legacy allowed `jpg/jpeg/png/webp/mp4/mp3` general, `.mp4` only for results. Confirm the
-Studio allow-list and per-kind max sizes.
+### OD-21 — Allowed file types & size limits — ✅ RESOLVED (ADR-0026)
+
+Kept legacy's exact allow-list (`jpg/jpeg/png/webp/mp3/mp4`), validated against sniffed
+content, not client-declared. New per-kind size limits legacy never had: 25MB image /
+100MB audio / 500MB video. See ADR-0026 and
+[../architecture/files.md](../architecture/files.md).
 
 ### OD-22 — Assets & outcomes: child rows vs JSONB
 
@@ -326,11 +332,16 @@ Needed for: durable delivery, artifact cleanup, wizard TTL sweep, stuck-job reco
 _Where:_ [../security/security.md](../security/security.md).
 Edge middleware / a limiter library / infra (reverse proxy, API gateway).
 
-### OD-42 — Object storage backend
+### OD-42 — Object storage backend — interface half ✅ RESOLVED (ADR-0024); backend choice still open
 
-_Where:_ [../architecture/tech-stack.md](../architecture/tech-stack.md).
-Local disk behind a volume / S3-compatible object storage / other. Access only via
-`server/adapters/storage`.
+_Where:_ [../architecture/tech-stack.md](../architecture/tech-stack.md),
+[../architecture/files.md](../architecture/files.md).
+
+**Resolved:** a `StorageAdapter` interface exists at `@/server/adapters/storage`, with a
+local-disk implementation for development/single-instance deployment. **Still open:**
+whether/when a production deployment needs an S3-compatible (or other) adapter instead —
+the interface makes that a new implementation file, not an architecture change, whenever
+it's needed.
 
 ### OD-43 — Session / auth library — ✅ RESOLVED (ADR-0020)
 

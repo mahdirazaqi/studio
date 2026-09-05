@@ -1,5 +1,9 @@
 # Domain: Files / File Gallery
 
+**Implemented, Phase 4.** This page is the business rules and permission matrix;
+[../architecture/files.md](../architecture/files.md) documents the mechanism (storage
+adapter, upload/deletion lifecycle, the content-delivery route) and ADR-0024/0025/0026.
+
 ## Purpose
 
 A **File** is an uploaded media asset (image / audio / video) used as an input to Jobs
@@ -57,6 +61,13 @@ Every File has a `category`:
   its original name / type / size still visible. **Never a broken reference, never a
   crash.**
 - **Job Artifact auto-cleanup:**
+
+  > **Phase 4 status.** `category` exists in the schema (`GALLERY_ASSET` |
+  > `JOB_ARTIFACT`) and every current code path only ever creates `GALLERY_ASSET` — there
+  > is no Job feature yet to produce an artifact. The deletion-safety hook a future Job
+  > feature must fill in (`assertNoActiveJobDependencies`) is documented and unit-tested
+  > as a no-op in [../architecture/files.md](../architecture/files.md) (ADR-0025).
+
   > **`OPEN DECISION` — artifact retention.** When exactly are `JOB_ARTIFACT` files
   > deleted? Options: immediately on `UPLOADED`; after a retention window (e.g. 30 days);
   > keep the thumbnail forever but purge the full video after delivery; keep everything
@@ -90,40 +101,58 @@ file already exists.
 > deletion/permission semantics need care. _Consequence of soft/advisory:_ simpler, minor
 > duplication. Recommended: **content-hash advisory + opt-in reuse**, with hard dedup as
 > a later optimization.
+>
+> **Phase 4 status:** `contentHash` is computed and stored on every upload, and an
+> in-department match is looked up and surfaced to the uploader as a non-blocking notice
+> (`duplicateOfFileId`). Nothing is blocked, merged, or offered as a "reuse this instead"
+> flow yet — this OD stays open on that count.
 
-### Fields (conceptual — final schema in [../data/database.md](../data/database.md))
+### Fields — implemented (Phase 4; final schema: [`prisma/schema.prisma`](../../prisma/schema.prisma))
 
-| Field                                | Notes                                                                              |
-| ------------------------------------ | ---------------------------------------------------------------------------------- |
-| `id`                                 |                                                                                    |
-| `departmentId`                       | **New in Studio.** Required. Scopes visibility.                                    |
-| `category`                           | `GALLERY_ASSET` \| `JOB_ARTIFACT`.                                                 |
-| `uploadedByUserId`                   | **Actually populated** (legacy never set it). Null for system-generated artifacts. |
-| `originalName`                       | Client-supplied name, for display only.                                            |
-| `storedName`                         | **System-generated** (e.g. a UUID + extension). Never derived from user input.     |
-| `storageKey`                         | Location in the storage adapter.                                                   |
-| `mimeType`                           | Validated against real content sniffing, not just the client header/extension.     |
-| `kind`                               | `IMAGE` \| `AUDIO` \| `VIDEO` — derived and validated.                             |
-| `sizeBytes`                          | Enforced against a max (OPEN DECISION on limits).                                  |
-| `contentHash`                        | For dedup / integrity.                                                             |
-| `width`, `height`, `durationSeconds` | Probed metadata where applicable (drives aspect-ratio checks).                     |
-| `ownerJobId`                         | For `JOB_ARTIFACT` — the Job it belongs to.                                        |
-| `createdAt`                          |                                                                                    |
+| Field              | Notes                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------- |
+| `id`               |                                                                                        |
+| `departmentId`     | **New in Studio.** Required. Scopes visibility.                                        |
+| `category`         | `GALLERY_ASSET` \| `JOB_ARTIFACT`. Only `GALLERY_ASSET` is ever created so far.        |
+| `uploadedByUserId` | **Actually populated** (legacy never set it). Null for system-generated artifacts.     |
+| `originalName`     | Client-supplied name, for display only.                                                |
+| `storedName`       | **System-generated** (a UUID + extension). Never derived from user input.              |
+| `storageKey`       | Location in the storage adapter. Never sent to the client — see architecture/files.md. |
+| `mimeType`         | Sniffed from the real bytes (`file-type`), not the client header/extension.            |
+| `kind`             | `IMAGE` \| `AUDIO` \| `VIDEO` — derived and validated from the sniffed type.           |
+| `sizeBytes`        | Enforced against a per-kind max (ADR-0026).                                            |
+| `contentHash`      | SHA-256. Advisory dedup lookup only (see above) — not yet a reuse/merge mechanism.     |
+| `width`, `height`  | Probed for `IMAGE` only (`image-size`). `null` for `AUDIO`/`VIDEO`.                    |
+| `createdAt`        |                                                                                        |
+
+**Not yet implemented:** `durationSeconds` (needs `ffprobe`, out of Phase 4's scope — see
+"Upload validation" below) and `ownerJobId` (no Job model exists to reference; added when
+the Jobs feature lands, per ADR-0025's contract in
+[../architecture/files.md](../architecture/files.md)).
 
 ### Upload validation
 
-- Extension **and** sniffed content type must both be in the allowed set.
-  > **`OPEN DECISION` — allowed types & size limits.** Legacy allowed
-  > `jpg/jpeg/png/webp/mp4/mp3` for general upload and `.mp4` only for job results.
-  > Confirm the Studio allow-list and per-kind max sizes.
-- Reject on mismatch with a clear error.
+- **Implemented, Phase 4** (`features/files/domain/file-types.ts`,
+  [../architecture/files.md](../architecture/files.md) "Upload lifecycle").
+- Extension **and** sniffed content type must both resolve to the same allowed **kind**
+  (not necessarily the exact same format — see ADR-0026) — reject on no match, with a
+  clear error naming the supported types.
+- Allow-list and size limits: **DECIDED, ADR-0026** — JPG/JPEG, PNG, WEBP (≤25MB); MP3
+  (≤100MB); MP4 (≤500MB). Same types legacy supported; new size ceiling legacy never had.
 - Store under a generated name; original name is metadata only.
-- Probe dimensions/duration for later validation.
-- If Studio normalizes on upload (legacy's ffmpeg/convert step), it must use `execFile`
-  with an argument array (ADR-0015). Whether normalization is even needed is an
-  **OPEN DECISION** — legacy's intent for the `convert` no-op is unknown.
+- Probe dimensions for images. **Duration probing for audio/video is explicitly deferred**
+  — it needs `ffprobe`, which this phase doesn't introduce; the OPEN DECISION about
+  whether Studio needs any on-upload media _processing_ (legacy's ffmpeg/convert
+  no-op) is unaffected and still unresolved, since Phase 4 does no transcoding either way,
+  only read-only sniffing/probing of the bytes as uploaded.
 
 ### Referencing from Jobs/Templates
+
+> **Phase 4 note:** the exact contract a future Job/Template feature must follow — what
+> to snapshot, when, and how the deletion-safety hook works — is written out in
+> [../architecture/files.md](../architecture/files.md) "Historical integrity contract for
+> future Job/Template features" (ADR-0025). The bullets below are the Phase 0 design
+> intent this now makes concrete.
 
 - A Job asset that uses a File captures, at creation time, the **file reference the
   Worker needs plus identifying metadata** — it does not rely on a live FK for historical

@@ -1,0 +1,142 @@
+# Files — Architecture
+
+**`DECIDED` — implemented in Phase 4.** ADR-0008 (deletion policy), ADR-0024 (storage
+abstraction), ADR-0025 (deletion contract / historical integrity), ADR-0026 (allow-list &
+size limits). Business rules and the permission matrix live in
+[../domain/files.md](../domain/files.md) — this page is the mechanism.
+
+## Layout
+
+```
+src/features/files/
+├── domain/
+│   ├── file.ts          SafeFile, FileCategory — the client-safe shape (no storageKey)
+│   └── file-types.ts     allow-list + per-kind size limits + resolveFileKind() — pure
+├── schemas/               upload-file.schema.ts, list-files.schema.ts
+├── repository/            file-repository.ts — the only module querying the File table
+├── use-cases/
+│   ├── upload-file.ts
+│   ├── list-files.ts
+│   ├── get-file.ts                 metadata read (detail views)
+│   ├── get-file-for-serving.ts     storageKey read — only for the content route
+│   ├── delete-file.ts
+│   └── authorize-file-management.ts   assertCanDeleteFile, canDeleteFile, the
+│                                       assertNoActiveJobDependencies hook (ADR-0025)
+├── actions/               upload-file.action.ts, delete-file.action.ts
+└── components/            UploadFileForm, FilesToolbar, FileCard, DeleteFileButton
+
+src/server/adapters/storage/   StorageAdapter interface + LocalStorageAdapter (ADR-0024)
+src/server/media/probe.ts       sniffContentType, probeImageDimensions, hashContent
+src/app/api/files/[fileId]/route.ts   authenticated binary content delivery
+```
+
+## Storage abstraction
+
+See ADR-0024. `@/server/adapters/storage` exports `storage: StorageAdapter` — `put`,
+`delete`, `stat`, `readStream(key, range?)`. Nothing outside this module imports `node:fs`
+or a cloud SDK for file bytes. The only implementation today is `LocalStorageAdapter`,
+writing under `env.STORAGE_LOCAL_DIR` (default `.data/storage`, outside `public/`).
+
+`storageKey` (e.g. `{departmentId}/{uuid}.{ext}`) is generated once, at upload time, and
+is opaque to everything above the repository layer — `SafeFile` (the type returned to
+Server Components/Actions) does not carry it. Only `get-file-for-serving.ts` reads it, for
+the one legitimate reason: the content route needs it to call `storage.readStream`.
+
+## Upload lifecycle
+
+`features/files/use-cases/upload-file.ts`, in order:
+
+1. **Resolve the target department.** USER/MANAGER: always their own
+   (`actor.departmentId`) — a client-supplied `departmentId` is ignored. ADMIN: may supply
+   one explicitly (docs/domain/authorization.md — "Upload file: ... Into own department
+   (ADMIN: any)"); it's validated to exist first.
+2. **Authorize** (`authorize(actor, "file:manage", { departmentId })`).
+3. **Sniff the real content type** from the bytes (`@/server/media`'s `sniffContentType`,
+   backed by `file-type`) — the client's declared `File.type` is never trusted.
+4. **Resolve the kind** (`resolveFileKind`) against the allow-list (ADR-0026). No match →
+   `validation` error naming the supported types.
+5. **Check the per-kind size limit.** A JPEG under the video cap but over the image cap is
+   still rejected — the limit is chosen by the sniffed kind, not the declared one.
+6. **Probe dimensions** for `IMAGE` only (`image-size`, pure JS, no subprocess). A file
+   that sniffs as an image but fails to decode (corrupt/truncated) is rejected as a
+   validation error, not allowed through with `width`/`height` left blank.
+7. **Hash the content** (SHA-256) and look up an existing file with the same hash in the
+   same department — **advisory only** (OD-20 stays open): if found, upload still
+   proceeds, and the result carries `duplicateOfFileId` for the UI to show a non-blocking
+   toast. Nothing is blocked or silently merged.
+8. **Write to storage**, then **write the database row**. If the storage write fails,
+   nothing else happens (no orphan, no row). If the _database_ write fails after a
+   successful storage write, the use case deletes the just-written storage object
+   (best-effort; a failure to clean up is logged, not thrown) — a database transaction
+   cannot roll back an external object store, so this compensation step is the only
+   defense against an orphaned object.
+
+Every step before the storage write operates on the in-memory buffer only — cheap to
+reject early, and nothing is written anywhere until validation fully passes.
+
+## Deletion
+
+`features/files/use-cases/delete-file.ts` — see ADR-0025 for the full reasoning:
+
+1. Load the file **scoped to the actor's department** (`findFileInScope` — cross-department
+   and nonexistent both resolve to the same `not_found`).
+2. `assertCanDeleteFile` — role floor + department match (`authorize`) plus: a USER may
+   delete only their own upload; MANAGER/ADMIN may delete any file in scope.
+3. `assertNoActiveJobDependencies` — a documented no-op today (no Job model exists); the
+   exact extension point a future Jobs feature must fill in.
+4. Delete the **database row first**, then the **storage bytes**. If the storage delete
+   fails, the row is already gone — the result is a harmless orphaned object (logged),
+   never a row pointing at missing bytes.
+
+## Access & preview
+
+Every file URL the browser ever sees is `/api/files/[fileId]` — the File's database id,
+never its storage key. That route:
+
+- Is a **plain Route Handler**, not `defineRouteHandler` (`@/server/api`) — that helper
+  always returns JSON; binary streaming with byte-range support needs a raw `Response`.
+- Is **not** a REST-for-internal-features exception in the sense
+  [boundaries.md](boundaries.md) warns against — it carries no business logic, only an
+  authenticated read-and-stream. A browser `<img>`/`<audio>`/`<video>` tag fetches its
+  `src` as a plain GET; there is no Server Component/Action equivalent for that. See
+  [boundaries.md](boundaries.md)'s decision table for the explicit, narrow carve-out.
+- **Re-authenticates and re-authorizes on every request.** There is no signed or
+  cacheable URL — `Cache-Control: private, no-store`. A cross-department or unknown id
+  both resolve to `404`, and no session resolves to `401`.
+- **Supports a single `Range: bytes=start-end` request** (`206 Partial Content` /
+  `416 Range Not Satisfiable`), enough for audio/video seeking. No multi-range support.
+
+## Historical integrity contract for future Job/Template features
+
+This is the one Phase 4 decision every later feature that references a File must honor —
+see ADR-0025 and [../data/historical-integrity.md](../data/historical-integrity.md):
+
+- **Never hold a live File row as the only source of truth for a historical record.** At
+  the moment a Job (or a Template default) resolves a File, copy the fields it needs
+  (`originalName`, `mimeType`, `sizeBytes`, `width`/`height`, and the `fileId` for a "media
+  still stored?" check) into that record's own immutable snapshot (ADR-0010). Never make a
+  historical view re-fetch the live File row and call it done.
+- **Before deleting a File, the deleting feature is responsible for its own active-
+  dependency check** — for Files today, that's `assertNoActiveJobDependencies`. When
+  Jobs land, implement the query _inside that function_, not by adding a parallel check
+  elsewhere. `File.category = JOB_ARTIFACT` already exists in the schema for that phase to
+  use immediately, without a migration.
+- **A deleted File must never surface as a broken link or a crash** in a historical
+  view — the UI reads the snapshot and shows "media no longer stored" (with the
+  snapshot's name/type/size still intact) when the live File is gone, exactly like
+  [../data/lifecycle-rules.md](../data/lifecycle-rules.md) describes.
+
+## What Phase 4 deliberately does not do
+
+- **No duration probing for audio/video** (`durationSeconds` isn't a column yet) — that
+  needs `ffprobe`, which this phase doesn't introduce (out of scope; see
+  [../domain/files.md](../domain/files.md)). Image dimensions are cheap and pure-JS, so
+  those are probed.
+- **No hard/blocking dedup, no "reuse this file?" UI** — OD-20 stays open; only the
+  groundwork (`contentHash` stored and indexed, an advisory toast) exists.
+- **No scheduled cleanup job.** Nothing produces a `JOB_ARTIFACT` yet, so there's nothing
+  to sweep; the retention policy itself is still OD-18/OD-19, unresolved.
+- **No Dialog/AlertDialog primitive was added** for the delete confirmation — a native
+  `window.confirm()` is used instead, a deliberate simplification given this phase's
+  focus is the File domain/backend, not polished modal UX. Revisit if/when a design
+  system pass touches destructive-action confirmations generally.

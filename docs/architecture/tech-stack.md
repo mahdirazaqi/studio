@@ -27,18 +27,25 @@ and `package-lock.json` for the resolved tree.
 | Lint                  | **ESLint** (flat config) + `eslint-config-next` + `eslint-config-prettier` | `9.x` / `15.5.x`                   | Custom `no-restricted-imports` guard for the server/client boundary.                                                                      |
 | Format                | **Prettier** + `prettier-plugin-tailwindcss`                               | `3.x`                              |                                                                                                                                           |
 | Tests                 | **Vitest**                                                                 | `3.x`                              | Foundational unit tests only in Phase 1.                                                                                                  |
+| File storage          | `StorageAdapter` interface; **local disk** the only implementation         | —                                  | ADR-0024, [files.md](files.md). Swappable for S3-compatible storage later without an application-layer change.                            |
+| File type sniffing    | **file-type**                                                              | `21.x`                             | Magic-byte detection — never trusts the client's declared MIME type. [files.md](files.md).                                                |
+| Image dimension probe | **image-size**                                                             | `2.x`                              | Pure JS, no subprocess. Images only — audio/video duration probing needs `ffprobe`, not introduced yet.                                   |
 
 ## Database
 
 **PostgreSQL + Prisma** (ADR-0002) — installed in Phase 2 with the first persistent
-models (`Department`, `User`, `Session`). See [database.md](database.md) and
+models (`Department`, `User`, `Session`); `File` added in Phase 4. See
+[database.md](database.md), [files.md](files.md), and
 [../data/database.md](../data/database.md).
 
-## Media tooling (not installed yet)
+## Media tooling
 
-**ffmpeg / ImageMagick** for screenshot + thumbnail generation, invoked via
-`execFile` / `spawn` with argument arrays only (ADR-0015). Added with the Files/Jobs
-features.
+**Installed (Phase 4):** `file-type` (content sniffing) and `image-size` (dimension
+probing) — both pure JS, no subprocess, no native build step.
+
+**Not installed yet:** `ffmpeg` / `ImageMagick` for screenshot + thumbnail generation and
+audio/video duration probing, invoked via `execFile` / `spawn` with argument arrays only
+(ADR-0015) when they are added — with the Jobs feature.
 
 ## Explicitly not used
 
@@ -52,7 +59,8 @@ features.
 
 ## Deferred / still open
 
-See [../development/open-decisions.md](../development/open-decisions.md): object storage
-backend (OD-42), background-job mechanism (OD-40), Telegram webhook vs polling (OD-34),
-Worker credential scheme (OD-27), rate-limiting layer (OD-41). Session library (OD-43) and
+See [../development/open-decisions.md](../development/open-decisions.md): the _specific_
+object storage backend beyond local disk (OD-42, interface half resolved — ADR-0024),
+background-job mechanism (OD-40), Telegram webhook vs polling (OD-34), Worker credential
+scheme (OD-27), rate-limiting layer (OD-41). Session library (OD-43) and
 Prisma naming (OD-45) are resolved — ADR-0020, ADR-0021.

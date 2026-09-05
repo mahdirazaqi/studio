@@ -40,6 +40,7 @@ Studio replaces the `src/render` module of the legacy NestJS backend
 | Authorization (mechanism)            | [`docs/architecture/authorization.md`](docs/architecture/authorization.md)                     |
 | Authorization workflow (how-to)      | [`docs/development/authorization.md`](docs/development/authorization.md)                       |
 | Database (Prisma/PostgreSQL)         | [`docs/architecture/database.md`](docs/architecture/database.md)                               |
+| Files / storage (mechanism)          | [`docs/architecture/files.md`](docs/architecture/files.md)                                     |
 | Database workflow (local dev)        | [`docs/development/database.md`](docs/development/database.md)                                 |
 | Error handling & error model         | [`docs/architecture/error-handling.md`](docs/architecture/error-handling.md)                   |
 | Environment configuration            | [`docs/architecture/environment.md`](docs/architecture/environment.md)                         |
@@ -87,7 +88,7 @@ The legacy repository is at `/home/mahdirazaqi/Projects/qtical-backend-node`
    actual behavior. Do not trust summaries alone for security- or correctness-sensitive
    work.
 4. Implement following the architecture rules below.
-5. If the docs do not answer a question, see rule §9 (ambiguity).
+5. If the docs do not answer a question, see rule §10 (ambiguity).
 6. Record any architectural decision you make in
    [`docs/architecture/decisions.md`](docs/architecture/decisions.md).
 
@@ -103,7 +104,7 @@ When sources conflict, resolve in this order (highest wins):
 
 The legacy code **never** overrides a deliberate Studio architectural decision.
 But do **not** silently discard legacy business behavior — if it looks important and
-Studio requirements are silent, record it as an **OPEN DECISION** (rule §9).
+Studio requirements are silent, record it as an **OPEN DECISION** (rule §10).
 
 ## 5. Architectural rules (non-negotiable)
 
@@ -226,7 +227,35 @@ Telegram must never bypass authorization.
   session check is the only coarse-grained gate; resource-level authorization lives in
   use cases/pages, per `docs/architecture/authorization.md` "Why not middleware".
 
-## 9. Handling ambiguity
+## 9. Files & storage rules (summary)
+
+Full detail: [`docs/architecture/files.md`](docs/architecture/files.md),
+[`docs/domain/files.md`](docs/domain/files.md). **Implemented, Phase 4.**
+
+- **Files are hard-deleted when safe — never soft-deleted.** There is no `deletedAt` on
+  `File`. Deletion order is fixed: the database row first, then the storage bytes — never
+  the reverse (ADR-0025).
+- **`File.storageKey` never crosses into a client-facing type or response.** The browser
+  only ever knows a File's `id`; bytes are served through the authenticated,
+  department-scoped `/api/files/[fileId]` route, which re-resolves the storage key
+  server-side on every request. Do not add a field or endpoint that returns a raw storage
+  key or path to the client.
+- **The domain/application layer never imports `node:fs` or a storage SDK directly** —
+  only `@/server/adapters/storage` does. A new storage backend is a new file behind
+  `StorageAdapter`, never a change to call sites (ADR-0024).
+- **Never trust a client-declared filename or MIME type for validation.** Content type is
+  sniffed from the actual bytes (`@/server/media`); the allow-list and per-kind size
+  limits live in `features/files/domain/file-types.ts` (ADR-0026) — centralized, not
+  re-implemented per form/action.
+- **A deleted File must never break a historical record.** A future Job/Template feature
+  that resolves a File must copy the metadata it needs into its own immutable snapshot at
+  creation time (ADR-0010) rather than depending on the File row surviving — see
+  `docs/architecture/files.md` "Historical integrity contract for future Job/Template
+  features" (ADR-0025) before wiring a new feature to Files.
+- **`File.category = JOB_ARTIFACT` and the `assertNoActiveJobDependencies` hook exist for
+  the Jobs feature to use — implement the real check there, don't add a parallel one.**
+
+## 10. Handling ambiguity
 
 - **Never invent business requirements when the documentation does not define them.**
 - Mark the gap as **`OPEN DECISION`** inline in the doc you are editing, add it to
@@ -236,7 +265,7 @@ Telegram must never bypass authorization.
   whoever decides has what they need.
 - Do not "temporarily" pick an answer and build on it silently.
 
-## 10. Worker REST compatibility
+## 11. Worker REST compatibility
 
 Studio must keep the existing Render Worker working with minimal changes. The legacy
 endpoints (`POST /files`, `GET /jobs/fetch`, `GET /jobs/:id`,
@@ -245,7 +274,7 @@ baseline. The **one deliberate break**: the Worker API **must be authenticated**
 not in legacy). See [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md)
 and [`docs/legacy/compatibility-matrix.md`](docs/legacy/compatibility-matrix.md).
 
-## 11. Security rules (summary)
+## 12. Security rules (summary)
 
 Full document: [`docs/security/security.md`](docs/security/security.md). Highlights:
 
@@ -259,14 +288,14 @@ Full document: [`docs/security/security.md`](docs/security/security.md). Highlig
 - Validate every input at the boundary (Zod or equivalent) — Server Actions included.
 - Secrets only via environment / secret manager; never in the repo.
 
-## 12. Frontend conventions (summary)
+## 13. Frontend conventions (summary)
 
 Panel-only app, **no landing page**. Next.js App Router + React + TypeScript + Tailwind +
 shadcn/ui. **LTR**, **English** UI and messages. Responsive with an excellent mobile
 experience. **Light / Dark / System** themes. Full detail:
 [`docs/frontend/conventions.md`](docs/frontend/conventions.md).
 
-## 13. Phase status
+## 14. Phase status
 
 - **Phase 0 (documentation & architecture foundation) — complete.**
 - **Phase 1 (Next.js foundation & application skeleton) — complete.** Dashboard shell,
@@ -282,12 +311,18 @@ experience. **Light / Dark / System** themes. Full detail:
   department-scope helpers (`assertDepartmentScopeOrNotFound`, `departmentScopeFilter`);
   user-management escalation/self-modification policy prepared ahead of the feature
   itself (ADR-0023); `/users` and `/departments` are protected server-side, not just
-  hidden from nav. The app runs (`npm run dev`), builds (`npm run build`), and passes
-  `npm run check` (lint + typecheck + format + tests). **Still no user/department
-  management UI, no domain features (Templates/Jobs/Files/Worker/Telegram/YouTube).**
+  hidden from nav.
+- **Phase 4 (File Gallery & storage lifecycle) — complete.** `File` model (hard-deleted
+  when safe, never soft-deleted — ADR-0025), a swappable `StorageAdapter` with a local-disk
+  implementation (ADR-0024), real content-type sniffing and per-kind size limits
+  (ADR-0026), a working upload/browse/search/preview/delete Gallery UI, and the
+  historical-integrity contract a future Job/Template feature must follow. The app runs
+  (`npm run dev`), builds (`npm run build`), and passes `npm run check` (lint + typecheck +
+  format + tests). **Still no user/department management UI, no Templates, no Jobs, no
+  Worker/Telegram/YouTube.**
 
-Do **not** start the next phase (user/department management, then the domain features)
-unless explicitly asked. See
+Do **not** start the next phase (user/department management, then Templates/Jobs) unless
+explicitly asked. See
 [`docs/development/workflow.md`](docs/development/workflow.md) for phase boundaries and
 [`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
 remains undecided.

@@ -24,6 +24,9 @@ npm-debug.log*
 .env.*
 !.env.example
 
+# local storage adapter's dev/default upload root (docs/architecture/files.md)
+.data/
+
 # vercel
 .vercel
 

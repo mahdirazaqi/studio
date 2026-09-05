@@ -8,8 +8,14 @@ enforce department scoping across every other feature.
 their own department; ADMIN acts across all. Department **deletion** policy is OPEN
 DECISION OD-07 (recommendation: archive only).
 
-**Not built yet.** Depends on the database layer.
+**Status: partial (Phase 4).** No management feature yet — `repository/` and `read/` hold
+exactly two reads, added only because the Files feature's ADMIN "upload into any
+department" capability needed somewhere to pick a department from:
 
-Will contain: `use-cases/` (create, rename, archive), `actions/`, `schemas/`,
-`repository/`, `read/`, `components/`. Scoping primitives already exist in
-`@/server/authz` (`assertSameDepartment`).
+- `repository/department-repository.ts` — `listDepartments()`, `departmentExists(id)`.
+- `read/list-departments-for-admin.ts` — the authorized (ADMIN-only) wrapper the file
+  upload form's department picker calls.
+
+**Not built yet:** `use-cases/` (create, rename, archive), `actions/`, `schemas/`,
+management `components/`. Scoping primitives already exist in `@/server/authz`
+(`assertSameDepartment`, `departmentScopeFilter`).

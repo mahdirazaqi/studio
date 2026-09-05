@@ -5,30 +5,30 @@ carried over.
 
 > **Phase 0 scope note.** This page documents the **conceptual** data model for
 > everything below. `Department`, `User`, and `Session` moved from conceptual to
-> **implemented** in Phase 2 — see [`prisma/schema.prisma`](../../prisma/schema.prisma),
-> [../architecture/database.md](../architecture/database.md), and
-> [../architecture/authentication.md](../architecture/authentication.md). Everything else
-> in the table below is still conceptual only; do not create Prisma models for it except
-> where strictly needed to validate a documented decision.
+> **implemented** in Phase 2 (see [../architecture/database.md](../architecture/database.md),
+> [../architecture/authentication.md](../architecture/authentication.md)); `File` moved
+> to **implemented** in Phase 4 (see [../architecture/files.md](../architecture/files.md)).
+> Everything else in the table below is still conceptual only; do not create Prisma
+> models for it except where strictly needed to validate a documented decision.
 
 ## 1. Entities
 
-| Entity                         | Deletion                                | Department-scoped            | Notes                                                                                                                                |
-| ------------------------------ | --------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `Department` **(implemented)** | Archive only (deletion = OPEN DECISION) | — (is the scope)             | Tenancy boundary. `id`, `name`, timestamps only so far.                                                                              |
-| `User` **(implemented)**       | Never (status `ACTIVE`/`DISABLED`)      | yes (`departmentId`)         | Referenced forever by Jobs/Templates/Files/audit. `phone`/`telegramUserId`/disable-audit fields not added yet (see domain/users.md). |
-| `Session` **(implemented)**    | Row deleted on logout/expiry            | via linked User              | Auth session (ADR-0020) — not in the original Phase 0 model; added for login.                                                        |
-| `Template`                     | Soft (`status`/`deletedAt`)             | yes                          | Render recipe + asset slots. Row kept forever.                                                                                       |
-| `TemplateAsset`                | With its Template (soft)                | via Template                 | Slot definitions. Could be rows or JSON on Template — see below.                                                                     |
-| `Job`                          | **Never**                               | yes                          | Permanent record. Carries an immutable snapshot.                                                                                     |
-| `JobAsset`                     | With its Job (never)                    | via Job                      | Resolved values. Rows or JSON on the Job — see below.                                                                                |
-| `File`                         | Hard delete when safe                   | yes                          | `GALLERY_ASSET` or `JOB_ARTIFACT`.                                                                                                   |
-| `TelegramWizardState`          | Expired by TTL cleanup                  | via linked User              | Durable Telegram conversation state (ADR-0014).                                                                                      |
-| `AuditEntry`                   | Never (retention = OPEN DECISION)       | yes                          | Who did what, when.                                                                                                                  |
-| `WorkerCredential`             | Revoke (status)                         | —                            | Service credential(s) for the Worker (mechanism = OPEN DECISION).                                                                    |
-| `YouTubeTarget`                | Revoke / disconnect                     | OPEN DECISION (dept-scoped?) | Connected YouTube channel + OAuth tokens. Legacy `Channel`.                                                                          |
-| `DeliveryOutcome`              | With its Job (never)                    | via Job                      | Per-target delivery result. Rows or JSON on the Job.                                                                                 |
-| `UploadQuotaUsage` (maybe)     | Rolling / TTL                           | per cap scope                | Backs the upload cap if not computed on the fly.                                                                                     |
+| Entity                         | Deletion                                | Department-scoped            | Notes                                                                                                                                      |
+| ------------------------------ | --------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Department` **(implemented)** | Archive only (deletion = OPEN DECISION) | — (is the scope)             | Tenancy boundary. `id`, `name`, timestamps only so far.                                                                                    |
+| `User` **(implemented)**       | Never (status `ACTIVE`/`DISABLED`)      | yes (`departmentId`)         | Referenced forever by Jobs/Templates/Files/audit. `phone`/`telegramUserId`/disable-audit fields not added yet (see domain/users.md).       |
+| `Session` **(implemented)**    | Row deleted on logout/expiry            | via linked User              | Auth session (ADR-0020) — not in the original Phase 0 model; added for login.                                                              |
+| `Template`                     | Soft (`status`/`deletedAt`)             | yes                          | Render recipe + asset slots. Row kept forever.                                                                                             |
+| `TemplateAsset`                | With its Template (soft)                | via Template                 | Slot definitions. Could be rows or JSON on Template — see below.                                                                           |
+| `Job`                          | **Never**                               | yes                          | Permanent record. Carries an immutable snapshot.                                                                                           |
+| `JobAsset`                     | With its Job (never)                    | via Job                      | Resolved values. Rows or JSON on the Job — see below.                                                                                      |
+| `File` **(implemented)**       | Hard delete when safe                   | yes                          | `GALLERY_ASSET` or `JOB_ARTIFACT` (only the former is created so far). `ownerJobId`/`durationSeconds` not added yet (see domain/files.md). |
+| `TelegramWizardState`          | Expired by TTL cleanup                  | via linked User              | Durable Telegram conversation state (ADR-0014).                                                                                            |
+| `AuditEntry`                   | Never (retention = OPEN DECISION)       | yes                          | Who did what, when.                                                                                                                        |
+| `WorkerCredential`             | Revoke (status)                         | —                            | Service credential(s) for the Worker (mechanism = OPEN DECISION).                                                                          |
+| `YouTubeTarget`                | Revoke / disconnect                     | OPEN DECISION (dept-scoped?) | Connected YouTube channel + OAuth tokens. Legacy `Channel`.                                                                                |
+| `DeliveryOutcome`              | With its Job (never)                    | via Job                      | Per-target delivery result. Rows or JSON on the Job.                                                                                       |
+| `UploadQuotaUsage` (maybe)     | Rolling / TTL                           | per cap scope                | Backs the upload cap if not computed on the fly.                                                                                           |
 
 > **`OPEN DECISION` — assets & outcomes: related rows vs JSONB.** Template asset slots,
 > resolved Job assets, and delivery outcomes can each be **child tables** or **JSONB
@@ -69,22 +69,23 @@ JobAsset *───0/1 File         (input file ref; nullable / may be deleted �
 
 ## 3. Constraints & indexes (requirements)
 
-| Requirement                                                                                        | Rationale                                         |
-| -------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `User.email` unique                                                                                | Login identity.                                   |
-| `User.telegramUserId` unique when not null                                                         | One Telegram account ↔ one User.                  |
-| `Department.name` unique                                                                           |                                                   |
-| `Template.name` unique **per department among non-deleted** _(OPEN DECISION — see templates.md)_   | Avoid confusing pickers.                          |
-| `TemplateAsset (templateId, name)` unique                                                          | Slot names unique within a template.              |
-| FK `Job.templateId` → `Template.id`, **no cascade delete** (Template can't be hard-deleted anyway) | Historical resolvability.                         |
-| FK `Job.retryOfJobId` → `Job.id`, nullable, no cascade                                             | Retry lineage.                                    |
-| Index `Job (departmentId, state, createdAt)`                                                       | Department-scoped lists + the atomic claim query. |
-| Partial index for the claim query on `state = QUEUED` ordered by `createdAt`                       | Fast `FOR UPDATE SKIP LOCKED`.                    |
-| Index `Job (createdByUserId)`, `Job (templateId)`                                                  | Common filters.                                   |
-| Index `File (departmentId, category, createdAt)`                                                   | Gallery browsing.                                 |
-| Index `File.contentHash`                                                                           | Dedup.                                            |
-| Index `AuditEntry (departmentId, createdAt)`, `(targetType, targetId)`                             | Audit queries.                                    |
-| `TelegramWizardState (telegramUserId)` unique; index on `updatedAt`                                | Lookup + TTL sweep.                               |
+| Requirement                                                                                        | Rationale                                          |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `User.email` unique                                                                                | Login identity.                                    |
+| `User.telegramUserId` unique when not null                                                         | One Telegram account ↔ one User.                   |
+| `Department.name` unique                                                                           |                                                    |
+| `Template.name` unique **per department among non-deleted** _(OPEN DECISION — see templates.md)_   | Avoid confusing pickers.                           |
+| `TemplateAsset (templateId, name)` unique                                                          | Slot names unique within a template.               |
+| FK `Job.templateId` → `Template.id`, **no cascade delete** (Template can't be hard-deleted anyway) | Historical resolvability.                          |
+| FK `Job.retryOfJobId` → `Job.id`, nullable, no cascade                                             | Retry lineage.                                     |
+| Index `Job (departmentId, state, createdAt)`                                                       | Department-scoped lists + the atomic claim query.  |
+| Partial index for the claim query on `state = QUEUED` ordered by `createdAt`                       | Fast `FOR UPDATE SKIP LOCKED`.                     |
+| Index `Job (createdByUserId)`, `Job (templateId)`                                                  | Common filters.                                    |
+| Index `File (departmentId, category, createdAt)` — **implemented**                                 | Gallery browsing.                                  |
+| Index `File (departmentId, kind)` — **implemented**                                                | Kind filter in the gallery UI.                     |
+| Index `File (departmentId, contentHash)` — **implemented** (compound, not bare `contentHash`)      | Advisory dedup lookup is always department-scoped. |
+| Index `AuditEntry (departmentId, createdAt)`, `(targetType, targetId)`                             | Audit queries.                                     |
+| `TelegramWizardState (telegramUserId)` unique; index on `updatedAt`                                | Lookup + TTL sweep.                                |
 
 ## 4. Atomic job claim
 

@@ -78,15 +78,27 @@ Binding security requirements for Studio. Many are direct responses to
 
 ## 6. File upload security
 
+**Implemented, Phase 4** (`features/files`, `@/server/media`, ADR-0026) — see
+[../architecture/files.md](../architecture/files.md) for the mechanism.
+
 - Validate **both** the file extension **and** the sniffed content type against an
-  allow-list. Reject on mismatch.
-- Enforce a **maximum size** per kind (limits = OPEN DECISION).
+  allow-list. Reject on mismatch. Sniffing uses `file-type` (magic bytes), never the
+  client's declared `File.type`.
+- Enforce a **maximum size** per kind — 25MB image / 100MB audio / 500MB video
+  (ADR-0026, resolves OD-21).
 - **Store under a system-generated name** (UUID + extension). The original filename is
   metadata only, never used for storage paths or shell commands.
 - Store outside any web-served directory unless access is mediated by an authorized
-  handler.
-- Probe media metadata (dimensions/duration) in a sandboxed, resource-bounded way.
+  handler — the local storage adapter writes under `STORAGE_LOCAL_DIR` (outside
+  `public/`); every read goes through the session-authenticated, department-scoped
+  `/api/files/[fileId]` route, never a static/public URL.
+- Probe media metadata: image dimensions via a pure-JS library (`image-size`), no
+  subprocess. Audio/video duration probing is deferred — it would need `ffprobe`, not
+  introduced in this phase (see [../domain/files.md](../domain/files.md)).
 - Never trust `Content-Type` from the client as authoritative.
+- The local storage adapter's key resolution refuses to resolve outside its configured
+  root, as defense in depth, even though `key` is always system-generated and never
+  derived from user input (Security Requirements §8).
 
 ## 7. Shell command injection
 

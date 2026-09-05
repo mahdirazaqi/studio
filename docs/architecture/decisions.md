@@ -572,3 +572,113 @@ ahead of any actual user-management use case:
 
 **Status:** DECIDED (interim/conservative defaults). OD-05 and the bulk-operation
 ADMIN-lockout safeguard remain **OPEN DECISION**.
+
+---
+
+## ADR-0024 — Storage abstraction: a `StorageAdapter` interface, local disk the only implementation
+
+**Context.** OD-42 left the object storage backend undecided. Phase 4 needs somewhere to
+put uploaded bytes without hard-coupling the File domain to a specific backend, since a
+production deployment will likely want S3-compatible storage while local development and
+a single-instance deployment don't need one.
+
+**Decision.** `src/server/adapters/storage` defines a small `StorageAdapter` interface
+(`put`, `delete`, `stat`, `readStream` with optional byte range) and exports one
+implementation today — `LocalStorageAdapter`, writing under `STORAGE_LOCAL_DIR`. The
+domain/application layer never imports `node:fs` or a cloud SDK directly; only this
+module does. There is no `getAccessUrl` on the interface — see the module's doc comment
+and [files.md](files.md) "Access & preview" for why: Studio's file URLs are always
+`/api/files/[fileId]` (the database id, re-authorized on every request), never a
+storage-specific URL.
+
+**Consequences.**
+
+- Swapping to an S3-compatible adapter later is one new file implementing the same
+  interface — nothing above it changes.
+- No `STORAGE_DRIVER` env switch was added; there is exactly one adapter, so a runtime
+  switch would be dead configuration. Add one only when a second adapter actually exists.
+- The local adapter treats `key` as always system-generated (never user input) but still
+  refuses to resolve outside its root, as defense in depth (Security Requirements §8).
+- Byte-range reads (`readStream(key, { start, end })`) exist from day one so
+  `/api/files/[fileId]` can serve `206 Partial Content` for audio/video scrubbing without
+  a later interface change.
+- Resolves OD-42's interface half; the specific production backend (S3 vs. something
+  else) remains an open choice, made easy by this seam rather than blocked by it.
+
+**Status:** DECIDED.
+
+---
+
+## ADR-0025 — File deletion is hard, immediate, and gated by a documented (not yet real) Job-dependency hook
+
+**Context.** ADR-0008 already decided Files are hard-deleted when safe, with no soft
+delete. Phase 4 implements File deletion before Job exists, so "safe" can't yet mean
+"no active Job depends on this" for real — but the deletion path must not need a
+breaking change when Job lands.
+
+**Decision.**
+
+- Deleting a File deletes the database row **before** the storage bytes. If the storage
+  delete then fails, the result is an orphaned object with nothing referencing it
+  (wasted space, logged, safe) rather than a database row pointing at bytes that might not
+  exist (a broken "file" a user could still try to open) — the failure mode is chosen
+  deliberately, not incidental.
+- `assertNoActiveJobDependencies(file)` (`features/files/use-cases/
+authorize-file-management.ts`) is called on every delete, today as a documented no-op —
+  there is no Job model to query. When Jobs exist, that function (not its caller) gains a
+  query for active-state (`QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING`) Jobs referencing the
+  file and throws `conflictError()` if any exist.
+- A USER may delete only a file **they uploaded**; MANAGER/ADMIN may delete any file in
+  scope (`assertCanDeleteFile`) — the conservative reading of
+  [../domain/authorization.md](../domain/authorization.md)'s "(own uploads? OPEN
+  DECISION)" annotation on that matrix cell.
+- Historical integrity for a future Job that used a since-deleted File does **not** depend
+  on this row surviving: per ADR-0010, a Job copies the metadata it needs (name, type,
+  size, dimensions) into its own immutable snapshot at creation time. This File row and
+  its bytes are the live, reusable, deletable copy; the Job's snapshot is the permanent
+  historical copy. Deleting a File a historical Job once used never breaks that Job — it
+  can only ever affect whether the _original bytes_ are still previewable, which the
+  snapshot already accounts for ("media no longer stored," per
+  [../data/lifecycle-rules.md](../data/lifecycle-rules.md)).
+
+**Consequences.**
+
+- No speculative Job/JobAsset table was added to make this "safe" check real — the hook
+  point is documented and unit-tested as a no-op, not faked.
+- The Jobs phase has an exact, pre-agreed contract to implement against instead of
+  re-deriving the deletion-safety design from scratch.
+- `File.category` (`GALLERY_ASSET` | `JOB_ARTIFACT`) exists in the schema now even though
+  nothing creates a `JOB_ARTIFACT` yet, so the Jobs phase doesn't need a schema migration
+  just to start attaching artifacts to Jobs.
+
+**Status:** DECIDED.
+
+---
+
+## ADR-0026 — File allow-list and per-kind size limits
+
+**Context.** OD-21 asked Studio to confirm its upload allow-list and size limits against
+what legacy already supported, rather than inventing a new (and possibly narrower) list.
+Legacy (`qtical-backend-node/src/render/file/file.controller.ts`) accepted exactly
+`jpg|jpeg|png|webp|mp4|mp3` by extension, with no size limit at all.
+
+**Decision.** Studio keeps the exact same type allow-list — JPG/JPEG, PNG, WEBP images;
+MP3 audio; MP4 video — validated against the **sniffed** content type (`file-type`), not
+the client-declared one, with the extension required to agree at the kind level (not
+exact format). New size limits, absent from legacy: **25 MB** images, **100 MB** audio,
+**500 MB** video (`features/files/domain/file-types.ts`).
+
+**Consequences.**
+
+- No functionality legacy supported is lost; Studio only adds a size ceiling legacy never
+  had (an unbounded upload was never a deliberate legacy feature, just a missing
+  safeguard — Security Requirements §6 explicitly asks for one).
+- The limits are generous enough for the media Studio actually handles (short source
+  clips and rendered output, not raw unedited camera footage) without being effectively
+  unbounded.
+- `next.config.ts`'s `experimental.serverActions.bodySizeLimit` is set to `512mb` — just
+  above the largest per-kind cap — as the outer framework ceiling; the precise per-kind
+  limits are enforced in the use case, not by that config value.
+- Resolves **OD-21**.
+
+**Status:** DECIDED.

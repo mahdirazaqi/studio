@@ -73,14 +73,14 @@ and **never updated**. It is also what the Worker fetch response is built from.
 
 ## 4. Consequences for other features
 
-| Feature              | Consequence                                                                                  |
-| -------------------- | -------------------------------------------------------------------------------------------- |
-| Template edit        | Never touches existing Jobs. Safe by construction.                                           |
-| Template soft-delete | Old Jobs still render fine from the snapshot; the `templateId` FK still resolves (row kept). |
-| File hard-delete     | Old Job shows file metadata from the snapshot + "bytes no longer stored"; no error.          |
-| User disable         | Job still shows the creator's name/id; the FK resolves (User row kept).                      |
-| Department archive   | Jobs remain fully readable by ADMIN.                                                         |
-| Reporting            | Can trust snapshots for point-in-time accuracy (e.g. "which template config produced this"). |
+| Feature              | Consequence                                                                                                                                                                                                                                                                                                                      |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Template edit        | Never touches existing Jobs. Safe by construction.                                                                                                                                                                                                                                                                               |
+| Template soft-delete | Old Jobs still render fine from the snapshot; the `templateId` FK still resolves (row kept).                                                                                                                                                                                                                                     |
+| File hard-delete     | Old Job shows file metadata from the snapshot + "bytes no longer stored"; no error. **Implemented, Phase 4** — see [../architecture/files.md](../architecture/files.md) "Historical integrity contract for future Job/Template features" (ADR-0025) for the exact contract a Job/Template feature must follow to keep this true. |
+| User disable         | Job still shows the creator's name/id; the FK resolves (User row kept).                                                                                                                                                                                                                                                          |
+| Department archive   | Jobs remain fully readable by ADMIN.                                                                                                                                                                                                                                                                                             |
+| Reporting            | Can trust snapshots for point-in-time accuracy (e.g. "which template config produced this").                                                                                                                                                                                                                                     |
 
 ## 5. Implementation checklist (for Phase 1)
 
