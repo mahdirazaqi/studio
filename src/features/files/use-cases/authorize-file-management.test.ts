@@ -1,11 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Actor } from "@/server/authz";
 import type { SafeFile } from "@/features/files/domain/file";
-import {
+
+const countTemplateAssetReferencesToFile = vi.fn();
+
+vi.mock("@/features/templates/repository/template-repository", () => ({
+  countTemplateAssetReferencesToFile: (...args: unknown[]) =>
+    countTemplateAssetReferencesToFile(...args),
+}));
+
+const {
   assertCanDeleteFile,
+  assertNoActiveTemplateDependencies,
   canDeleteFile,
-} from "./authorize-file-management";
+} = await import("./authorize-file-management");
 
 const actor = (overrides: Partial<Actor> = {}): Actor => ({
   userId: "actor-1",
@@ -33,6 +42,10 @@ const file = (overrides: Partial<SafeFile> = {}): SafeFile => ({
 function forbidden() {
   return expect.objectContaining({ kind: "forbidden" });
 }
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("assertCanDeleteFile", () => {
   it("allows a USER to delete their own upload", () => {
@@ -81,6 +94,22 @@ describe("assertCanDeleteFile", () => {
         file({ departmentId: "dept-b", uploadedByUserId: "someone-else" }),
       ),
     ).not.toThrow();
+  });
+});
+
+describe("assertNoActiveTemplateDependencies", () => {
+  it("allows deletion when no template asset references the file", async () => {
+    countTemplateAssetReferencesToFile.mockResolvedValue(0);
+    await expect(
+      assertNoActiveTemplateDependencies(file()),
+    ).resolves.toBeUndefined();
+  });
+
+  it("throws conflict when a template asset defaults to the file", async () => {
+    countTemplateAssetReferencesToFile.mockResolvedValue(2);
+    await expect(
+      assertNoActiveTemplateDependencies(file()),
+    ).rejects.toMatchObject({ kind: "conflict" });
   });
 });
 

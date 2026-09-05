@@ -3,10 +3,10 @@
 **Scope:** the File Gallery — upload, catalog, browse, preview, reuse, and safe deletion
 of media assets.
 
-**Status: implemented (Phase 4).** See
+**Status: implemented (Phase 4; extended Phase 5).** See
 [`docs/architecture/files.md`](../../../docs/architecture/files.md) for the mechanism and
-ADR-0024/0025/0026, and [`docs/domain/files.md`](../../../docs/domain/files.md) for the
-business rules.
+ADR-0024/0025/0026/0027, and [`docs/domain/files.md`](../../../docs/domain/files.md) for
+the business rules.
 
 ## Contents
 
@@ -20,12 +20,17 @@ business rules.
   - `upload-file.ts` — validation → storage write → DB write, with orphan cleanup on a
     failed DB write.
   - `list-files.ts`, `get-file.ts` — department-scoped reads.
+  - `list-all-gallery-files-for-admin.ts` (Phase 5) — ADMIN-only, cross-department,
+    capped listing for the Template asset editor's "default file" picker when ADMIN
+    authors a Template for a department other than their own.
   - `get-file-for-serving.ts` — the one place `storageKey` is read for an actual byte
     read; only `/api/files/[fileId]` calls it.
   - `delete-file.ts` — DB row deleted before storage bytes.
   - `authorize-file-management.ts` — `assertCanDeleteFile` / `canDeleteFile` (a USER may
-    delete only their own upload) and `assertNoActiveJobDependencies` (a documented
-    no-op today — the Jobs feature's extension point, ADR-0025).
+    delete only their own upload), `assertNoActiveJobDependencies` (still a documented
+    no-op — the Jobs feature's extension point, ADR-0025), and
+    `assertNoActiveTemplateDependencies` (real, Phase 5 — blocks deleting a File any
+    Template asset currently defaults to, ADR-0027).
 - `actions/` — `uploadFileAction`, `deleteFileAction`.
 - `components/` — `UploadFileForm`, `FilesToolbar` (search/kind filter, URL-driven),
   `FileCard`, `DeleteFileButton`.
@@ -34,7 +39,8 @@ The storage adapter (`@/server/adapters/storage`) and media probing
 (`@/server/media`) live outside this feature, as generic `server/*` infrastructure — see
 `docs/architecture/files.md`.
 
-**Not built yet:** the Templates/Jobs features that will actually reference a File
-(`ownerJobId`, real `JOB_ARTIFACT` creation, the real active-dependency check), a
+**Not built yet:** the Jobs feature that will actually reference a File (`ownerJobId`,
+real `JOB_ARTIFACT` creation, the real `assertNoActiveJobDependencies` check), a
 dedup/reuse UI (OD-20 stays open), audio/video duration probing (needs `ffprobe`),
-scheduled artifact cleanup.
+scheduled artifact cleanup. Templates (Phase 5) already reference Files — see
+`features/templates/README.md`.

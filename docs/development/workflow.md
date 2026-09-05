@@ -194,23 +194,64 @@ API, Telegram Bot, YouTube, rendering/transcoding (ffmpeg/ImageMagick), audio/vi
 duration probing, a real dedup/reuse UI, scheduled artifact cleanup (nothing produces a
 `JOB_ARTIFACT` yet). **No new speculative tables** — `File` is the only addition.
 
-### Phase 5+ (not started)
+### Phase 5 — Template management _(complete)_
+
+**Goal:** the Template domain — authoring, listing/search, enable/disable, soft-delete,
+asset-slot configuration with optional Gallery File defaults — plus the documented (not
+yet enforceable) Template/Job contract later Job features build on. No Job/Worker/
+Telegram/YouTube implementation.
+
+**Delivered:**
+
+- `Template`/`TemplateAsset` models — `status` (`ACTIVE`/`DISABLED`) and
+  `deletedAt`/`deletedByUserId` as two independent axes (ADR-0006); `name` unique per
+  Department among non-deleted rows via a hand-added partial DB index; zero-asset
+  Templates allowed; an optional, department-verified, deletion-protected
+  `defaultFileId` per `IMAGE`/`AUDIO`/`VIDEO` asset — all ADR-0027, resolving
+  OD-09/OD-10/OD-11.
+- Authorization: `template:manage` (MANAGER+) / `template:view` (USER+), confirmed
+  against OD-04 with the product owner after the phase brief's own draft matrix
+  contradicted the existing Phase 3 default — MANAGER+ authors, USER only views/lists
+  their own department's Templates.
+- `assertNoActiveTemplateDependencies` — a **real** File deletion-safety check (the
+  direct, now-implemented sibling of Phase 4's still-documented-only
+  `assertNoActiveJobDependencies`), blocking deletion of any File a Template asset
+  currently defaults to.
+- Full CRUD use cases (create/update/get/list/enable/disable/soft-delete), each
+  authorizing first, then enforcing department scope, state-transition rules
+  (idempotent enable/disable/delete; a soft-deleted Template can never be edited or
+  re-enabled), and cross-department File-reference rejection.
+- UI: list (search, status filter, pagination, role-aware actions), create/edit form
+  (shared component, read-only for USER or a soft-deleted Template), and an asset editor
+  (add/remove/reorder, per-kind field rules, Gallery File picker scoped to the Template's
+  department).
+- Docs: rewrote `domain/templates.md` Part B; updated `domain/authorization.md`,
+  `domain/files.md`, `architecture/{authorization,files,project-structure,decisions}.md`,
+  `data/{database,historical-integrity}.md`, `legacy/compatibility-matrix.md`,
+  `open-decisions.md` (OD-09/10/11 resolved; OD-04 confirmed), `CLAUDE.md`.
+
+**Explicitly NOT in Phase 5:** Job implementation (creation, snapshot, state machine),
+Worker REST API, Telegram Bot, YouTube delivery, rendering/transcoding,
+`youtubeTargetId` on Template (no `YouTubeTarget` table exists — would be speculative
+schema), aspect-ratio tolerance comparison (OD-14 stays open; nothing yet accepts an
+image against a Template slot), a Template version-history/restore mechanism.
+
+### Phase 6+ (not started)
 
 Sequencing is not finalized, but a sensible order:
 
 1. User management (create/disable/role-change) + Department management — wires
    Phase 3's `authorize-user-management.ts` policy to real repositories/Server Actions/UI.
-2. Templates (authoring + soft-delete + validation; resolves OD-04, OD-09, OD-10).
-3. Jobs (creation, snapshot, state machine) + Worker API (atomic claim, auth,
+2. Jobs (creation, snapshot, state machine) + Worker API (atomic claim, auth,
    progress/state/result, durable delivery scaffold; resolves OD-03, OD-19, OD-27, OD-40)
-   — wires Phase 4's `assertNoActiveJobDependencies` hook and `JOB_ARTIFACT` category to
-   real Job rows.
-4. YouTube delivery adapter.
-5. Telegram adapter + durable wizard state.
-6. Cleanup jobs, retention, hardening, observability (resolves OD-18, OD-20's remaining
+   — wires Phase 4's `assertNoActiveJobDependencies` hook and `JOB_ARTIFACT` category, and
+   Phase 5's documented Template/Job contract, to real Job rows.
+3. YouTube delivery adapter.
+4. Telegram adapter + durable wizard state.
+5. Cleanup jobs, retention, hardening, observability (resolves OD-18, OD-20's remaining
    half).
 
-Each Phase 4+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
+Each Phase 6+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
 the product owner, implement behind the layering rules, test (unit + the integration
 tests listed in `conventions.md` §9), update the docs.
 

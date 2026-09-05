@@ -1,6 +1,6 @@
 # Project Structure
 
-**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 4 tree.
+**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 5 tree.
 
 ## 1. Repository layout
 
@@ -43,7 +43,8 @@ src/
 │   │   ├── layout.tsx            getCurrentUser() guard + redirect; SidebarProvider + AppSidebar + AppHeader
 │   │   ├── page.tsx              "/" overview — filtered to navigationForRole(user.role)
 │   │   ├── loading.tsx  error.tsx
-│   │   ├── jobs/  templates/     → PlaceholderPage
+│   │   ├── jobs/                 → PlaceholderPage
+│   │   ├── templates/            → IMPLEMENTED (Phase 5) — list, `new/`, `[templateId]/`
 │   │   ├── files/                → IMPLEMENTED (Phase 4) — real gallery page
 │   │   ├── users/                → role-gated (MANAGER+) PlaceholderPage or ForbiddenPage
 │   │   └── departments/          → role-gated (ADMIN) PlaceholderPage or ForbiddenPage
@@ -58,20 +59,28 @@ src/
 │   ├── users/                    partial (Phase 2/3) — domain/, repository/ (auth's
 │   │                             credential lookup only), use-cases/authorize-user-management.ts
 │   │                             (Phase 3 — policy only, no mutation/UI yet)
-│   ├── departments/               partial (Phase 4) — repository/ + read/ (two ADMIN-only
-│   │                             reads for the upload form's department picker; no
-│   │                             management CRUD yet)
-│   ├── files/                     IMPLEMENTED (Phase 4) — domain/, schemas/, repository/,
-│   │                             use-cases/ (upload, list, get, delete, authorize-*),
-│   │                             actions/, components/ (form, toolbar, card, delete button)
-│   ├── jobs/  templates/  telegram/
+│   ├── departments/               partial (Phase 4/5) — repository/ + read/ (ADMIN-only
+│   │                             reads for the upload form's and Template create form's
+│   │                             department pickers; no management CRUD yet)
+│   ├── files/                     IMPLEMENTED (Phase 4/5) — domain/, schemas/, repository/,
+│   │                             use-cases/ (upload, list, get, delete, authorize-*,
+│   │                             list-all-gallery-files-for-admin — Phase 5), actions/,
+│   │                             components/ (form, toolbar, card, delete button)
+│   ├── templates/                 IMPLEMENTED (Phase 5) — domain/ (template.ts,
+│   │                             template-asset-rules.ts), schemas/, repository/,
+│   │                             use-cases/ (create, update, get, list, set-status,
+│   │                             soft-delete, verify-file-references,
+│   │                             resolve-target-department), actions/, components/
+│   │                             (form, asset editor, toolbar, list item, status actions)
+│   ├── jobs/  telegram/
 │   └── (each of these: README.md describing scope + boundaries; no impl yet)
 │
 ├── components/
 │   ├── ui/                       shadcn/ui primitives (owned, copied in)
 │   ├── theme/                    theme-provider, theme-toggle  ("use client")
 │   └── layout/                   app-sidebar, app-header, page-shell, placeholder-page,
-│                                 forbidden-page (Phase 3)
+│                                 forbidden-page (Phase 3), pagination-link (Phase 5,
+│                                 shared by Files/Templates list pages)
 │
 ├── hooks/
 │   └── use-mobile.ts             (from shadcn, used by the sidebar)
@@ -105,18 +114,30 @@ src/
 
 ## 3. Layer responsibilities
 
-| Layer                                 | May import                                                                 | Must NOT                                                                      | Responsibility                                                                           |
-| ------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `app/` pages & layouts                | `features/*/ui`, `features/*/read`, `components/*`, `server/auth`          | Prisma, business rules                                                        | routing, layout, suspense/error boundaries, calling reads + actions                      |
-| `app/api/**` route handlers           | `server/api`, `features/*/use-cases`, feature `server/` auth               | business logic, Prisma directly                                               | parse + authenticate + validate + delegate + map to HTTP                                 |
-| `features/*/actions` (`"use server"`) | `server/actions`, `features/*/use-cases`, feature `schemas`                | business logic, Prisma directly                                               | `defineAction` wrappers — thin                                                           |
-| `features/*/use-cases`                | feature `domain` + `repository`, `server/authz`, `server/errors`, adapters | `next/*` request APIs, transport types, other features' internals             | authorize, enforce invariants + state machine, orchestrate, transactions                 |
-| `features/*/domain`                   | nothing (pure)                                                             | any I/O                                                                       | types, enums, state machines, invariant functions                                        |
-| `features/*/repository`               | `server/db`, feature `domain`                                              | business/authorization decisions (but applies dept-scope filters defensively) | CRUD + queries, row↔domain mapping, atomic ops                                           |
-| `features/*/read`                     | `server/db` or repository, `server/auth`                                   | mutations                                                                     | query functions / read models for pages (dept-scoped)                                    |
-| `components/`, `components/ui/`       | React, `lib/*`, `types/*`                                                  | `@/server/*`, `server-only` (**ESLint-enforced**)                             | reusable UI; receives data as props                                                      |
-| `lib/`, `types/`                      | each other, tiny libs                                                      | `@/server/*`, `next` server APIs                                              | pure client-safe helpers/types                                                           |
-| `server/*`                            | each other, the wrapped lib/SDK                                            | domain rules (in `env`/`logger`/`errors`)                                     | env, logging, error mapping, action/route conventions, auth & authz boundaries, adapters |
+| Layer                                 | May import                                                                                                                                         | Must NOT                                                                                              | Responsibility                                                                           |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `app/` pages & layouts                | `features/*/ui`, `features/*/read`, `components/*`, `server/auth`                                                                                  | Prisma, business rules                                                                                | routing, layout, suspense/error boundaries, calling reads + actions                      |
+| `app/api/**` route handlers           | `server/api`, `features/*/use-cases`, feature `server/` auth                                                                                       | business logic, Prisma directly                                                                       | parse + authenticate + validate + delegate + map to HTTP                                 |
+| `features/*/actions` (`"use server"`) | `server/actions`, `features/*/use-cases`, feature `schemas`                                                                                        | business logic, Prisma directly                                                                       | `defineAction` wrappers — thin                                                           |
+| `features/*/use-cases`                | feature `domain` + `repository`, `server/authz`, `server/errors`, adapters, **another feature's `repository` for a narrow, read-only cross-check** | `next/*` request APIs, transport types, another feature's `use-cases`/`domain`/`actions`/`components` | authorize, enforce invariants + state machine, orchestrate, transactions                 |
+| `features/*/domain`                   | nothing (pure)                                                                                                                                     | any I/O                                                                                               | types, enums, state machines, invariant functions                                        |
+| `features/*/repository`               | `server/db`, feature `domain`                                                                                                                      | business/authorization decisions (but applies dept-scope filters defensively)                         | CRUD + queries, row↔domain mapping, atomic ops                                           |
+| `features/*/read`                     | `server/db` or repository, `server/auth`                                                                                                           | mutations                                                                                             | query functions / read models for pages (dept-scoped)                                    |
+| `components/`, `components/ui/`       | React, `lib/*`, `types/*`                                                                                                                          | `@/server/*`, `server-only` (**ESLint-enforced**)                                                     | reusable UI; receives data as props                                                      |
+| `lib/`, `types/`                      | each other, tiny libs                                                                                                                              | `@/server/*`, `next` server APIs                                                                      | pure client-safe helpers/types                                                           |
+| `server/*`                            | each other, the wrapped lib/SDK                                                                                                                    | domain rules (in `env`/`logger`/`errors`)                                                             | env, logging, error mapping, action/route conventions, auth & authz boundaries, adapters |
+
+**Cross-feature repository calls, established Phase 4/5:** a use case may import another
+feature's `repository` module directly for a small, narrow, read-only lookup —
+`features/files/use-cases/upload-file.ts` → `departments/repository` (does this department
+exist), `features/templates/use-cases/*` → `files/repository` (does this File id resolve
+in this department), `features/files/use-cases/authorize-file-management.ts` →
+`templates/repository` (does any Template asset still default to this File). This is
+**not** the same as reaching into another feature's `use-cases`, `domain`, or UI — those
+stay off-limits — and it is not a general "features may import each other" license: each
+instance exists because one feature's data must be validated against another's without
+duplicating that other feature's query logic, the same reasoning Files → Departments
+already established.
 
 ## 4. Cross-cutting conventions
 

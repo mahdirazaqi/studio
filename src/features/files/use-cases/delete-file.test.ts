@@ -7,6 +7,7 @@ const findFileInScope = vi.fn();
 const findStorageKey = vi.fn();
 const deleteFileRow = vi.fn();
 const storageDelete = vi.fn();
+const countTemplateAssetReferencesToFile = vi.fn();
 
 vi.mock("@/features/files/repository/file-repository", () => ({
   findFileInScope: (...args: unknown[]) => findFileInScope(...args),
@@ -16,6 +17,11 @@ vi.mock("@/features/files/repository/file-repository", () => ({
 
 vi.mock("@/server/adapters/storage", () => ({
   storage: { delete: (...args: unknown[]) => storageDelete(...args) },
+}));
+
+vi.mock("@/features/templates/repository/template-repository", () => ({
+  countTemplateAssetReferencesToFile: (...args: unknown[]) =>
+    countTemplateAssetReferencesToFile(...args),
 }));
 
 const { deleteFile } = await import("./delete-file");
@@ -48,6 +54,7 @@ beforeEach(() => {
   findStorageKey.mockResolvedValue("dept-a/some-key.png");
   deleteFileRow.mockResolvedValue(undefined);
   storageDelete.mockResolvedValue(undefined);
+  countTemplateAssetReferencesToFile.mockResolvedValue(0);
 });
 
 describe("deleteFile", () => {
@@ -99,5 +106,15 @@ describe("deleteFile", () => {
     await expect(
       deleteFile(actor({ role: "MANAGER" }), "file-1"),
     ).resolves.toBeUndefined();
+  });
+
+  it("throws conflict when a template asset still defaults to this file", async () => {
+    findFileInScope.mockResolvedValue(file());
+    countTemplateAssetReferencesToFile.mockResolvedValue(1);
+
+    await expect(deleteFile(actor(), "file-1")).rejects.toMatchObject({
+      kind: "conflict",
+    });
+    expect(deleteFileRow).not.toHaveBeenCalled();
   });
 });

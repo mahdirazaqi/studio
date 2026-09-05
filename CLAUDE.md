@@ -88,7 +88,7 @@ The legacy repository is at `/home/mahdirazaqi/Projects/qtical-backend-node`
    actual behavior. Do not trust summaries alone for security- or correctness-sensitive
    work.
 4. Implement following the architecture rules below.
-5. If the docs do not answer a question, see rule §10 (ambiguity).
+5. If the docs do not answer a question, see rule §11 (ambiguity).
 6. Record any architectural decision you make in
    [`docs/architecture/decisions.md`](docs/architecture/decisions.md).
 
@@ -104,7 +104,7 @@ When sources conflict, resolve in this order (highest wins):
 
 The legacy code **never** overrides a deliberate Studio architectural decision.
 But do **not** silently discard legacy business behavior — if it looks important and
-Studio requirements are silent, record it as an **OPEN DECISION** (rule §10).
+Studio requirements are silent, record it as an **OPEN DECISION** (rule §11).
 
 ## 5. Architectural rules (non-negotiable)
 
@@ -247,15 +247,58 @@ Full detail: [`docs/architecture/files.md`](docs/architecture/files.md),
   sniffed from the actual bytes (`@/server/media`); the allow-list and per-kind size
   limits live in `features/files/domain/file-types.ts` (ADR-0026) — centralized, not
   re-implemented per form/action.
-- **A deleted File must never break a historical record.** A future Job/Template feature
-  that resolves a File must copy the metadata it needs into its own immutable snapshot at
-  creation time (ADR-0010) rather than depending on the File row surviving — see
-  `docs/architecture/files.md` "Historical integrity contract for future Job/Template
-  features" (ADR-0025) before wiring a new feature to Files.
+- **A deleted File must never break a historical record.** A future Job that resolves a
+  File must copy the metadata it needs into its own immutable snapshot at creation time
+  (ADR-0010) rather than depending on the File row surviving — see
+  `docs/architecture/files.md` "Historical integrity contract for Job/Template features"
+  (ADR-0025) before wiring a new feature to Files. **Templates are different**: a
+  Template's File reference (`TemplateAsset.defaultFileId`) is a live field on a mutable
+  resource, not a historical record — see §10 below.
 - **`File.category = JOB_ARTIFACT` and the `assertNoActiveJobDependencies` hook exist for
   the Jobs feature to use — implement the real check there, don't add a parallel one.**
+  `assertNoActiveTemplateDependencies` (the same file) is Templates' already-real
+  counterpart — see §10.
 
-## 10. Handling ambiguity
+## 10. Templates rules (summary)
+
+Full detail: [`docs/domain/templates.md`](docs/domain/templates.md),
+[`docs/architecture/decisions.md`](docs/architecture/decisions.md) ADR-0006/ADR-0027.
+**Implemented, Phase 5.**
+
+- **`status` (`ACTIVE`/`DISABLED`) and `deletedAt`/`deletedByUserId` are two independent
+  fields — never combine them.** Disabled = hidden from new-Job creation, still fully
+  editable. Deleted (soft, ADR-0006) = additionally un-editable and out of management
+  lists, row kept forever. A soft-deleted Template can never be enabled, disabled, or
+  edited again; enabling/disabling/soft-deleting an already-enabled/disabled/deleted
+  Template is a no-op, not an error.
+- **`template:manage` (create/edit/enable/disable/soft-delete) is MANAGER+ only; USER gets
+  `template:view` only** (view/list their own department's Templates) — confirmed for
+  Phase 5 (resolves OD-04). Do not expand USER's Template capabilities without the same
+  level of explicit confirmation this required.
+- **`Template.name` is unique per Department among non-deleted rows** (ADR-0027, resolves
+  OD-09), enforced by a **partial** unique DB index added by hand into the migration SQL —
+  `schema.prisma` cannot declare a filtered unique constraint natively. Never add a
+  pre-check query in place of relying on this DB constraint + catching its violation; do
+  add the catch (translate to a clean `conflict` error, never a raw Prisma error) if a new
+  write path is added.
+- **A Template asset's optional `defaultFileId` must belong to the Template's own
+  Department, verified server-side on every write** — never trust a client-supplied File
+  id, and never validate it against the _actor's_ department when they differ (ADMIN
+  authoring for another department). See `features/templates/use-cases/
+verify-file-references.ts`.
+- **A File referenced by any Template asset's `defaultFileId` (deleted Template or not)
+  cannot be deleted** — `assertNoActiveTemplateDependencies`
+  (`features/files/use-cases/authorize-file-management.ts`) is called from `deleteFile`
+  and throws a clean `conflict` error. Do not add a second, parallel dependency check;
+  extend this one if the rule ever needs to change.
+- **Editing a Template replaces its entire asset list wholesale** (delete all, recreate),
+  not a per-asset diff — this is deliberate and documented, not a shortcut to fix later.
+- **No Job feature exists yet** — Template state (disabled/deleted) is designed to be
+  checked by a future Job-creation use case, but nothing enforces it end-to-end today
+  (there is no Job creation path to enforce it in). Do not build Job creation as part of a
+  Templates change; that is its own phase.
+
+## 11. Handling ambiguity
 
 - **Never invent business requirements when the documentation does not define them.**
 - Mark the gap as **`OPEN DECISION`** inline in the doc you are editing, add it to
@@ -265,7 +308,7 @@ Full detail: [`docs/architecture/files.md`](docs/architecture/files.md),
   whoever decides has what they need.
 - Do not "temporarily" pick an answer and build on it silently.
 
-## 11. Worker REST compatibility
+## 12. Worker REST compatibility
 
 Studio must keep the existing Render Worker working with minimal changes. The legacy
 endpoints (`POST /files`, `GET /jobs/fetch`, `GET /jobs/:id`,
@@ -274,7 +317,7 @@ baseline. The **one deliberate break**: the Worker API **must be authenticated**
 not in legacy). See [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md)
 and [`docs/legacy/compatibility-matrix.md`](docs/legacy/compatibility-matrix.md).
 
-## 12. Security rules (summary)
+## 13. Security rules (summary)
 
 Full document: [`docs/security/security.md`](docs/security/security.md). Highlights:
 
@@ -288,14 +331,14 @@ Full document: [`docs/security/security.md`](docs/security/security.md). Highlig
 - Validate every input at the boundary (Zod or equivalent) — Server Actions included.
 - Secrets only via environment / secret manager; never in the repo.
 
-## 13. Frontend conventions (summary)
+## 14. Frontend conventions (summary)
 
 Panel-only app, **no landing page**. Next.js App Router + React + TypeScript + Tailwind +
 shadcn/ui. **LTR**, **English** UI and messages. Responsive with an excellent mobile
 experience. **Light / Dark / System** themes. Full detail:
 [`docs/frontend/conventions.md`](docs/frontend/conventions.md).
 
-## 14. Phase status
+## 15. Phase status
 
 - **Phase 0 (documentation & architecture foundation) — complete.**
 - **Phase 1 (Next.js foundation & application skeleton) — complete.** Dashboard shell,
@@ -316,16 +359,23 @@ experience. **Light / Dark / System** themes. Full detail:
   when safe, never soft-deleted — ADR-0025), a swappable `StorageAdapter` with a local-disk
   implementation (ADR-0024), real content-type sniffing and per-kind size limits
   (ADR-0026), a working upload/browse/search/preview/delete Gallery UI, and the
-  historical-integrity contract a future Job/Template feature must follow. The app runs
-  (`npm run dev`), builds (`npm run build`), and passes `npm run check` (lint + typecheck +
-  format + tests). **Still no user/department management UI, no Templates, no Jobs, no
+  historical-integrity contract a future Job/Template feature must follow.
+- **Phase 5 (Template management) — complete.** `Template`/`TemplateAsset` models
+  (soft-delete independent of enabled/disabled state — ADR-0006; name uniqueness per
+  Department among non-deleted rows via a hand-added partial index, zero-asset Templates
+  allowed, and an optional department-verified, deletion-protected asset-level default
+  File reference — all ADR-0027, resolving OD-09/OD-10/OD-11); `template:manage`
+  (MANAGER+) / `template:view` (USER+) authorization, confirmed against OD-04; a full
+  create/list/search/filter/edit/enable-disable/soft-delete UI; and the documented (not
+  yet enforceable — no Job feature exists) Template/Job contract for Phase 6. The app
+  runs (`npm run dev`), builds (`npm run build`), and passes `npm run check` (lint +
+  typecheck + format + tests). **Still no user/department management UI, no Jobs, no
   Worker/Telegram/YouTube.**
 
-Do **not** start the next phase (user/department management, then Templates/Jobs) unless
-explicitly asked. See
-[`docs/development/workflow.md`](docs/development/workflow.md) for phase boundaries and
-[`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
-remains undecided.
+Do **not** start the next phase (user/department management, then Jobs) unless explicitly
+asked. See [`docs/development/workflow.md`](docs/development/workflow.md) for phase
+boundaries and [`docs/development/open-decisions.md`](docs/development/open-decisions.md)
+for what remains undecided.
 
 ### Quick start
 

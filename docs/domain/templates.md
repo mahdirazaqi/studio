@@ -1,5 +1,10 @@
 # Domain: Templates
 
+**Implemented, Phase 5.** This page is the business rules and permission matrix;
+[../architecture/decisions.md](../architecture/decisions.md) ADR-0006/ADR-0027 records the
+decisions behind the shape below, and [`prisma/schema.prisma`](../../prisma/schema.prisma)
+is the final schema.
+
 ## Purpose
 
 A **Template** is a reusable render recipe. It defines _what_ to render and _what inputs_
@@ -34,105 +39,199 @@ From `qtical-backend-node/src/render/template` (see
 
 ---
 
-## Part B — Studio design
+## Part B — Studio design (implemented)
 
 ### Lifecycle
 
 ```
-DRAFT? ──> ACTIVE ──> DISABLED ──> ACTIVE ...
-                 └──> DELETED (soft)      (row kept forever)
+ACTIVE ──> DISABLED ──> ACTIVE ...
+     └──────────────> DELETED (soft, from either state; row kept forever)
 ```
 
-| State            | In creation pickers? | Editable?            | Resolvable by historical Jobs? |
-| ---------------- | -------------------- | -------------------- | ------------------------------ |
-| `ACTIVE`         | yes                  | yes                  | yes                            |
-| `DISABLED`       | **no**               | yes                  | yes                            |
-| `DELETED` (soft) | **no**               | no (or restore only) | **yes**                        |
+| State            | In creation pickers? | Editable? | Resolvable by historical Jobs? |
+| ---------------- | -------------------- | --------- | ------------------------------ |
+| `ACTIVE`         | yes                  | yes       | yes                            |
+| `DISABLED`       | **no**               | yes       | yes                            |
+| `DELETED` (soft) | **no**               | **no**    | **yes**                        |
+
+`status` (`ACTIVE`/`DISABLED`) and `deletedAt`/`deletedByUserId` are **two independent
+columns**, never combined into one field (Phase 5 brief §7). `templateLifecycleState()`
+(`features/templates/domain/template.ts`) computes the effective three-state value:
+`deletedAt` set always wins, regardless of `status`.
 
 - **Templates are soft-deleted only** (ADR-0006). The row is **never** physically
-  removed. `deletedAt` + `deletedByUserId`.
-- **Disabled ≠ deleted.** Disabled = temporarily hidden from new-job creation, still
-  fully intact and manageable. Deleted = also removed from management lists, retained
-  purely so historical Jobs remain readable.
-- **Disabling/deleting a Template must be enforced on every job-creation path** — web
-  Server Action **and** Telegram. (Legacy leak: API bypassed the `disabled` check.)
+  removed.
+- **Disabled ≠ deleted.** Disabled = temporarily hidden from new-Job creation, still
+  fully editable. Deleted = also removed from management lists and no longer editable,
+  retained purely so a future historical Job remains readable.
+- **State transitions are deliberately restricted, not a general state machine:**
+  - A soft-deleted Template can never be enabled, disabled, or edited again
+    (`business_rule` error on any of these) — it is no longer an active resource.
+  - Enabling/disabling an already-enabled/disabled Template is a **no-op**, not an error
+    (idempotent, per Phase 5 brief §25).
+  - Soft-deleting an already-deleted Template is likewise a no-op.
+  - There is no "restore a deleted Template" action in this phase — not a requirement,
+    and not built speculatively.
+- Disabling/deleting is enforced in the one place Job creation will ever check it (a
+  future Jobs feature's own use case) — Studio does **not** repeat legacy's leak where
+  the GraphQL path bypassed the Telegram picker's `disabled` filter. See
+  [../legacy/known-issues.md](../legacy/known-issues.md) and "Template / Job contract"
+  below.
 
-### Fields (conceptual — final schema in [../data/database.md](../data/database.md))
+### Fields (implemented; final schema in
 
-| Field                                                    | Notes                                                                                                                                                               |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                                     | Referenced by Jobs (and snapshots) forever.                                                                                                                         |
-| `departmentId`                                           | **New in Studio.** Required. Scopes ownership.                                                                                                                      |
-| `createdByUserId`                                        |                                                                                                                                                                     |
-| `name`                                                   | Display/lookup name. Uniqueness scope = OPEN DECISION (see below).                                                                                                  |
-| `status`                                                 | `ACTIVE` \| `DISABLED` \| `DELETED`.                                                                                                                                |
-| `composition`                                            | Passed to the Worker. Opaque to Studio.                                                                                                                             |
-| `source`                                                 | Legacy `src` — the Worker's project/source location. Opaque.                                                                                                        |
-| `outputPattern`                                          | Legacy `output` — output naming/dir. Copied into the Job at creation.                                                                                               |
-| `scriptRef`                                              | Legacy `script` — injected as the first job asset.                                                                                                                  |
-| `description`                                            | Used as the YouTube description on delivery.                                                                                                                        |
-| `tags`                                                   | YouTube tag templates with `{{layer}}` placeholders.                                                                                                                |
-| `youtubeTargetId`                                        | Legacy `_channel`. Nullable. If set, Jobs from this Template may be delivered to that YouTube target. See [../integrations/youtube.md](../integrations/youtube.md). |
-| `assets`                                                 | Ordered list of Template Assets (below).                                                                                                                            |
-| `createdAt`, `updatedAt`, `deletedAt`, `deletedByUserId` |                                                                                                                                                                     |
+[`prisma/schema.prisma`](../../prisma/schema.prisma))
+
+| Field                                                 | Notes                                                                                                                                                                    |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                                                  | Referenced by a future Job's snapshot forever — never reused, never removed.                                                                                             |
+| `departmentId`                                        | Required. Scopes ownership. Immutable after creation (no reassignment path — matches OD-08's "not supported" default).                                                   |
+| `createdByUserId`                                     | Always set (Users are never deleted — ADR-0007 — so this FK is `onDelete: Restrict`, not nullable).                                                                      |
+| `name`                                                | Unique per Department among non-deleted rows — **ADR-0027, resolves OD-09.**                                                                                             |
+| `status`                                              | `ACTIVE` \| `DISABLED`. Independent of `deletedAt` — see "Lifecycle" above.                                                                                              |
+| `composition`, `source`, `scriptRef`, `outputPattern` | Legacy `composition`/`src`/`script`/`output` — opaque strings passed through to a future Job/the Render Worker. Studio never interprets them.                            |
+| `description`                                         | Optional. Used as the YouTube description on delivery (not implemented yet).                                                                                             |
+| `tags`                                                | String array. YouTube tag templates with `{{layer}}` placeholders — **Templates only store this**; substitution is the future delivery module's job (Phase 5 brief §16). |
+| `assets`                                              | Ordered `TemplateAsset[]` — see below. **Zero assets is valid** — ADR-0027, resolves OD-10 (a fully static render has no Job-supplied inputs).                           |
+| `createdAt`, `updatedAt`                              |                                                                                                                                                                          |
+| `deletedAt`, `deletedByUserId`                        | Soft-delete marker (ADR-0006). Both `null` until deleted; set together, never individually.                                                                              |
+
+**Not present, deliberately:** `youtubeTargetId` (legacy `_channel`). There is no
+`YouTubeTarget` Prisma model yet (OD-36 is still open, and YouTube delivery is out of
+scope for this phase) — adding a column that references a table that doesn't exist would
+be exactly the speculative schema CLAUDE.md asks to avoid. It is added, as a proper
+nullable FK, when `YouTubeTarget` lands.
 
 ### Template Asset (slot definition)
 
-| Field         | Notes                                                                                                                                                                      |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`        | Slot identifier; the key a Job must fill. Unique within the Template.                                                                                                      |
-| `kind`        | Enum: `DATA` (literal text) \| `IMAGE` \| `AUDIO` \| `VIDEO`. (Legacy free-text `type` becomes a validated enum. `script` is not an author-visible kind — it is injected.) |
-| `composition` | Passed through to the Job asset.                                                                                                                                           |
-| `layer`       | Passed through; also the `{{layer}}` token for tag substitution.                                                                                                           |
-| `imageRatio`  | For `IMAGE` kind: `PORTRAIT_9_16` \| `LANDSCAPE_16_9` \| `SQUARE` \| `ANY`.                                                                                                |
-| `order`       | Explicit ordering.                                                                                                                                                         |
+| Field           | Notes                                                                                                                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | Internal identity. **Not** what a future Job refers to — see "Stable asset identifiers".                                                                                                                    |
+| `key`           | Stable slot identifier a future Job fills in (legacy `name`) — also the only author-facing label for the slot. Unique within the Template (`@@unique([templateId, key])`).                                  |
+| `kind`          | `DATA` (literal text) \| `IMAGE` \| `AUDIO` \| `VIDEO`. Legacy's free-text `type` becomes a validated enum; legacy's server-injected `script` kind is not author-visible.                                   |
+| `composition`   | Passed through to the future Job asset. Opaque to Studio.                                                                                                                                                   |
+| `layer`         | Passed through; also the `{{layer}}` substitution token for tags.                                                                                                                                           |
+| `imageRatio`    | `PORTRAIT_9_16` \| `LANDSCAPE_16_9` \| `SQUARE` \| `ANY` — **required for `kind: IMAGE`, forbidden for every other kind.** Enforced in `checkAssetKindConsistency` (domain) and mirrored in the Zod schema. |
+| `defaultFileId` | Optional Gallery File reference — **ADR-0027, resolves OD-11.** Allowed only for `IMAGE`/`AUDIO`/`VIDEO`; forbidden for `DATA`. See "File Gallery Integration" below.                                       |
+| `order`         | Explicit ordering. Rewritten in full on every Template update (see "Updating Template assets").                                                                                                             |
 
-### Creation & editing
+**Not present, deliberately:** a `required`/`optional` flag. Legacy has no such concept —
+every declared asset slot must be supplied by a Job — and Job creation isn't part of this
+phase regardless, so adding the field now would be speculative.
 
-- **Who:** MANAGER and ADMIN for sure; whether a plain USER can author is an
-  **OPEN DECISION** (see [authorization.md](authorization.md)).
-- **Editing is a patch**, not a full replace (legacy required resending every field).
-- **Editing a Template never changes existing Jobs** — Jobs hold an immutable snapshot
-  (ADR-0010). This is the key behavioral improvement enabling safe template evolution.
-- **Validation on save:**
-  - `name` non-empty; uniqueness per the decided scope.
-  - At least one asset slot (OPEN DECISION — is a zero-asset template valid?).
-  - Asset `name`s unique within the template.
-  - `kind` is a valid enum value.
-  - `imageRatio` only meaningful for `IMAGE`.
-  - If `youtubeTargetId` set, the target must exist and belong to the same Department
-    (OPEN DECISION — are YouTube targets department-scoped?).
-  - Duplicate-name attempts return a **clean validation error**, never a raw DB error
-    (legacy bug).
+### Stable asset identifiers
 
-### Aspect ratio checking
+A slot's `key` — not its database `id` — is the stable handle a future Job (and any
+render-time substitution) will use. `key` is validated to letters/digits/hyphen/underscore
+only, and duplicate keys within one Template are rejected both client-side
+(`findDuplicateAssetKey`) and by the database (`@@unique([templateId, key])`). There is no
+support for intentionally duplicate keys — the domain doesn't need it, and it would make a
+future Job's "fill in every slot" contract ambiguous.
 
-- Image aspect-ratio validation (Telegram and web upload) must use a **tolerance**
-  (e.g. within ~1% of the target ratio), never exact floating-point equality (legacy
-  High-severity bug). Exact tolerance value = OPEN DECISION.
-- Ratio validation applies on **every** path that accepts an image for a slot, not just
-  Telegram (legacy enforced it only in the bot).
+### File Gallery Integration
+
+A Template asset of kind `IMAGE`/`AUDIO`/`VIDEO` may optionally set `defaultFileId` to a
+Gallery File. This is validated on **every** create/update:
+
+- The referenced File must exist, be a `GALLERY_ASSET` (never a `JOB_ARTIFACT`, which
+  doesn't exist yet regardless), and belong to the **Template's own Department** — never
+  the actor's department, since ADMIN may author a Template for a department other than
+  their own. `features/templates/use-cases/verify-file-references.ts` performs this check
+  by looking the id(s) up scoped to that department; a cross-department or nonexistent id
+  simply doesn't come back, and the resulting error names no specific id or department
+  (the same existence-leak caution [../architecture/authorization.md](../architecture/authorization.md)
+  applies to a specific resource lookup).
+- A client-supplied File id is **never trusted as-is** — this lookup is the only thing
+  that decides whether a reference is accepted, exactly mirroring how a client-supplied
+  `departmentId` is never trusted (CLAUDE.md §5/§8).
+
+### Template → File dependency (deletion safety)
+
+If any Template asset (of any Template, deleted or not) currently defaults to a File,
+that File cannot be deleted: `assertNoActiveTemplateDependencies`
+(`features/files/use-cases/authorize-file-management.ts`) — the direct Phase 5 sibling of
+ADR-0025's (still-unimplemented) `assertNoActiveJobDependencies` — is called from the File
+deletion use case and throws a clean `conflict` error naming no internals. See ADR-0027
+for the full reasoning, including why this check is **not** scoped to non-deleted
+Templates only.
+
+A Template can therefore never silently end up pointing at a missing File (Phase 5 brief
+§13) — the File simply can't be removed while referenced, full stop.
 
 ### Department ownership
 
-- A Template belongs to one Department. USER/MANAGER see and use only their department's
-  Templates; ADMIN sees all.
-- A Job can only be created from a Template in the **same Department** as the Job.
+A Template belongs to one Department, fixed at creation and never reassigned (matches
+OD-08's "not supported" default for every resource). USER/MANAGER see and use only their
+department's Templates; ADMIN sees and manages all, and may choose an explicit target
+department when creating one (validated against `departmentExists`, mirroring
+`features/files/use-cases/upload-file.ts`'s `resolveTargetDepartment`). A future Job can
+only be created from a Template in the Job's own Department.
 
-### Open decisions
+### Creation & editing
 
-> **`OPEN DECISION` — `name` uniqueness scope.** Options: (a) globally unique among
-> non-deleted templates; (b) unique per Department; (c) unique per Department among
-> non-deleted. _Consequence of global:_ matches legacy, but two departments can't both
-> have a "Standard" template. _Consequence of per-department:_ natural isolation, but
-> cross-department admin views show name collisions. Recommended: **unique per Department
-> among non-deleted rows.**
+- **Who:** MANAGER and ADMIN. **Confirmed, Phase 5** (see
+  [authorization.md](authorization.md) and
+  [../development/open-decisions.md](../development/open-decisions.md) OD-04): a USER may
+  view/list Templates in their own Department but not author, edit, enable/disable, or
+  soft-delete them.
+- **Editing replaces the Template's full asset list wholesale**, not a per-asset diff —
+  simple and safe, because a Template's live configuration never needs row-level
+  continuity for a historical Job (a future Job holds its own immutable snapshot,
+  ADR-0010). Scalar fields (name, composition, tags, ...) are all resent on every edit
+  too — the create and edit forms/schemas are intentionally the same shape.
+- **Editing a Template never changes an existing Job** — this is the key behavioral
+  improvement enabling safe template evolution; see "Template / Job contract" below.
+- **Validation on save** (`features/templates/schemas/template-input.schema.ts`,
+  `features/templates/domain/template-asset-rules.ts`):
+  - `name` non-empty; unique per Department among non-deleted rows (ADR-0027) — a
+    database-level violation is translated to a clean `conflict` error, never a raw
+    Prisma/SQL error.
+  - Asset `key`s unique within the Template; `kind` a valid enum value.
+  - `imageRatio` required for `IMAGE`, forbidden otherwise; `defaultFileId` forbidden for
+    `DATA`, otherwise verified against the Template's Department.
+  - A zero-asset Template is valid (ADR-0027, resolves OD-10).
 
-> **`OPEN DECISION` — zero-asset templates.** Is a Template with no asset slots valid
-> (e.g. a fully static render)? _Consequence of allowing:_ supports static intros/outros.
-> _Consequence of forbidding:_ simpler Job creation (always has inputs).
+### Aspect ratio checking
 
-> **`OPEN DECISION` — template versioning.** Studio currently relies on per-Job snapshots
-> so Templates can be edited freely. An explicit version history for Templates (beyond
-> the audit log) is not planned. _Consequence of adding it later:_ better authoring UX
-> (diff, rollback); _of not:_ audit log + snapshots already cover correctness.
+- `imageRatio` on a Template asset is a **named target** (`PORTRAIT_9_16` /
+  `LANDSCAPE_16_9` / `SQUARE` / `ANY`), not a numeric comparison — Studio records the
+  author's intent here. Actually measuring an uploaded image's ratio against that intent
+  (with a tolerance, never legacy's exact float equality) is a **File upload / Job
+  creation-time** concern, not something the Template domain itself computes; no such
+  check exists yet because no feature accepts an image against a specific Template slot
+  yet (that's Jobs, a later phase). The exact tolerance value stays **OD-14, still open**.
+
+### Template / Job contract
+
+Not implemented this phase — but explicitly designed for:
+
+> **Template is mutable. A future Job's history is immutable.**
+
+A future Job-creation use case will: (1) identify a Template by id, (2) verify it is
+`ACTIVE` and not soft-deleted (both checked fresh, at Job-creation time — never trusting
+that a UI picker already filtered it), (3) resolve its ordered asset slots, (4) require a
+value for every slot (there is no optional-slot concept), and (5) copy everything it needs
+— the Template's render-relevant fields and the resolved asset values — into the Job's own
+immutable creation-time snapshot (ADR-0010). After that point, editing or even soft-deleting
+the Template has **zero** effect on that Job's meaning; the `templateId` FK stays for
+convenience/joins and active-dependency checks, never as the source of truth for a
+historical Job's content. This Template feature does not implement any of steps 1–5 above
+— it only guarantees the Template-side data (stable `id`, stable asset `key`s, a Department
+match, a real File reference where one exists) will be there for Jobs to read when that
+phase lands.
+
+### Template versioning
+
+Not implemented, and not planned as a general mechanism (matches the Phase 0 design
+intent) — Studio relies on per-Job snapshots (ADR-0010) for historical correctness instead
+of a Template version history. If authoring UX (diff, rollback) is ever wanted, that is a
+new, separate decision — not a byproduct of this feature.
+
+### Open decisions (still unresolved)
+
+> **`OPEN DECISION` — OD-14, aspect-ratio tolerance value.** Exact epsilon for "close
+> enough" when a future feature actually compares an uploaded image against a Template
+> slot's `imageRatio`. Unaffected by this phase, since no such comparison exists yet.
+
+> **`OPEN DECISION` — OD-36, YouTube target scoping.** Blocks adding `youtubeTargetId` to
+> Template — see "Fields" above.

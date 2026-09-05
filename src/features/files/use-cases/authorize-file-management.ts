@@ -1,6 +1,7 @@
-import { forbiddenError } from "@/server/errors/app-error";
+import { conflictError, forbiddenError } from "@/server/errors/app-error";
 import { authorize, hasAtLeastRole, type Actor } from "@/server/authz";
 import type { SafeFile } from "@/features/files/domain/file";
+import { countTemplateAssetReferencesToFile } from "@/features/templates/repository/template-repository";
 
 /**
  * Authorization policy for file mutations. `authorize(actor, "file:manage",
@@ -61,4 +62,26 @@ export async function assertNoActiveJobDependencies(
   // TODO(jobs-phase): query for active-state Jobs referencing _file.id and
   // throw conflictError() if any exist. See this function's doc comment.
   return Promise.resolve();
+}
+
+/**
+ * The Phase 5 counterpart to `assertNoActiveJobDependencies`, and — unlike
+ * that one — a real check: a File currently used as a Template asset's
+ * default (`TemplateAsset.defaultFileId`, ADR-0027) must not be deleted out
+ * from under that Template (docs/domain/templates.md "Template → File
+ * dependency"; Phase 5 brief §13). `defaultFileId`'s `onDelete: Restrict` FK
+ * would refuse the delete at the database level regardless, but checking
+ * first means the caller gets a clean, safe `conflict` error instead of a raw
+ * Postgres foreign-key violation — the same reasoning ADR-0025 already
+ * applied to the (still not-yet-real) Job check above.
+ */
+export async function assertNoActiveTemplateDependencies(
+  file: SafeFile,
+): Promise<void> {
+  const referenceCount = await countTemplateAssetReferencesToFile(file.id);
+  if (referenceCount > 0) {
+    throw conflictError(
+      "This file is used as the default for one or more template assets and cannot be deleted. Remove it from those templates first.",
+    );
+  }
 }

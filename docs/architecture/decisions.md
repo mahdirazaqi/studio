@@ -682,3 +682,79 @@ exact format). New size limits, absent from legacy: **25 MB** images, **100 MB**
 - Resolves **OD-21**.
 
 **Status:** DECIDED.
+
+---
+
+## ADR-0027 — Template name uniqueness, asset-level File defaults, and the Template→File dependency contract
+
+**Context.** Phase 5 needed three related, previously-open questions resolved to implement
+Templates at all: OD-09 (name uniqueness scope), OD-10 (are zero-asset Templates valid),
+and OD-11 (does a Template asset store a default File reference, and if so how does that
+interact with Phase 4's File deletion-safety design, ADR-0025).
+
+**Decision.**
+
+- **OD-09 — resolved as "unique per Department, among non-deleted rows"**, matching
+  [`domain/templates.md`](../domain/templates.md)'s own recommendation. Enforced by a
+  **partial unique index** (`(departmentId, name) WHERE "deletedAt" IS NULL`) added by
+  hand into the generated migration SQL — Prisma's schema language has no first-class
+  syntax for a filtered/partial unique constraint, so it cannot be declared as a plain
+  `@@unique` in `schema.prisma`. A violation of this index still surfaces through Prisma
+  as an ordinary `P2002` error (Prisma detects a unique violation by parsing Postgres's
+  SQLSTATE 23505, not by having the index declared in its own schema model), so the
+  repository's `isUniqueConstraintError` catch needs no special case for "the constraint
+  isn't in the schema." No pre-check query is used before insert/update — the operation
+  goes straight to the write and catches the constraint violation, which is what makes
+  this actually race-safe (Phase 5 brief §27) rather than a `find-then-insert` race.
+- **OD-10 — resolved as "allowed."** A Template with zero asset slots is valid (e.g. a
+  fully static render with no Job-supplied inputs). No minimum-asset-count validation
+  exists; forbidding it would have been an invented restriction with no requirement
+  behind it.
+- **OD-11 — resolved as "yes, an optional per-slot default File reference."**
+  `TemplateAsset.defaultFileId` is a nullable FK to `File`, meaningful only for
+  `kind: IMAGE | AUDIO | VIDEO` (`null` for `DATA`, enforced at the application layer,
+  `features/templates/domain/template-asset-rules.ts`). The Template's brief was explicit
+  and repeated about needing real File Gallery integration with cross-department
+  rejection tests, which only makes sense if an asset can actually hold a File reference
+  — so this OD is resolved now rather than left open with no way to build what was asked
+  for.
+  - **Department consistency** between a Template and any File its assets default to is
+    enforced at the application layer on every create/update
+    (`features/templates/use-cases/verify-file-references.ts`, calling
+    `findGalleryFileIdsInDepartment` — department-scoped by the Template's own
+    department, not the actor's, since ADMIN may author a Template for a department other
+    than their own). Prisma cannot express a cross-row department-equality constraint, so
+    this is not attempted at the DB level.
+  - **The Template→File dependency** is the direct continuation of ADR-0025's
+    `assertNoActiveJobDependencies` pattern, not a second, conflicting mechanism: a new
+    sibling function, `assertNoActiveTemplateDependencies` (same file,
+    `features/files/use-cases/authorize-file-management.ts`), is called from `deleteFile`
+    right alongside the (still-unimplemented) Job check, and — unlike that one — is a
+    **real** check today, because Templates actually exist: it counts every
+    `TemplateAsset` row (of any Template, deleted or not) that currently defaults to the
+    File being deleted, and throws a clean `conflict` error if any exist.
+    `defaultFileId`'s `onDelete: Restrict` FK is defense-in-depth for the same case, so
+    the count check deliberately does **not** scope itself to non-deleted Templates only
+    — the FK is enforced regardless of the referencing Template's soft-delete state, and
+    the app-level check must refuse in exactly the same cases the FK would, or a caller
+    could still hit a raw Postgres foreign-key error after being told "safe to delete."
+  - **Historical integrity is unaffected**: a Template's default-File reference is a live,
+    _current_-configuration field on a mutable resource, not a historical Job record —
+    ADR-0010's snapshot contract (a File's identifying metadata is copied into a future
+    Job's immutable snapshot at Job-creation time) is what protects a historical Job's
+    readability after a File is deleted, and remains completely unchanged by this ADR.
+
+**Consequences.**
+
+- Templates/Files gained one, symmetric pair of narrow, read-only cross-feature
+  repository calls in each direction (Files → Templates for the dependency count; Templates
+  → Files for the reference-verification lookup), matching the precedent Files → Departments
+  already set in Phase 4 rather than inventing a new "shared read" abstraction layer.
+- A Gallery File that is ever set as a Template asset's default becomes permanently
+  undeletable until every Template asset referencing it is edited to remove that
+  reference (including a _soft-deleted_ Template's asset) — a deliberate, documented
+  trade-off favoring "never a dangling reference" over "always deletable."
+- No Job/JobAsset table was added to make any of this real ahead of its own phase —
+  `assertNoActiveJobDependencies` stays exactly the documented no-op ADR-0025 left it.
+
+**Status:** DECIDED. Resolves OD-09, OD-10, OD-11.

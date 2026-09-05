@@ -53,12 +53,14 @@ export const navigation: NavGroup[] = [
     items: [
       { label: "Jobs", href: "/jobs", icon: ListVideo, placeholder: true },
       {
+        // Implemented, Phase 5 — the `placeholder` badge was still on Templates
+        // from before this feature existed; also fixing the same leftover flag
+        // on Files below (implemented since Phase 4, never flipped off).
         label: "Templates",
         href: "/templates",
         icon: FileVideo,
-        placeholder: true,
       },
-      { label: "Files", href: "/files", icon: FolderOpen, placeholder: true },
+      { label: "Files", href: "/files", icon: FolderOpen },
     ],
   },
   {

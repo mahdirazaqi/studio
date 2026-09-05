@@ -5,6 +5,12 @@ abstraction), ADR-0025 (deletion contract / historical integrity), ADR-0026 (all
 size limits). Business rules and the permission matrix live in
 [../domain/files.md](../domain/files.md) — this page is the mechanism.
 
+**Phase 5 update:** the Template→File dependency this page's "Historical integrity
+contract" section anticipated is now real, not just documented — see
+`assertNoActiveTemplateDependencies` below and
+[../domain/templates.md](../domain/templates.md) "Template → File dependency" /
+ADR-0027.
+
 ## Layout
 
 ```
@@ -20,8 +26,11 @@ src/features/files/
 │   ├── get-file.ts                 metadata read (detail views)
 │   ├── get-file-for-serving.ts     storageKey read — only for the content route
 │   ├── delete-file.ts
-│   └── authorize-file-management.ts   assertCanDeleteFile, canDeleteFile, the
-│                                       assertNoActiveJobDependencies hook (ADR-0025)
+│   └── authorize-file-management.ts   assertCanDeleteFile, canDeleteFile,
+│                                       assertNoActiveJobDependencies (still a
+│                                       documented no-op, ADR-0025), and
+│                                       assertNoActiveTemplateDependencies (real,
+│                                       Phase 5 — ADR-0027)
 ├── actions/               upload-file.action.ts, delete-file.action.ts
 └── components/            UploadFileForm, FilesToolbar, FileCard, DeleteFileButton
 
@@ -84,7 +93,14 @@ reject early, and nothing is written anywhere until validation fully passes.
    delete only their own upload; MANAGER/ADMIN may delete any file in scope.
 3. `assertNoActiveJobDependencies` — a documented no-op today (no Job model exists); the
    exact extension point a future Jobs feature must fill in.
-4. Delete the **database row first**, then the **storage bytes**. If the storage delete
+4. `assertNoActiveTemplateDependencies` (Phase 5, ADR-0027) — a **real** check: counts
+   every `TemplateAsset` row (of any Template, deleted or not) whose `defaultFileId`
+   points at this File, and throws `conflict` if any exist. Not scoped to non-deleted
+   Templates only — `TemplateAsset.defaultFileId`'s `onDelete: Restrict` FK is enforced
+   regardless of the referencing Template's soft-delete state, so this check must refuse
+   in exactly the same cases the FK would, or a caller could still hit a raw Postgres
+   foreign-key error after being told "safe to delete."
+5. Delete the **database row first**, then the **storage bytes**. If the storage delete
    fails, the row is already gone — the result is a harmless orphaned object (logged),
    never a row pointing at missing bytes.
 
@@ -106,25 +122,33 @@ never its storage key. That route:
 - **Supports a single `Range: bytes=start-end` request** (`206 Partial Content` /
   `416 Range Not Satisfiable`), enough for audio/video seeking. No multi-range support.
 
-## Historical integrity contract for future Job/Template features
+## Historical integrity contract for Job/Template features
 
 This is the one Phase 4 decision every later feature that references a File must honor —
-see ADR-0025 and [../data/historical-integrity.md](../data/historical-integrity.md):
+see ADR-0025 and [../data/historical-integrity.md](../data/historical-integrity.md).
+**Templates (Phase 5) are the first real consumer**; Jobs still only has the documented
+extension point.
 
-- **Never hold a live File row as the only source of truth for a historical record.** At
-  the moment a Job (or a Template default) resolves a File, copy the fields it needs
-  (`originalName`, `mimeType`, `sizeBytes`, `width`/`height`, and the `fileId` for a "media
-  still stored?" check) into that record's own immutable snapshot (ADR-0010). Never make a
-  historical view re-fetch the live File row and call it done.
+- **Never hold a live File row as the only source of truth for a historical record.**
+  This governs a future **Job**, which will copy the fields it needs (`originalName`,
+  `mimeType`, `sizeBytes`, `width`/`height`, and the `fileId` for a "media still stored?"
+  check) into its own immutable snapshot (ADR-0010) at creation time. It does **not**
+  govern a Template's `defaultFileId` — that is a live, current-configuration field on a
+  mutable resource, not a historical record, so it is correctly a plain FK with no
+  snapshot of its own (ADR-0027).
 - **Before deleting a File, the deleting feature is responsible for its own active-
-  dependency check** — for Files today, that's `assertNoActiveJobDependencies`. When
-  Jobs land, implement the query _inside that function_, not by adding a parallel check
-  elsewhere. `File.category = JOB_ARTIFACT` already exists in the schema for that phase to
-  use immediately, without a migration.
+  dependency check.** For Files today that's two checks, both called from `deleteFile`:
+  `assertNoActiveJobDependencies` (still a documented no-op — no Job model exists yet;
+  when Jobs land, implement the query _inside that function_, not a parallel check
+  elsewhere — `File.category = JOB_ARTIFACT` already exists in the schema for that phase
+  to use immediately) and `assertNoActiveTemplateDependencies` (real, Phase 5 — see
+  "Deletion" above).
 - **A deleted File must never surface as a broken link or a crash** in a historical
   view — the UI reads the snapshot and shows "media no longer stored" (with the
   snapshot's name/type/size still intact) when the live File is gone, exactly like
-  [../data/lifecycle-rules.md](../data/lifecycle-rules.md) describes.
+  [../data/lifecycle-rules.md](../data/lifecycle-rules.md) describes. This is unaffected
+  by Templates: a Template's File dependency is handled by _preventing_ the delete in the
+  first place (above), not by tolerating a dangling reference afterward.
 
 ## What Phase 4 deliberately does not do
 

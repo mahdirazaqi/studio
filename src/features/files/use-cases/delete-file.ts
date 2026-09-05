@@ -5,6 +5,7 @@ import { storage } from "@/server/adapters/storage";
 import {
   assertCanDeleteFile,
   assertNoActiveJobDependencies,
+  assertNoActiveTemplateDependencies,
 } from "@/features/files/use-cases/authorize-file-management";
 import {
   deleteFileRow,
@@ -27,6 +28,7 @@ export async function deleteFile(actor: Actor, fileId: string): Promise<void> {
 
   assertCanDeleteFile(actor, file);
   await assertNoActiveJobDependencies(file);
+  await assertNoActiveTemplateDependencies(file);
 
   const storageKey = await findStorageKey(fileId);
   if (!storageKey) throw notFoundError();

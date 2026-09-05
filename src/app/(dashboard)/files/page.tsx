@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { ChevronLeft, ChevronRight, FolderOpen } from "lucide-react";
 
 import { PageHeader, PageShell } from "@/components/layout/page-shell";
+import {
+  firstSearchParamValue,
+  PageLink,
+} from "@/components/layout/pagination-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireUser } from "@/server/auth/current-user";
 import { toActor } from "@/server/authz";
@@ -27,10 +30,10 @@ export default async function FilesPage({
 
   const rawParams = await searchParams;
   const parsed = safeParseInput(listFilesSchema, {
-    q: firstValue(rawParams.q),
-    kind: firstValue(rawParams.kind),
-    page: firstValue(rawParams.page),
-    pageSize: firstValue(rawParams.pageSize),
+    q: firstSearchParamValue(rawParams.q),
+    kind: firstSearchParamValue(rawParams.kind),
+    page: firstSearchParamValue(rawParams.page),
+    pageSize: firstSearchParamValue(rawParams.pageSize),
   });
   // A malformed query string (e.g. a hand-edited URL) falls back to the
   // schema's defaults rather than erroring the whole page.
@@ -84,6 +87,7 @@ export default async function FilesPage({
         {totalPages > 1 ? (
           <div className="flex items-center justify-center gap-2">
             <PageLink
+              href="/files"
               page={page - 1}
               disabled={page <= 1}
               searchParams={rawParams}
@@ -94,6 +98,7 @@ export default async function FilesPage({
               Page {page} of {totalPages}
             </span>
             <PageLink
+              href="/files"
               page={page + 1}
               disabled={page >= totalPages}
               searchParams={rawParams}
@@ -104,44 +109,5 @@ export default async function FilesPage({
         ) : null}
       </div>
     </PageShell>
-  );
-}
-
-function firstValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function PageLink({
-  page,
-  disabled,
-  searchParams,
-  children,
-}: {
-  page: number;
-  disabled: boolean;
-  searchParams: Record<string, string | string[] | undefined>;
-  children: React.ReactNode;
-}) {
-  if (disabled) {
-    return (
-      <span className="text-muted-foreground/50 inline-flex items-center gap-1 px-3 py-2 text-sm">
-        {children}
-      </span>
-    );
-  }
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(searchParams)) {
-    if (key === "page") continue;
-    const v = firstValue(value);
-    if (v) params.set(key, v);
-  }
-  params.set("page", String(page));
-  return (
-    <Link
-      href={`/files?${params}`}
-      className="hover:bg-muted inline-flex items-center gap-1 rounded-md px-3 py-2 text-sm"
-    >
-      {children}
-    </Link>
   );
 }

@@ -181,3 +181,29 @@ export async function findFileByContentHash(
 export async function deleteFileRow(fileId: string): Promise<void> {
   await db.file.delete({ where: { id: fileId } });
 }
+
+/**
+ * Which of `fileIds` are real, department-scoped Gallery Assets. Used by the
+ * Templates feature (`features/templates/use-cases/verify-file-references.ts`)
+ * to validate every `defaultFileId` an asset submits belongs to the
+ * Template's own Department — never the actor's, since ADMIN may create a
+ * Template for a department other than their own (docs/domain/templates.md
+ * "File Gallery Integration"). Returns a `Set` rather than the rows
+ * themselves: the caller only needs "does this id resolve here", not the
+ * File's other fields.
+ */
+export async function findGalleryFileIdsInDepartment(
+  departmentId: string,
+  fileIds: readonly string[],
+): Promise<Set<string>> {
+  if (fileIds.length === 0) return new Set();
+  const rows = await db.file.findMany({
+    where: {
+      id: { in: [...fileIds] },
+      departmentId,
+      category: "GALLERY_ASSET",
+    },
+    select: { id: true },
+  });
+  return new Set(rows.map((row) => row.id));
+}

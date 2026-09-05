@@ -54,8 +54,8 @@ Legend: ✅ allowed · 🟨 allowed, own department only · ⬛ not allowed · �
 | Change a user's department        | ⬛                              | ⬛                                       | ✅ (OPEN DECISION — reassignment) |                                                                                                   |
 | **Templates**                     |                                 |                                          |                                   |                                                                                                   |
 | View / list templates             | 🟨                              | 🟨                                       | ✅                                | Soft-deleted templates hidden from pickers for all; visible in management views to MANAGER/ADMIN. |
-| Create template                   | 🟨 (OPEN DECISION)              | 🟨                                       | ✅                                | See below.                                                                                        |
-| Edit template                     | 🟨 (OPEN DECISION)              | 🟨                                       | ✅                                | Edits never alter existing Jobs (snapshots).                                                      |
+| Create template                   | ⬛ (confirmed, Phase 5 — OD-04) | 🟨                                       | ✅                                | See below.                                                                                        |
+| Edit template                     | ⬛ (confirmed, Phase 5 — OD-04) | 🟨                                       | ✅                                | Edits never alter existing Jobs (snapshots).                                                      |
 | Disable template                  | ⬛                              | 🟨                                       | ✅                                |                                                                                                   |
 | Soft-delete template              | ⬛                              | 🟨                                       | ✅                                | No hard delete exists.                                                                            |
 | **Files / Gallery**               |                                 |                                          |                                   |                                                                                                   |
@@ -71,14 +71,16 @@ Legend: ✅ allowed · 🟨 allowed, own department only · ⬛ not allowed · �
 | Delete job                        | ⬛                              | ⬛                                       | ⬛                                | **Nobody. Ever.** (ADR-0005)                                                                      |
 | **Worker API**                    | —                               | —                                        | —                                 | Only the Worker principal. No human role can call it.                                             |
 
-> **`OPEN DECISION` — USER vs MANAGER split on Templates.** Does a plain USER author and
-> edit Templates, or only consume them? _Consequence of "USER can author":_ faster for
-> small teams, but templates are powerful (they define render + delivery) and a bad
-> template affects everyone in the department. _Consequence of "MANAGER+ only":_ safer,
-> clearer ownership, matches "MANAGER manages templates" from the brief. The brief lists
-> template management under MANAGER and ADMIN explicitly and lists USER as working "with
-> Templates according to authorization rules" — leaning toward **USER consumes, MANAGER
-> authors**, but this must be confirmed.
+> **OD-04 — USER vs MANAGER split on Templates — confirmed, Phase 5.** Does a plain USER
+> author and edit Templates, or only consume them? The Phase 5 brief's own draft
+> authorization matrix listed USER as able to create/edit/enable-disable/soft-delete
+> Templates, which would have resolved this the other way — but that directly
+> contradicted this page's existing default and every other authorization doc, so it was
+> raised with the product owner rather than silently implemented either way. **Confirmed
+> answer: MANAGER+ only** — USER gets `template:view` (view/list their own department's
+> Templates) and nothing else. See
+> [../development/open-decisions.md](../development/open-decisions.md) OD-04 for the full
+> note.
 
 > **`OPEN DECISION` — "own resource" scope for USER.** For cancel/retry/delete-own-file,
 > is a USER limited to resources **they created**, or any resource in their department?
@@ -87,13 +89,16 @@ Legend: ✅ allowed · 🟨 allowed, own department only · ⬛ not allowed · �
 > to reason about. Recommended pending decision: **whole department for view; own-or-
 > department for cancel/retry (confirm); MANAGER+ for destructive file ops.**
 
-### Implemented in Phase 3 — conservative defaults where still OPEN
+### Implemented in Phase 3/5 — conservative defaults where still OPEN
 
 The mechanism (role floor per capability + department scope) is implemented for every row
 above via `@/server/authz` (see [../architecture/authorization.md](../architecture/authorization.md)).
-Users/Departments are the only rows with an actual policy function behind them today
-(`src/features/users/use-cases/authorize-user-management.ts`) — Templates/Jobs/Files have
-a registered capability role-floor only, no use case yet. Where a cell above is marked
+Users/Departments/Templates now have a real policy behind them
+(`src/features/users/use-cases/authorize-user-management.ts`;
+`src/features/templates/use-cases/*` call `authorize(actor, "template:manage"|"template:view", ...)`
+directly, needing no extra fine-grained policy function the way Users' escalation rules
+did) — Jobs/Files' `OPEN DECISION` rows are still just a registered capability role-floor,
+no use case yet for the parts that remain open. Where a cell above is marked
 `OPEN DECISION`, the code takes the most conservative reading until it's resolved, never
 a guessed answer:
 
@@ -114,10 +119,14 @@ a guessed answer:
   remains unaddressed and `OPEN DECISION`.
 - **Disable / re-enable user (MANAGER):** implemented exactly as written — `USER`s only,
   not "anyone who isn't an ADMIN" (a peer MANAGER is also out of reach).
-- Templates' `OPEN DECISION` rows (USER authoring) and Jobs/Files' `OPEN DECISION` rows
-  (own-vs-department scope) are **not** implemented at all yet — no code path exists for
-  them to default anything, conservatively or otherwise. Only their **role floor**
-  (decided, not open) is registered as a capability today.
+- **Templates' OD-04 is confirmed (Phase 5, see above) and fully implemented**: every
+  Template use case's first step is `authorize(actor, "template:manage"|"template:view",
+{ departmentId })` — a USER never even reaches the department-scope check for a
+  mutation, since `template:manage`'s `MANAGER` role floor rejects it first.
+- Jobs/Files' remaining `OPEN DECISION` rows (own-vs-department scope) are **not**
+  implemented at all yet — no code path exists for them to default anything,
+  conservatively or otherwise. Only their **role floor** (decided, not open) is
+  registered as a capability today.
 
 ## 4. Enforcement requirements
 

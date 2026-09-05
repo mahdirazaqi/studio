@@ -65,6 +65,16 @@ feature or use case exists yet to actually enforce it.
   templates".
   **Recommendation (leaning):** USER consumes, MANAGER authors — confirm.
 
+**Phase 5 note:** the Phase 5 brief's own draft authorization matrix listed USER as able
+to create/edit/enable-disable/soft-delete Templates, which would have resolved this OD the
+other way — but that directly contradicted this page's existing, carefully-reasoned
+default and every other authorization doc, so it was raised with the product owner rather
+than silently implemented either way. **Confirmed: MANAGER+ only** — Phase 5 implements
+`template:manage` exactly as the Phase 3 default already had it (USER gets `template:view`
+only: view/list own-department Templates, nothing else). This OD is not formally closed by
+an ADR (no product-level sign-off beyond this confirmation), but Phase 5's Template feature
+is built on this answer.
+
 ### OD-05 — Can a MANAGER create/promote another MANAGER?
 
 _Where:_ [../domain/users.md](../domain/users.md).
@@ -114,24 +124,26 @@ _Where:_ [../domain/departments.md](../domain/departments.md).
 - _ADMIN can reassign:_ useful for reorgs; complicates historical reporting; would need
   auditing and arguably snapshotting the department on the Job.
 
-### OD-09 — Template `name` uniqueness scope
+### OD-09 — Template `name` uniqueness scope — ✅ RESOLVED (ADR-0027)
 
 _Where:_ [../domain/templates.md](../domain/templates.md).
-Global / per-Department / per-Department among non-deleted.
-**Recommendation:** unique per Department among non-deleted rows.
+**Resolved, Phase 5:** unique per Department among non-deleted rows, enforced by a
+hand-added partial unique index (`WHERE "deletedAt" IS NULL`) — see ADR-0027.
 
-### OD-10 — Zero-asset templates allowed?
+### OD-10 — Zero-asset templates allowed? — ✅ RESOLVED (ADR-0027)
 
 _Where:_ [../domain/templates.md](../domain/templates.md).
+**Resolved, Phase 5: allowed.** No minimum-asset-count validation — a Template with no
+slots (e.g. a fully static render) is valid.
 
-- _Allow:_ supports fully static renders.
-- _Forbid:_ simpler Job creation.
-
-### OD-11 — Template-level asset defaults
+### OD-11 — Template-level asset defaults — ✅ RESOLVED (ADR-0027)
 
 _Where:_ [../domain/files.md](../domain/files.md), [../domain/templates.md](../domain/templates.md).
-Does a Template store default File references / default text per slot? Convenience vs
-extra complexity in creation + historical integrity.
+**Resolved, Phase 5: yes.** `TemplateAsset.defaultFileId` — optional, only for
+`IMAGE`/`AUDIO`/`VIDEO` slots, department-verified against the Template's own department
+on every write, and protected from File deletion by `assertNoActiveTemplateDependencies`.
+See ADR-0027 for the full contract, including how this composes with ADR-0025's File
+deletion-safety design.
 
 ### OD-12 — Album grouping entity
 

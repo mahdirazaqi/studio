@@ -53,7 +53,11 @@ Every File has a `category`:
 
 - **Files are hard-deleted (row + bytes). There is no soft delete.**
 - A File may be deleted only when it breaks **no active or required dependency**:
-  - No `QUEUED` / `CLAIMED` / `RENDERING` / `DELIVERING` Job references it as an input.
+  - No `QUEUED` / `CLAIMED` / `RENDERING` / `DELIVERING` Job references it as an input
+    (not yet enforced — no Job model exists; see `assertNoActiveJobDependencies`).
+  - **No Template asset currently defaults to it** — enforced, Phase 5
+    (`assertNoActiveTemplateDependencies`); see [templates.md](templates.md) and
+    ADR-0027.
   - It is not the sole record needed for an in-progress operation.
 - **Deleting a File must never make a historical Job unreadable.** Historical Jobs do not
   depend on the File row — they hold the needed identifying metadata in their snapshot
@@ -160,5 +164,11 @@ the Jobs feature lands, per ADR-0025's contract in
 - A live FK (`ownerJobId`, and Job-asset → File) is still kept for **active** dependency
   checks (so deletion can be blocked while a Job is in flight) and for the "media still
   stored?" indicator.
-- Templates may store **default** File references for slots (optional feature — OPEN
-  DECISION whether Studio supports template-level asset defaults).
+- **Implemented, Phase 5:** a Template asset slot (`kind: IMAGE | AUDIO | VIDEO`) may
+  store an optional **default** File reference (`TemplateAsset.defaultFileId`) —
+  resolves the "template-level asset defaults" question (OD-11) as **yes**. Unlike a
+  Job's snapshot, this is a live FK on a mutable resource, not a historical record: it is
+  verified against the Template's own Department on every write, and a File it points to
+  cannot be deleted while it does (`assertNoActiveTemplateDependencies` below). See
+  [../domain/templates.md](../domain/templates.md) "File Gallery Integration" and
+  [ADR-0027](../architecture/decisions.md#adr-0027--template-name-uniqueness-asset-level-file-defaults-and-the-templatefile-dependency-contract).

@@ -64,11 +64,19 @@ authorize(actor, "user:manage", { departmentId: targetDepartmentId });
 
 Registering a capability is a one-line addition transcribed directly from a decided row
 of [../domain/authorization.md](../domain/authorization.md)'s permission matrix — never a
-new invented rule. `job:manage`, `file:manage`, `template:manage`, `template:view` are
-already registered even though Jobs/Templates/Files don't exist yet, precisely so those
-phases don't have to design this registry from scratch; only the **role floor** is
-encoded, not the finer "own resource vs. department resource" granularity that OD-03/OD-04
-leave open — a Jobs/Files use case still adds its own narrower check once it exists.
+new invented rule. `job:manage`, `file:manage`, `template:manage`, `template:view` were
+registered ahead of Jobs/Templates/Files existing, precisely so those phases wouldn't have
+to design this registry from scratch. **Templates (Phase 5)** is the first of the three to
+actually land: every `features/templates/use-cases/*` function calls `authorize(actor,
+"template:manage" | "template:view", { departmentId })` as its first step, with no
+additional fine-grained policy function needed (OD-04, "can USER author Templates", is
+confirmed as MANAGER+ only — see [../domain/authorization.md](../domain/authorization.md)
+— so the registered role floor alone is the complete answer; there is no "own resource"
+nuance for Templates the way Files' delete rule needed one). `job:manage`/`file:manage`
+still encode only the role floor, not the finer "own resource vs. department resource"
+granularity that OD-03 leaves open — a Jobs use case still adds its own narrower check
+once it exists, the way `features/files/use-cases/authorize-file-management.ts` already
+does for Files.
 
 ## Department scope: three tools, three situations
 
@@ -167,6 +175,21 @@ navigation is checked exactly like a click would be, per §17 of the Phase 3 bri
 permission to access this page" view (English, no internal detail) — a rendering choice
 made _after_ the real check fails, never a substitute for it.
 
+`src/app/(dashboard)/templates/[templateId]/page.tsx` (Phase 5) is the first page that
+also needs a **not-found** outcome, not just forbidden: `getTemplate` throws a `not_found`
+`AppError` for both "doesn't exist" and "exists in another department" (the same fold
+`findFileInScope`/`findTemplateInScope` already do), and the page catches `AppError`
+directly to call Next's `notFound()` — no other Server Component in this codebase has
+needed that translation before. One known, accepted limitation: because the `(dashboard)`
+route group has a `loading.tsx` (Phase 1), every route in it streams, so the initial `200`
+response headers are already sent before an awaited `notFound()` deep in the page can
+change the status — the rendered content is fully correct (Next's real not-found UI, no
+data leaked either way), but the raw HTTP status stays `200` instead of `404`. This is a
+general Next.js App Router characteristic of streamed routes, not something a leaf page
+can opt out of while sharing that layout's `loading.tsx`; it does not weaken the
+authorization guarantee (no cross-department content is ever rendered), only the
+status-code observability of it.
+
 The dashboard sidebar (`navigationForRole(role)`) and the Overview page's "Planned areas"
 list both filter to the current role for the same reason a placeholder page shouldn't
 link somewhere it will immediately reject — **this filtering is presentation, not
@@ -246,3 +269,24 @@ different department:
 | ADMIN                                | Sidebar / Overview nav | Both rendered                                                                                                                           |
 | Disabled user (valid session cookie) | `/`                    | `307` → `/sign-in` (unchanged from Phase 2 — the authentication boundary, not this phase, already refuses a disabled user's session)    |
 | No session                           | `/`                    | `307` → `/sign-in`                                                                                                                      |
+
+Re-verified again for Phase 5 (Templates), same real-server setup plus two MANAGERs in
+different departments:
+
+| Actor            | Route/action                                                | Result                                                                              |
+| ---------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| USER             | `/templates`, `/templates/[id]` (own dept)                  | Real content rendered, read-only (no "New template", no Edit/Enable/Disable/Delete) |
+| USER             | `/templates/new`                                            | `ForbiddenPage` rendered                                                            |
+| USER             | `createTemplate`/`updateTemplate` use case, called directly | `forbidden`                                                                         |
+| MANAGER (dept A) | `/templates/new`, create/edit/disable/enable/delete         | All succeed, scoped to dept A                                                       |
+| MANAGER (dept A) | `updateTemplate`/`softDeleteTemplate` on dept B's template  | `not_found`                                                                         |
+| MANAGER (dept A) | `createTemplate` with a dept-B File's id as a default       | `business_rule` (file reference not found in dept A)                                |
+| MANAGER (dept A) | Two templates with the same name in dept A                  | Second `conflict`; same name in dept B succeeds                                     |
+| ADMIN            | `/templates` (no department filter)                         | Templates from every department rendered, with a department badge per row           |
+| ADMIN            | `createTemplate` with an explicit, existing `departmentId`  | Created in that department                                                          |
+| ADMIN            | `createTemplate` with a nonexistent `departmentId`          | `business_rule`                                                                     |
+| Any role         | `deleteFile` on a File a live Template asset defaults to    | `conflict`, file not deleted                                                        |
+| MANAGER          | Enable/disable an already-enabled/disabled template         | No-op, no error (idempotent)                                                        |
+| MANAGER          | Soft-delete an already-deleted template                     | No-op, no error (idempotent)                                                        |
+| MANAGER          | Enable or edit a soft-deleted template                      | `business_rule`                                                                     |
+| MANAGER          | Create a template with the same name a just-deleted one had | Succeeds (partial unique index excludes soft-deleted rows — ADR-0027)               |
