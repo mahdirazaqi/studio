@@ -17,9 +17,10 @@ A **User** is a person who operates Studio, through the web panel or the Telegra
 - A User may be **linked to a Telegram account** (see below). The link is identity only;
   it grants no extra privileges.
 
-## Fields (final schema: [`prisma/schema.prisma`](../../prisma/schema.prisma); rationale:
+## Fields
 
-[../architecture/database.md](../architecture/database.md))
+Final schema: [`prisma/schema.prisma`](../../prisma/schema.prisma). Rationale:
+[../architecture/database.md](../architecture/database.md).
 
 **Implemented (Phase 2):** `id`, `email` (unique login identifier), `fullName`,
 `passwordHash`, `role`, `departmentId` (required), `status`, `createdAt`, `updatedAt`. See
@@ -72,6 +73,11 @@ A **User** is a person who operates Studio, through the web panel or the Telegra
 > **`OPEN DECISION` — can a MANAGER create another MANAGER?** _Consequence of yes:_
 > managers can fully delegate; risk of privilege sprawl within a department.
 > _Consequence of no:_ only ADMIN mints managers; tighter control, more admin load.
+>
+> **Phase 3 implementation note:** the authorization policy
+> (`assertCanCreateUserWithRole`, [../architecture/authorization.md](../architecture/authorization.md))
+> takes the conservative reading until this is decided: a MANAGER may create a `USER`
+> only. No user-creation use case exists yet to exercise this either way.
 
 ## Disabling
 
@@ -80,6 +86,16 @@ A **User** is a person who operates Studio, through the web panel or the Telegra
   on safeguard).
 - Disabling immediately invalidates the user's sessions and blocks Telegram actions.
 - In-flight Jobs created by the user continue; the user simply can no longer act.
+
+> **Phase 3 implementation note:** "MANAGER can disable USERs" is implemented literally —
+> a MANAGER cannot disable a peer MANAGER even in their own Department, only a `USER`-role
+> account (`assertCanSetActiveStatus`). **Nobody can disable/re-enable or change the role
+> of their own account**, including ADMIN — this closes the entire "accidental ADMIN
+> lockout" question for these two operations without needing a "last remaining ADMIN"
+> count check; that kind of safeguard for other paths (e.g. a bulk operation, if one is
+> ever built) remains `OPEN DECISION`. Changing an _existing_ user's role is currently
+> ADMIN-only regardless of actor — the matrix's MANAGER cell for that operation is itself
+> `OPEN DECISION`, so the code denies it entirely rather than guessing a partial rule.
 
 ## What Users own
 

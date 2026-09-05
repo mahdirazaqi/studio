@@ -4,6 +4,12 @@
 application/use-case layer, with defensive department filtering in repositories. **The UI
 never enforces authorization.**
 
+**Implemented, Phase 3.** This page is the business-rule source of truth (the matrix
+below); [../architecture/authorization.md](../architecture/authorization.md) documents
+the actual mechanism (`@/server/authz`'s capability registry, department-scope helpers,
+the user-management escalation rules) and how to use it from a new feature. ADR-0022/
+ADR-0023.
+
 ## 1. Principals
 
 | Principal            | Identity established by       | Authorization                                                                        |
@@ -81,13 +87,49 @@ Legend: ✅ allowed · 🟨 allowed, own department only · ⬛ not allowed · �
 > to reason about. Recommended pending decision: **whole department for view; own-or-
 > department for cancel/retry (confirm); MANAGER+ for destructive file ops.**
 
+### Implemented in Phase 3 — conservative defaults where still OPEN
+
+The mechanism (role floor per capability + department scope) is implemented for every row
+above via `@/server/authz` (see [../architecture/authorization.md](../architecture/authorization.md)).
+Users/Departments are the only rows with an actual policy function behind them today
+(`src/features/users/use-cases/authorize-user-management.ts`) — Templates/Jobs/Files have
+a registered capability role-floor only, no use case yet. Where a cell above is marked
+`OPEN DECISION`, the code takes the most conservative reading until it's resolved, never
+a guessed answer:
+
+- **Create user (MANAGER):** implemented as role `USER` only. OD-05 (can MANAGER mint
+  another MANAGER) stays open; the code simply doesn't allow it yet.
+- **Change a user's role (MANAGER):** implemented as **not allowed at all** — ADMIN-only.
+  This row's OPEN DECISION is "does MANAGER get this at all", so denying it entirely is
+  the conservative default, not a partial guess.
+- **Change a user's department:** implemented as **ADMIN-only**, matching the ✅/⬛/⬛
+  cells exactly. The reassignment mechanics OPEN DECISION (audit trail, snapshotting —
+  OD-08) is about what ADMIN reassignment _does_, not whether ADMIN can do it at all, so
+  granting ADMIN the capability doesn't overreach past what's already decided; no
+  reassignment function exists yet regardless.
+- **Nobody may change their own role or active status** through the implemented
+  functions, including ADMIN — not one of the matrix rows above, but the concrete answer
+  to `§20`/`§23`'s "prevent an accidental ADMIN lockout" requirement (see the
+  architecture doc). A general "don't disable the last ADMIN" safeguard for other paths
+  remains unaddressed and `OPEN DECISION`.
+- **Disable / re-enable user (MANAGER):** implemented exactly as written — `USER`s only,
+  not "anyone who isn't an ADMIN" (a peer MANAGER is also out of reach).
+- Templates' `OPEN DECISION` rows (USER authoring) and Jobs/Files' `OPEN DECISION` rows
+  (own-vs-department scope) are **not** implemented at all yet — no code path exists for
+  them to default anything, conservatively or otherwise. Only their **role floor**
+  (decided, not open) is registered as a capability today.
+
 ## 4. Enforcement requirements
 
 1. **Every use case starts by authorizing the actor** for the specific capability and the
-   specific resource's department. No use case trusts its caller.
+   specific resource's department (`authorize(actor, capability, { departmentId })` —
+   implemented). No use case trusts its caller.
 2. **404 over 403** for cross-department access to a specific resource, to avoid leaking
-   which ids exist in other departments.
-3. **List endpoints always pass a department filter** unless the actor is ADMIN.
+   which ids exist in other departments (`assertDepartmentScopeOrNotFound` — implemented,
+   see [../architecture/authorization.md](../architecture/authorization.md)).
+3. **List endpoints always pass a department filter** unless the actor is ADMIN
+   (`departmentScopeFilter(actor)` — implemented as a reusable helper; no list endpoint
+   exists yet to call it).
 4. **Server Actions and Route Handlers both** go through the same authorized use case.
 5. **Telegram** resolves to a `User` and runs the same checks — a Telegram user with role
    USER cannot do MANAGER things, and cannot touch other departments.

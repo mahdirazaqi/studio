@@ -1,6 +1,6 @@
 # Project Structure
 
-**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 2 tree.
+**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 3 tree.
 
 ## 1. Repository layout
 
@@ -41,24 +41,28 @@ src/
 │   │   └── sign-in/page.tsx      real sign-in form; redirects to "/" if already authenticated
 │   ├── (dashboard)/              authenticated app shell (sidebar + header)
 │   │   ├── layout.tsx            getCurrentUser() guard + redirect; SidebarProvider + AppSidebar + AppHeader
-│   │   ├── page.tsx              "/" overview
+│   │   ├── page.tsx              "/" overview — filtered to navigationForRole(user.role)
 │   │   ├── loading.tsx  error.tsx
-│   │   ├── jobs/  templates/  files/  users/  departments/   → PlaceholderPage
+│   │   ├── jobs/  templates/  files/  → PlaceholderPage
+│   │   ├── users/                → role-gated (MANAGER+) PlaceholderPage or ForbiddenPage
+│   │   └── departments/          → role-gated (ADMIN) PlaceholderPage or ForbiddenPage
 │   └── api/
 │       └── health/route.ts       the only Route Handler
 │
 ├── features/                     one folder per module (see features/README.md)
 │   ├── auth/                     IMPLEMENTED (Phase 2) — schemas/, use-cases/
 │   │                             (sign-in, sign-out), actions/, components/ (form, sign-out menu item)
-│   ├── users/                    partial (Phase 2) — domain/, repository/ (auth's
-│   │                             credential lookup only; management is a later phase)
+│   ├── users/                    partial (Phase 2/3) — domain/, repository/ (auth's
+│   │                             credential lookup only), use-cases/authorize-user-management.ts
+│   │                             (Phase 3 — policy only, no mutation/UI yet)
 │   ├── departments/  jobs/  templates/  files/  telegram/
 │   └── (each of these: README.md describing scope + boundaries; no impl yet)
 │
 ├── components/
 │   ├── ui/                       shadcn/ui primitives (owned, copied in)
 │   ├── theme/                    theme-provider, theme-toggle  ("use client")
-│   └── layout/                   app-sidebar, app-header, page-shell, placeholder-page
+│   └── layout/                   app-sidebar, app-header, page-shell, placeholder-page,
+│                                 forbidden-page (Phase 3)
 │
 ├── hooks/
 │   └── use-mobile.ts             (from shadcn, used by the sidebar)
@@ -77,7 +81,9 @@ src/
 │   ├── actions/                 defineAction() + ActionResult<T>
 │   ├── api/                     defineRouteHandler() + healthResponse()
 │   ├── auth/                    current-user.ts (BOUNDARY) + session.ts + password.ts — real session backend (ADR-0020)
-│   ├── authz/                   authorize() / requireRole / assertSameDepartment — BOUNDARY (still Phase 1 policy: ADMIN-only; Phase 3 adds the real matrix)
+│   ├── authz/                   authorize() / requireRole / assertSameDepartment /
+│   │                             assertDepartmentScopeOrNotFound / departmentScopeFilter
+│   │                             — BOUNDARY, real capability registry (ADR-0022, Phase 3)
 │   └── db/                      index.ts — the single PrismaClient instance
 │
 ├── types/                       cross-cutting client-safe types (Maybe, Paginated, Result)

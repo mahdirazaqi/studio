@@ -10,7 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { navItems } from "@/lib/navigation";
+import { navigationForRole } from "@/lib/navigation";
+import { requireUser } from "@/server/auth/current-user";
 
 export const metadata: Metadata = { title: "Overview" };
 
@@ -18,19 +19,27 @@ const foundation = [
   "Next.js App Router + TypeScript (strict)",
   "Tailwind CSS v4 + shadcn/ui, Light / Dark / System themes",
   "Feature-based architecture with server/UI layer separation",
-  "Server Action & REST Route Handler conventions",
+  "PostgreSQL + Prisma, authentication, and department-scoped authorization",
   "Validation (Zod), typed error model, structured logging",
-  "Validated environment configuration",
 ];
 
-export default function OverviewPage() {
-  const features = navItems.filter((item) => item.href !== "/");
+export default async function OverviewPage() {
+  const user = await requireUser();
+  // Same source the sidebar uses (`navigationForRole`) — this list must never
+  // show a route the current role can't actually open. Navigation visibility
+  // is not itself the authorization boundary (the pages enforce that
+  // server-side too), but showing a link a click would just bounce off is a
+  // broken navigation experience distinct from that concern, so it's still
+  // filtered here. See docs/architecture/authorization.md.
+  const features = navigationForRole(user.role)
+    .flatMap((group) => group.items)
+    .filter((item) => item.href !== "/");
 
   return (
     <PageShell>
       <PageHeader
         title="Studio"
-        description="Control plane for the video-rendering pipeline. This is the Phase 1 application foundation."
+        description="Control plane for the video-rendering pipeline."
       />
 
       <div className="grid gap-4 md:grid-cols-2">

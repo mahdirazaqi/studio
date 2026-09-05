@@ -43,6 +43,10 @@ _Where:_ [../domain/authorization.md](../domain/authorization.md).
 For cancel / retry / delete-own-file, is a plain USER limited to resources they created
 or any in their department?
 
+**Phase 3 note:** the `job:manage`/`file:manage` capabilities are registered with a `USER`
+role floor (that much is decided) — this OD is only about the finer "own vs. department"
+granularity a future Jobs/Files use case still has to add on top.
+
 - _Own only:_ least privilege; awkward when a colleague is away.
 - _Whole department:_ collaborative; matches MANAGER; simpler.
   **Recommendation:** whole department for view; confirm for cancel/retry; MANAGER+ for
@@ -51,6 +55,10 @@ or any in their department?
 ### OD-04 — Can a USER author/edit Templates?
 
 _Where:_ [../domain/authorization.md](../domain/authorization.md), [../domain/templates.md](../domain/templates.md).
+
+**Phase 3 note:** `template:manage` is registered with a `MANAGER` role floor (the
+recommendation's conservative reading) purely so the capability exists; no Template
+feature or use case exists yet to actually enforce it.
 
 - _USER can author:_ faster for small teams; a bad template affects the whole department.
 - _MANAGER+ only:_ safer, clearer ownership; matches the brief's "MANAGER manages
@@ -63,6 +71,24 @@ _Where:_ [../domain/users.md](../domain/users.md).
 
 - _Yes:_ full delegation; privilege sprawl risk.
 - _No:_ only ADMIN mints managers; tighter, more admin load.
+
+**Current implemented default (ADR-0023):** no — a MANAGER may only create a `USER` and
+may not change anyone's role at all (ADMIN-only). Conservative, not a resolution; revisit
+when decided.
+
+### OD-47 — "Last remaining ADMIN" lockout safeguard for bulk/other operations
+
+_Where:_ [../domain/users.md](../domain/users.md), [../domain/authorization.md](../domain/authorization.md), ADR-0023.
+Self-service role/status changes are already structurally forbidden for everyone,
+including ADMIN (ADR-0023) — that closes the single-user self-lockout path. Whether a
+_different_ actor (another ADMIN) disabling/demoting the last remaining ADMIN needs an
+explicit count-based safeguard, and whether a future bulk operation needs the same check,
+is undecided. No such operation exists yet.
+
+- _Add a "last active ADMIN" count check:_ safer against a rare but catastrophic mistake;
+  adds a query + edge case to every path that could disable/demote an ADMIN.
+- _No safeguard beyond the self-service block:_ simpler; relies on operational discipline
+  (e.g. always keep ≥ 2 ADMINs) instead of code.
 
 ### OD-06 — Ambiguous / no phone match on Telegram link
 

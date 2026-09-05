@@ -115,22 +115,60 @@ allows ADMIN only, exactly as Phase 1 left it), department isolation enforcement
 management (create/disable/role-change) or department management UI, Templates, Jobs,
 Files, Worker API, Telegram, YouTube, rate limiting on login.
 
-### Phase 3+ (not started)
+### Phase 3 — Authorization & department isolation _(complete)_
+
+**Goal:** answer "what can this authenticated user do, and on which data" server-side,
+everywhere — no user/department management UI yet, no Templates/Jobs/Files/Worker/
+Telegram.
+
+**Delivered:**
+
+- `@/server/authz`'s capability registry (`authorize(actor, capability, {
+departmentId? })`), replacing the Phase 1 ADMIN-only placeholder — role floor per
+  capability, transcribed from the decided rows of `domain/authorization.md`'s permission
+  matrix (ADR-0022).
+- Department-scope tooling: `assertSameDepartment` (403, capability-level),
+  `assertDepartmentScopeOrNotFound` (404, single-resource-instance level),
+  `departmentScopeFilter(actor)` (query-level `where` fragment).
+- User-management escalation/self-modification policy, prepared ahead of the actual
+  feature: `src/features/users/use-cases/authorize-user-management.ts` — nobody changes
+  their own role/status (including ADMIN), MANAGER is scoped to `USER`-role targets only,
+  role changes are ADMIN-only pending OD-05, department reassignment is ADMIN-only
+  (ADR-0023).
+- `/users` (MANAGER+) and `/departments` (ADMIN-only) now check the actor's role
+  server-side and render a real `ForbiddenPage` instead of their placeholder content when
+  it isn't met — direct URL access is protected, not just the nav link.
+- The Overview page's "Planned areas" list and the sidebar both filter to
+  `navigationForRole(role)` (a Phase 1 leftover — the Overview page previously listed
+  every route unfiltered — fixed as part of this phase's "navigation reflects
+  permissions, but is never itself the security boundary" requirement).
+- No middleware introduced — the existing layout-level session check already does the
+  coarse job; fine-grained checks live in use cases/pages, documented in
+  `architecture/authorization.md` "Why not middleware".
+- Docs: `architecture/authorization.md`, `development/authorization.md`; updates to
+  `domain/authorization.md`, `domain/users.md`, `security/security.md`,
+  `open-decisions.md` (OD-03/04/05 annotated with their implemented conservative
+  defaults; new OD-47 for a "last remaining ADMIN" bulk-operation safeguard).
+
+**Explicitly NOT in Phase 3:** user/department management UI or mutating use cases (only
+the authorization policy for them), Templates, Jobs, Files, Worker API, Telegram,
+YouTube, rendering. **No database schema changes were required.**
+
+### Phase 4+ (not started)
 
 Sequencing is not finalized, but a sensible order:
 
-1. Full authorization matrix + department isolation enforcement (the backbone Phase 2's
-   `Actor`/`CurrentUser` shapes were built for; resolves OD-05, OD-07's enforcement side).
-2. User management (create/disable/role-change) + Department management.
-3. Templates (authoring + soft-delete + validation).
-4. Files / Gallery (upload, storage adapter, categories; resolves OD-42, OD-21).
-5. Jobs (creation, snapshot, state machine) + Worker API (atomic claim, auth,
-   progress/state/result, durable delivery scaffold; resolves OD-27, OD-40).
-6. YouTube delivery adapter.
-7. Telegram adapter + durable wizard state.
-8. Cleanup jobs, retention, hardening, observability.
+1. User management (create/disable/role-change) + Department management — wires
+   Phase 3's `authorize-user-management.ts` policy to real repositories/Server Actions/UI.
+2. Templates (authoring + soft-delete + validation; resolves OD-04, OD-09, OD-10).
+3. Files / Gallery (upload, storage adapter, categories; resolves OD-42, OD-21).
+4. Jobs (creation, snapshot, state machine) + Worker API (atomic claim, auth,
+   progress/state/result, durable delivery scaffold; resolves OD-03, OD-27, OD-40).
+5. YouTube delivery adapter.
+6. Telegram adapter + durable wizard state.
+7. Cleanup jobs, retention, hardening, observability.
 
-Each Phase 2+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
+Each Phase 4+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
 the product owner, implement behind the layering rules, test (unit + the integration
 tests listed in `conventions.md` §9), update the docs.
 

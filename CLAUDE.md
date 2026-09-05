@@ -37,6 +37,8 @@ Studio replaces the `src/render` module of the legacy NestJS backend
 | Server / Client component boundary   | [`docs/architecture/server-client-boundary.md`](docs/architecture/server-client-boundary.md)   |
 | Authentication boundary              | [`docs/architecture/authentication-boundary.md`](docs/architecture/authentication-boundary.md) |
 | Authentication (implementation)      | [`docs/architecture/authentication.md`](docs/architecture/authentication.md)                   |
+| Authorization (mechanism)            | [`docs/architecture/authorization.md`](docs/architecture/authorization.md)                     |
+| Authorization workflow (how-to)      | [`docs/development/authorization.md`](docs/development/authorization.md)                       |
 | Database (Prisma/PostgreSQL)         | [`docs/architecture/database.md`](docs/architecture/database.md)                               |
 | Database workflow (local dev)        | [`docs/development/database.md`](docs/development/database.md)                                 |
 | Error handling & error model         | [`docs/architecture/error-handling.md`](docs/architecture/error-handling.md)                   |
@@ -180,7 +182,9 @@ Exact snapshot shape is an **OPEN DECISION**.
 ## 8. Authorization rules (summary)
 
 Three roles. Every rule is enforced server-side; see
-[`docs/domain/authorization.md`](docs/domain/authorization.md) for the full matrix.
+[`docs/domain/authorization.md`](docs/domain/authorization.md) for the full matrix and
+[`docs/architecture/authorization.md`](docs/architecture/authorization.md) for the
+mechanism (**implemented, Phase 3**).
 
 - **USER** — normal operator. Works with Jobs / Files / Templates **within their own
   Department**, per the permission matrix.
@@ -190,6 +194,37 @@ Three roles. Every rule is enforced server-side; see
 
 Telegram users map to the **same** User + Department + role and get the **same** checks.
 Telegram must never bypass authorization.
+
+**Permanent rules, non-negotiable (Phase 3):**
+
+- **Never trust a client-supplied `role` or `departmentId`.** For USER/MANAGER, both are
+  always derived from the authenticated `Actor`; only ADMIN may supply a `departmentId`
+  explicitly, and only for operations the matrix grants ADMIN.
+- **Never rely on a hidden UI button, disabled field, or filtered nav item as
+  authorization.** `navigationForRole` and the Overview page's filtered list are a
+  presentation choice only — every route they point at (e.g. `/users`, `/departments`)
+  re-checks the actor's role itself, because direct URL access must be blocked
+  independently of what got rendered.
+- **Every use case's first step is `authorize(actor, capability, { departmentId? })`**
+  (`@/server/authz`) — never an inline `actor.role === "ADMIN"` check. A capability with
+  no registered policy fails loudly (`internal`), by design — that is not a bug to work
+  around by adding a permissive fallback.
+- **A specific resource load uses `assertDepartmentScopeOrNotFound` (404, never 403)**;
+  a list/search/count query spreads `departmentScopeFilter(actor)` into its `where`
+  clause. Do not hand-roll either pattern differently per feature.
+- **No self-service privilege escalation, ever** — nobody changes their own role or
+  their own active/disabled status, not even ADMIN
+  (`src/features/users/use-cases/authorize-user-management.ts`, ADR-0023). A MANAGER may
+  only ever create/manage a `USER`-role account, never a peer MANAGER or an ADMIN.
+- **Users are never deleted; disabled users cannot authenticate or act** — enforced once,
+  at the session-resolution layer (`@/server/auth`), not re-checked per authorization
+  call (an `Actor` cannot exist for a disabled user by construction).
+- **Do not introduce a policy engine, permission tables, or configurable RBAC.** Studio
+  has exactly three fixed roles; a fourth role or a materially different rule shape is a
+  new ADR, not a registry edit.
+- **Do not implement authorization in Next.js middleware.** The `(dashboard)` layout's
+  session check is the only coarse-grained gate; resource-level authorization lives in
+  use cases/pages, per `docs/architecture/authorization.md` "Why not middleware".
 
 ## 9. Handling ambiguity
 
@@ -241,13 +276,18 @@ experience. **Light / Dark / System** themes. Full detail:
   (`Department`, `User`, `Session`), a real DB-backed session mechanism (ADR-0020), bcrypt
   password hashing, sign-in/sign-out (`features/auth`), and a genuinely protected
   dashboard (`(dashboard)/layout.tsx` redirects unauthenticated/disabled sessions to
-  `/sign-in`). The app runs (`npm run dev`), builds (`npm run build`), and passes
-  `npm run check` (lint + typecheck + format + tests). **Still no full authorization
-  matrix, no user/department management UI, no domain features (Jobs/Templates/Files/
-  Worker/Telegram/YouTube).**
+  `/sign-in`).
+- **Phase 3 (authorization & department isolation) — complete.** The real capability
+  registry (`@/server/authz`, ADR-0022) replaces the Phase 1 ADMIN-only placeholder;
+  department-scope helpers (`assertDepartmentScopeOrNotFound`, `departmentScopeFilter`);
+  user-management escalation/self-modification policy prepared ahead of the feature
+  itself (ADR-0023); `/users` and `/departments` are protected server-side, not just
+  hidden from nav. The app runs (`npm run dev`), builds (`npm run build`), and passes
+  `npm run check` (lint + typecheck + format + tests). **Still no user/department
+  management UI, no domain features (Templates/Jobs/Files/Worker/Telegram/YouTube).**
 
-Do **not** start the next phase (the full authorization matrix, then Users/Departments
-management, then the domain features) unless explicitly asked. See
+Do **not** start the next phase (user/department management, then the domain features)
+unless explicitly asked. See
 [`docs/development/workflow.md`](docs/development/workflow.md) for phase boundaries and
 [`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
 remains undecided.

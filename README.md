@@ -15,8 +15,12 @@ authorization), **not** a port.
 - **Phase 1** — Next.js foundation & application skeleton — **complete**.
 - **Phase 2** — database & authentication — **complete**. PostgreSQL + Prisma, a real
   DB-backed session mechanism, bcrypt password hashing, sign-in/sign-out, and a genuinely
-  protected dashboard. No full authorization matrix, no user/department management UI, no
-  domain features (Jobs/Templates/Files/Worker/Telegram/YouTube) yet.
+  protected dashboard.
+- **Phase 3** — authorization & department isolation — **complete**. A real capability
+  registry (role floor per capability + department scope), `/users` (MANAGER+) and
+  `/departments` (ADMIN) protected server-side, and a role-escalation/self-modification
+  policy prepared for the future user-management feature. No user/department management
+  UI, no domain features (Templates/Jobs/Files/Worker/Telegram/YouTube) yet.
 
 ## Getting started
 
@@ -53,12 +57,12 @@ Zod · Vitest · ESLint 9 · Prettier · npm · **PostgreSQL + Prisma** · **bcr
 prisma/         schema.prisma, migrations/, seed.ts
 src/
 ├── app/          App Router — (auth) + (dashboard) route groups, /api/health
-├── features/     one folder per module — auth & users (implemented, Phase 2),
+├── features/     one folder per module — auth (Phase 2) & users (Phase 2/3) implemented,
 │                 departments, jobs, templates, files, telegram (README only, no impl yet)
-├── components/   ui/ (shadcn), theme/, layout/ (sidebar, header, shells)
+├── components/   ui/ (shadcn), theme/, layout/ (sidebar, header, shells, forbidden page)
 ├── lib/          client-safe utilities (cn, roles, navigation, site-config)
 ├── server/       server-only: env, logger, errors, validation, actions, api,
-│                 auth (session/password/current-user), authz boundary, db (Prisma client)
+│                 auth (session/password/current-user), authz (capability registry), db
 └── types/        cross-cutting client-safe types
 ```
 
@@ -83,6 +87,7 @@ docs/
 │   ├── server-client-boundary.md  Server vs Client Components
 │   ├── authentication-boundary.md Where the current user is resolved
 │   ├── authentication.md          Session mechanism, login/logout flow (ADR-0020)
+│   ├── authorization.md           Capability registry, department scope (ADR-0022/0023)
 │   ├── database.md                Prisma client, schema decisions, migrations
 │   ├── error-handling.md          AppError model & error boundaries
 │   ├── environment.md             Validated env configuration
@@ -115,5 +120,6 @@ docs/
     ├── conventions.md             Coding conventions
     ├── workflow.md                Phases & dev workflow
     ├── database.md                Local setup, migrate/seed commands, troubleshooting
+    ├── authorization.md           How to add a new authorized operation
     └── open-decisions.md          OPEN DECISION register
 ```

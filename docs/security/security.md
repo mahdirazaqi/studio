@@ -15,17 +15,39 @@ Binding security requirements for Studio. Many are direct responses to
 
 ## 2. Authorization
 
-- Enforced **server-side in the application layer**, on every entry point, for every
-  operation. See [../domain/authorization.md](../domain/authorization.md).
+- **Implemented, Phase 3.** Enforced **server-side in the application layer**, on every
+  entry point, for every operation, via `@/server/authz`'s capability registry — see
+  [../domain/authorization.md](../domain/authorization.md) (the matrix) and
+  [../architecture/authorization.md](../architecture/authorization.md) (the mechanism).
+  An unregistered capability fails loudly (`internal` error) rather than silently
+  allowing or denying — a missing policy is a bug, not a valid state.
 - **UI restrictions are not authorization.** Hiding a button, disabling a field, omitting
-  a route — none of these are access control.
-- **Department isolation** enforced in use cases and **defensively** in repositories/read
-  functions (every scoped query filters by department unless ADMIN).
+  a route — none of these are access control. `/users` and `/departments` are protected
+  server-side in the page itself, independent of whether the sidebar/nav renders a link
+  to them for the current role.
+- **Department isolation** enforced in use cases (`assertSameDepartment` /
+  `assertDepartmentScopeOrNotFound`) and available to repositories via
+  `departmentScopeFilter(actor)`, spread into a query's `where` clause so the boundary is
+  encoded in the query itself.
 - **404 over 403** for cross-department access to specific resources (don't leak
-  existence).
-- The Worker principal has a **narrow capability set** (Worker API only) and no
-  Department.
-- Telegram users get the **identical** role + department checks as web users.
+  existence) — `assertDepartmentScopeOrNotFound` throws `not_found`, never `forbidden`,
+  for this case specifically.
+- **Privilege escalation is structurally blocked, not just discouraged:** nobody can
+  change their own role or their own active/disabled status through the implemented
+  policy functions, including ADMIN (closes the "accidental ADMIN lockout" risk for
+  self-service paths without a "last remaining ADMIN" count check); a MANAGER can only
+  ever create/manage `USER`-role accounts, never mint or touch a MANAGER or ADMIN; a
+  MANAGER can only act within their own Department. See
+  [../domain/users.md](../domain/users.md) "Creation"/"Disabling" and
+  [../architecture/authorization.md](../architecture/authorization.md).
+- The Worker principal has a **narrow capability set** (Worker API only), no Department,
+  and never becomes an `Actor` — it is a categorically different, not-yet-implemented
+  principal type (OPEN DECISION OD-27 on its credential mechanism).
+- Telegram users get the **identical** role + department checks as web users — both
+  resolve to the same `Actor` shape and the same `authorize()` calls (not implemented
+  yet; the mechanism is transport-agnostic by construction, see
+  [../architecture/authorization.md](../architecture/authorization.md) "Non-user
+  principals").
 
 ## 3. Secure state transitions
 

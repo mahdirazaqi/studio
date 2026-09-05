@@ -491,3 +491,84 @@ field name exactly (`passwordHash`, `departmentId`, `createdAt`, ...).
 - Resolves **OD-45**.
 
 **Status:** DECIDED.
+
+---
+
+## ADR-0022 — Capability-based authorization: a registered role floor plus a cross-cutting department-scope check
+
+**Context.** Phase 1 established the `Actor` shape and an `authorize()` placeholder that
+allowed ADMIN only, keeping callers honest without hard-coding real policy. Phase 3 needs
+the real policy, reusable across Server Actions, future REST, and future Telegram,
+without building a full policy-engine/ACL-table system Studio doesn't need for three
+fixed roles.
+
+**Decision.** `@/server/authz` exposes a flat capability registry
+(`CAPABILITY_POLICIES: Record<Capability, { minRole }>`) and one entry point,
+`authorize(actor, capability, { departmentId? })`, that checks the registered role floor
+and — orthogonally — department match (ADMIN bypasses). An unregistered capability throws
+`internal` rather than silently allowing or denying. Department scope for a _specific_
+resource instance uses a separate helper, `assertDepartmentScopeOrNotFound`, which throws
+`not_found` (404) instead of `forbidden` (403) to avoid confirming a cross-department
+resource id exists; list/search/count queries use `departmentScopeFilter(actor)` spread
+into the query's `where` clause instead.
+
+**Consequences.**
+
+- Adding a capability is a one-line registry entry, transcribed directly from a decided
+  row of [`../domain/authorization.md`](../domain/authorization.md)'s permission matrix —
+  never an inline `if (actor.role === ...)` scattered through a use case.
+- Role-floor and department-scope are independent axes checked by the same call, so a
+  use case never forgets one while remembering the other.
+- The 403-vs-404 split for resource-instance access vs. capability/route-level access is
+  explicit in the API (two different function names), not a judgment call made ad hoc at
+  each call site.
+- `job:manage`, `file:manage`, `template:{view,manage}` are registered ahead of those
+  features' implementation, encoding only their decided role floor (not the still-open
+  "own resource" granularity of OD-03/OD-04) — those phases reuse the registry instead of
+  designing it.
+- No policy engine, no permission tables, no configurable RBAC — exactly the three fixed
+  roles Studio has today; a fourth role or a fundamentally different rule shape is a new
+  ADR, not a config change.
+
+**Status:** DECIDED.
+
+---
+
+## ADR-0023 — Self-service role/status changes are always forbidden; MANAGER is scoped to USER-role targets only
+
+**Context.** Phase 3 requires that no application operation let a user escalate their own
+privileges, and that the system be structurally unable to lock out all administrators by
+accident. `docs/domain/users.md` and `docs/domain/authorization.md` leave several related
+questions as explicit `OPEN DECISION`s (OD-05: can MANAGER create/promote another
+MANAGER; whether MANAGER can change a role at all; a "last remaining ADMIN" safeguard).
+
+**Decision.** Implemented in `src/features/users/use-cases/authorize-user-management.ts`,
+ahead of any actual user-management use case:
+
+- **Nobody may change their own role or their own active/disabled status** through these
+  functions — including ADMIN. This is the entire safeguard against an accidental
+  ADMIN lockout for these two operations; no "count the remaining ADMINs" check is
+  implemented or needed for them.
+- **MANAGER may only create, disable/re-enable, or (once role changes are allowed for
+  MANAGER at all) act on a `USER`-role target** — never a peer MANAGER, never an ADMIN,
+  even within their own Department.
+- **Changing an existing user's role is ADMIN-only** — the matrix's MANAGER cell for this
+  operation is itself an open question, so the conservative default is to grant it to
+  ADMIN alone rather than guess a partial MANAGER rule.
+- **Only ADMIN may set/change a user's Department.**
+
+**Consequences.**
+
+- OD-05 and the "last remaining ADMIN" question remain genuinely open — this ADR
+  documents the safe interim behavior, not a resolution of either. Resolving OD-05 later
+  only changes `assertCanCreateUserWithRole`'s and `assertCanChangeRole`'s role check; it
+  does not touch the self-modification or Department-change rules, which are independent
+  of it.
+- A future bulk operation (e.g. "disable all users in a department") still needs its own
+  explicit ADMIN-lockout consideration if it could ever target every ADMIN at once — this
+  ADR only closes the single-user self-service path.
+- No schema change was needed — these are pure functions over already-available
+  `Actor`/`User` fields (`id`, `role`, `departmentId`).
+
+**Status:** DECIDED (interim/conservative defaults). OD-05 and the bulk-operation
+ADMIN-lockout safeguard remain **OPEN DECISION**.
