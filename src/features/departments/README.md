@@ -5,21 +5,25 @@ enforce department scoping across every other feature.
 
 **Key rules** (`docs/domain/departments.md`, ADR-0011): every scoped resource
 (`User`, `Template`, `Job`, `File`) has a `departmentId`. USER/MANAGER act only within
-their own department; ADMIN acts across all. Department **deletion** policy is OPEN
-DECISION OD-07 (recommendation: archive only).
+their own department; ADMIN acts across all. Department **deletion** policy is still
+OPEN DECISION OD-07 (recommendation: archive only) — **no delete/archive path exists,
+deliberately.**
 
-**Status: partial (Phase 4/5).** No management feature yet — `repository/` and `read/`
-hold exactly two reads, added only because ADMIN's "act on any department" capability
-(Files' upload form, Templates' create form) needed somewhere to pick a department from
-and something to validate a choice against:
+**Status: implemented (Phase 4/5/9/10).**
 
-- `repository/department-repository.ts` — `listDepartments()`, `departmentExists(id)`.
-  `departmentExists` is also called directly by
-  `features/templates/use-cases/resolve-target-department.ts` for ADMIN Template
-  creation, mirroring how Files' `upload-file.ts` already used it.
+- `domain/department.ts` — the pure `SafeDepartment` type (Phase 10). No `status` field —
+  adding one ahead of OD-07 being decided would be speculative schema for a policy that
+  doesn't exist yet.
+- `repository/department-repository.ts` — `listDepartments()`/`departmentExists(id)`
+  (the lightweight picker helpers ADMIN's "act on any department" capability needs,
+  Phase 4/5/9), plus the real management queries (Phase 10): `listAllDepartments`,
+  `findDepartmentById`, `createDepartment`, `renameDepartment` (both ADMIN-only,
+  `department:manage`).
 - `read/list-departments-for-admin.ts` — the authorized (ADMIN-only) wrapper the file
-  upload form's and the Template list/create pages' department pickers call.
+  upload form's, Template form's, and User form's department pickers call.
+- `use-cases/`, `actions/`, `schemas/`, `components/` (Phase 10) — the `/departments`
+  page: every role sees their own department (read-only); ADMIN additionally sees every
+  department and can create/rename.
 
-**Not built yet:** `use-cases/` (create, rename, archive), `actions/`, `schemas/`,
-management `components/`. Scoping primitives already exist in `@/server/authz`
-(`assertSameDepartment`, `departmentScopeFilter`).
+See [`docs/domain/departments.md`](../../../docs/domain/departments.md) for the full
+enforcement pattern and the still-open deletion-policy decision.

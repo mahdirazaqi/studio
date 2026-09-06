@@ -41,11 +41,12 @@ export const navigation: NavGroup[] = [
   {
     label: null,
     items: [
+      // The "Soon" badge stuck around from Phase 1, long after the page
+      // itself became real (Phase 10) — a misleading UI defect, fixed here.
       {
         label: "Overview",
         href: "/",
         icon: LayoutDashboard,
-        placeholder: true,
       },
     ],
   },
@@ -68,19 +69,20 @@ export const navigation: NavGroup[] = [
   {
     label: "Administration",
     items: [
+      // Implemented, Phase 10 — create/list/disable-enable/role-change.
       {
         label: "Users",
         href: "/users",
         icon: Users,
         minRole: "MANAGER",
-        placeholder: true,
       },
+      // Implemented, Phase 10 — every role may view their own department;
+      // only ADMIN sees create/rename (enforced server-side, not by this
+      // nav filter — see `/departments`'s own page comment).
       {
         label: "Departments",
         href: "/departments",
         icon: Building2,
-        minRole: "ADMIN",
-        placeholder: true,
       },
       // Implemented, Phase 9 — connect/manage YouTube delivery channels.
       {

@@ -3,20 +3,21 @@ import { describe, expect, it } from "vitest";
 import { navigation, navigationForRole } from "./navigation";
 
 describe("navigationForRole", () => {
-  it("hides MANAGER/ADMIN items from a plain USER", () => {
+  it("hides MANAGER/ADMIN-only items from a plain USER, but shows their own department", () => {
     const groups = navigationForRole("USER");
     const hrefs = groups.flatMap((g) => g.items.map((i) => i.href));
     expect(hrefs).not.toContain("/users");
-    expect(hrefs).not.toContain("/departments");
+    // Every role may view their own department (docs/domain/departments.md).
+    expect(hrefs).toContain("/departments");
     expect(hrefs).toContain("/jobs");
   });
 
-  it("shows /users to MANAGER but not /departments", () => {
+  it("shows /users and /departments to MANAGER", () => {
     const hrefs = navigationForRole("MANAGER").flatMap((g) =>
       g.items.map((i) => i.href),
     );
     expect(hrefs).toContain("/users");
-    expect(hrefs).not.toContain("/departments");
+    expect(hrefs).toContain("/departments");
   });
 
   it("shows everything to ADMIN", () => {

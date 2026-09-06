@@ -36,6 +36,18 @@ itself refuses to delete a Department that still has Users, even with no applica
 delete path at all and no decision yet on OD-07 —
 [../architecture/database.md](../architecture/database.md) has the detail.
 
+## Creation & management — implemented, Phase 10
+
+- **Create / rename a Department is ADMIN-only** (`department:manage`,
+  `features/departments/use-cases/create-department.ts`/`rename-department.ts`), exactly
+  per the permission matrix. `name` is unique (a duplicate is rejected as a clean
+  `conflict`, not a raw Prisma error).
+- **Viewing is universal**: every role sees their own Department (read-only for
+  USER/MANAGER); ADMIN additionally sees and manages every Department, at `/departments`.
+- **No delete/archive/status field exists** — see "Department deletion" below; this phase
+  implements only the two operations the matrix already resolved (create, rename), and
+  deliberately does not add a third to pre-empt OD-07.
+
 ## Resource assignment
 
 - A resource's Department is set **at creation** from the actor's context:

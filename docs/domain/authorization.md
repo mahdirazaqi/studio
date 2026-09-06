@@ -94,11 +94,14 @@ Legend: ✅ allowed · 🟨 allowed, own department only · ⬛ not allowed · �
 > to reason about. Recommended pending decision: **whole department for view; own-or-
 > department for cancel/retry (confirm); MANAGER+ for destructive file ops.**
 
-### Implemented in Phase 3/5/6 — conservative defaults where still OPEN
+### Implemented in Phase 3/5/6/10 — conservative defaults where still OPEN
 
 The mechanism (role floor per capability + department scope) is implemented for every row
 above via `@/server/authz` (see [../architecture/authorization.md](../architecture/authorization.md)).
-Users/Departments/Templates/Jobs now have a real policy behind them
+Users/Departments/Templates/Jobs now have a real policy **and real mutations** behind
+them — the Phase 3 policy below was verified against the real database in Phase 10
+(create/list/disable-enable/role-change for Users; create/rename for Departments), not
+just unit-tested against mocks
 (`src/features/users/use-cases/authorize-user-management.ts`;
 `src/features/templates/use-cases/*` call `authorize(actor, "template:manage"|"template:view", ...)`
 directly; `src/features/jobs/use-cases/*` call `authorize(actor, "job:manage", ...)`

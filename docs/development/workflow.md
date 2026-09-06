@@ -409,25 +409,50 @@ upload quota, automatic/scheduled artifact cleanup, any background-job/queue
 infrastructure, configurable YouTube privacy/metadata, a dashboard in-app notification
 center, user/department management.
 
-### Phase 10+ (not started)
+### Phase 10 — UI completion, testing & production hardening _(complete, final phase)_
 
-Sequencing is not finalized, but a sensible order:
+**Goal:** no new features — complete the two features every prior phase status
+explicitly deferred by name (Users, Departments), audit the whole system for security/
+reliability/consistency defects, and fix what's found.
 
-1. User management (create/disable/role-change) + Department management — wires
-   Phase 3's `authorize-user-management.ts` policy to real repositories/Server Actions/UI.
-   This would also be the natural place to add a `User.phone`-editing surface, closing
-   the gap Phase 8 deliberately left open (ADR-0036).
-2. A self-service "Connect with Google" OAuth consent-screen flow for `YouTubeTarget`,
-   if the manual refresh-token entry Phase 9 shipped ever needs a friendlier UX.
-3. Background-work/queue infrastructure (OD-40's general question) — needed for
-   scheduled artifact cleanup (OD-18), a `TelegramWizardState` TTL sweep, and a
-   stuck-job (`CLAIMED`/`RENDERING`) requeue sweep (OD-31).
-4. Rate limiting (OD-41), a dashboard in-app notification center, per-YouTube-target
-   upload quota.
+**Delivered:**
 
-Each Phase 10+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
-the product owner, implement behind the layering rules, test (unit + the integration
-tests listed in `conventions.md` §9), update the docs.
+- Users: `/users` (list, search, pagination, department column for ADMIN) and
+  `/users/new` (create) — wires Phase 3's already-tested `authorize-user-management.ts`
+  policy to real repository mutations for the first time (`create-user.ts`,
+  `list-users.ts`, `set-user-active-status.ts`, `change-user-role.ts`). No policy
+  changes — OD-05 (can MANAGER mint a MANAGER) and the MANAGER role-change question stay
+  exactly as conservatively resolved in Phase 3.
+- Departments: `/departments` — every role sees their own department; ADMIN additionally
+  sees and can create/rename any department (`department:manage`). **Deliberately no
+  delete/archive path** — OD-07 stays open, exactly as `docs/domain/departments.md`
+  requires.
+- Both features use the same department-scoped-404 pattern every other feature already
+  established (`findUserInScope`, mirroring `findJobInScope`/`findTemplateInScope`) —
+  no new authorization pattern was invented.
+- A full security/architecture audit (shell execution, path traversal, disabled-user
+  session enforcement, cross-department isolation, Worker/Telegram/Delivery auth
+  boundaries) found the codebase already correct from Phases 1–9, plus two concrete
+  defects, both fixed: the Worker result-upload endpoint buffered an oversized body
+  fully into memory before checking its size (now rejected via `Content-Length` first);
+  the dashboard's Overview page and its "Soon" sidebar badge were stale Phase 1
+  placeholder copy long after the features it called "planned" had shipped (rewritten;
+  the now-fully-dead `PlaceholderPage` component removed).
+- 32 new tests (23 unit covering authorization/idempotency/self-lockout/cross-department
+  paths + a real end-to-end run against Postgres). `npm run check` and `npm run build`
+  both pass.
+
+**Explicitly not in Phase 10** (documented future considerations, not silently
+resolved): a self-service "Connect with Google" OAuth consent-screen flow for
+`YouTubeTarget`; background-work/queue infrastructure (OD-40) — still needed for
+scheduled artifact cleanup (OD-18), a `TelegramWizardState` TTL sweep, and a stuck-job
+requeue sweep (OD-31); rate limiting (OD-41); a dashboard in-app notification center;
+per-YouTube-target upload quota; a self-service `User.phone`-editing UI (ADR-0036);
+Department archive/deactivate (OD-07); MANAGER minting another MANAGER (OD-05).
+
+**This is the final phase.** Studio is feature-complete for its currently defined scope.
+Any of the items above is a new decision to make explicitly, not a "Phase 11" to start
+automatically.
 
 ## Working on a task (any phase)
 

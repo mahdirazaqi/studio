@@ -635,11 +635,35 @@ deliver-job-result.ts`) drives `RENDERED -> DELIVERING -> UPLOADED`/`ERROR` thro
   per-target upload quota, automatic/scheduled artifact cleanup, any background-job/queue
   infrastructure, a dashboard in-app notification center, configurable YouTube privacy.
   **Still no user/department management UI.**
+- **Phase 10 (UI completion, testing & production hardening) — complete. Final phase.**
+  Users (`/users`, `/users/new`) and Departments (`/departments`) — the last two
+  placeholder pages — are now real: create/list/disable-enable/ADMIN-only role-change for
+  Users (wiring Phase 3's already-tested `authorize-user-management.ts` policy to real
+  repository mutations for the first time — no policy changes, only wiring), create/
+  rename for Departments (ADMIN-only; deliberately **no** delete/archive path — OD-07
+  stays open, `docs/domain/departments.md`). Both department-scoped consistently with
+  every other feature (`findUserInScope` folds cross-department into `not_found`, never
+  `forbidden`). A full security/architecture audit found and fixed two real defects: the
+  Worker's result-upload endpoint buffered an oversized body fully into memory before
+  its size check (now rejected via `Content-Length` first, `docs/security/security.md`
+  §6); the dashboard's Overview page and its "Soon" sidebar badge were stale Phase 1
+  placeholder copy describing already-shipped features as "planned" (rewritten; the
+  now-fully-dead `PlaceholderPage` component was removed). Everything else audited —
+  shell execution (`execFile`-only, no `shell: true`, confirmed by grep), path traversal
+  (`LocalStorageAdapter`'s root-containment check), disabled-user session enforcement
+  (`status !== "ACTIVE"` checked on every session read), cross-department isolation
+  (every list/detail use case), Worker/Telegram/Delivery authentication boundaries — was
+  already correct from Phases 1–9's own rigor; **no other regressions found**. 32 new
+  tests (23 unit + a real end-to-end run against Postgres covering department creation,
+  duplicate-name/duplicate-email conflicts, MANAGER-cannot-create-MANAGER,
+  cross-department 404, self-lockout, idempotent status/role changes, and department-
+  scoped listing). `npm run check` and `npm run build` both pass. **Studio is
+  feature-complete for its currently defined scope — this is the final phase.**
 
-Do **not** start the next phase (user/department management) unless explicitly asked. See
-[`docs/development/workflow.md`](docs/development/workflow.md) for phase boundaries and
-[`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
-remains undecided.
+This is the final phase. Do not start another phase, and do not add speculative features
+— see [`docs/development/workflow.md`](docs/development/workflow.md) for the full history
+and [`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
+remains genuinely undecided (not a backlog to silently resolve).
 
 ### Quick start
 

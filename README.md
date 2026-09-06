@@ -56,6 +56,14 @@ authorization), **not** a port.
   verified refresh-token entry rather than a full OAuth flow; a delivery-only retry and
   an idempotent artifact-cleanup primitive complete the pipeline. Still no
   user/department management UI.
+- **Phase 10** — UI completion, testing & production hardening — **complete (final
+  phase)**. Users (`/users`, `/users/new`) and Departments (`/departments`) — the last
+  two placeholder pages — are now real: create/list/disable-enable/role-change for
+  Users, create/rename for Departments (ADMIN-only, no delete — OD-07 stays open). A
+  full security audit found and fixed an oversized-payload gap in the Worker's
+  result-upload endpoint and stale Phase 1 placeholder copy on the dashboard's Overview
+  page; everything else audited was already correct. **Studio is feature-complete for
+  its currently defined scope.**
 
 ## Getting started
 
@@ -95,11 +103,11 @@ src/
 │                 /api/files/[fileId] (session- or Worker-authenticated binary delivery),
 │                 /api/worker/v1/jobs/{next,[jobId],[jobId]/state,progress,duration,result},
 │                 /api/telegram/webhook (Telegram webhook, Phase 8)
-├── features/     one folder per module — auth (Phase 2), users (Phase 2/3, partial),
-│                 files (Phase 4), templates (Phase 5), jobs (Phase 6/7), telegram
-│                 (Phase 8), youtube (Phase 9, YouTubeTarget CRUD + adapter), delivery
-│                 (Phase 9, DeliveryAttempt + orchestration) implemented; departments
-│                 (partial, Phase 4/5)
+├── features/     one folder per module, all implemented — auth (Phase 2), users
+│                 (Phase 2/3/10), departments (Phase 4/5/9/10), files (Phase 4),
+│                 templates (Phase 5), jobs (Phase 6/7), telegram (Phase 8), youtube
+│                 (Phase 9, YouTubeTarget CRUD + adapter), delivery (Phase 9,
+│                 DeliveryAttempt + orchestration)
 ├── components/   ui/ (shadcn), theme/, layout/ (sidebar, header, shells, forbidden page)
 ├── lib/          client-safe utilities (cn, roles, navigation, site-config)
 ├── server/       server-only: env, logger, errors, validation, actions, api,

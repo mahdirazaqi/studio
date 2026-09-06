@@ -71,12 +71,19 @@ src/
 ├── features/                     one folder per module (see features/README.md)
 │   ├── auth/                     IMPLEMENTED (Phase 2) — schemas/, use-cases/
 │   │                             (sign-in, sign-out), actions/, components/ (form, sign-out menu item)
-│   ├── users/                    partial (Phase 2/3) — domain/, repository/ (auth's
-│   │                             credential lookup only), use-cases/authorize-user-management.ts
-│   │                             (Phase 3 — policy only, no mutation/UI yet)
-│   ├── departments/               partial (Phase 4/5) — repository/ + read/ (ADMIN-only
-│   │                             reads for the upload form's and Template create form's
-│   │                             department pickers; no management CRUD yet)
+│   ├── users/                    IMPLEMENTED (Phase 2/3/10) — domain/, repository/
+│   │                             (credential lookup + the real management queries,
+│   │                             Phase 10), use-cases/ (authorize-user-management.ts —
+│   │                             Phase 3 policy; create-user, list-users,
+│   │                             set-user-active-status, change-user-role — Phase 10
+│   │                             wiring), schemas/, actions/, components/ (form, list
+│   │                             item, toolbar, actions)
+│   ├── departments/               IMPLEMENTED (Phase 4/5/9/10) — repository/ (the
+│   │                             ADMIN-only picker reads, Phase 4/5/9, plus the real
+│   │                             management queries, Phase 10) + read/, use-cases/
+│   │                             (create-department, rename-department,
+│   │                             list-departments-for-management), schemas/, actions/,
+│   │                             components/ (departments-manager.tsx)
 │   ├── files/                     IMPLEMENTED (Phase 4/5/7) — domain/, schemas/,
 │   │                             repository/ (incl. findFileForWorkerServing —
 │   │                             unscoped, Phase 7), use-cases/ (upload, list, get,
@@ -145,14 +152,16 @@ src/
 │                                 an orchestrator over Jobs/Files/Telegram/YouTube, not a
 │                                 competing implementation
 │
-│   (each remaining placeholder feature: README.md describing scope + boundaries; no impl yet)
+│   (every feature above is now implemented, Phase 10 — no placeholder-only feature
+│   folder remains; `components/layout/placeholder-page.tsx` was removed as dead code
+│   for the same reason)
 │
 ├── components/
 │   ├── ui/                       shadcn/ui primitives (owned, copied in)
 │   ├── theme/                    theme-provider, theme-toggle  ("use client")
-│   └── layout/                   app-sidebar, app-header, page-shell, placeholder-page,
+│   └── layout/                   app-sidebar, app-header, page-shell,
 │                                 forbidden-page (Phase 3), pagination-link (Phase 5,
-│                                 shared by Files/Templates list pages)
+│                                 shared by Files/Templates/Users list pages)
 │
 ├── hooks/
 │   └── use-mobile.ts             (from shadcn, used by the sidebar)

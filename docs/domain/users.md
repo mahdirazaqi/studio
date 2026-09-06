@@ -80,10 +80,13 @@ phone-editing surface (see ADR-0036 for why this is a deliberate boundary, not a
 > managers can fully delegate; risk of privilege sprawl within a department.
 > _Consequence of no:_ only ADMIN mints managers; tighter control, more admin load.
 >
-> **Phase 3 implementation note:** the authorization policy
-> (`assertCanCreateUserWithRole`, [../architecture/authorization.md](../architecture/authorization.md))
-> takes the conservative reading until this is decided: a MANAGER may create a `USER`
-> only. No user-creation use case exists yet to exercise this either way.
+> **Implemented, Phase 10** (`features/users/use-cases/create-user.ts`, `/users/new`):
+> the authorization policy (`assertCanCreateUserWithRole`,
+> [../architecture/authorization.md](../architecture/authorization.md)) takes the
+> conservative reading until OD-05 is decided: a MANAGER may create a `USER` only, in
+> their own Department; ADMIN may create any role in any Department. A brand-new User is
+> always `ACTIVE`; the password is set once at creation (bcrypt-hashed before it ever
+> reaches the repository) — there is no separate "invite" flow.
 
 ## Disabling
 
@@ -93,15 +96,21 @@ phone-editing surface (see ADR-0036 for why this is a deliberate boundary, not a
 - Disabling immediately invalidates the user's sessions and blocks Telegram actions.
 - In-flight Jobs created by the user continue; the user simply can no longer act.
 
-> **Phase 3 implementation note:** "MANAGER can disable USERs" is implemented literally —
-> a MANAGER cannot disable a peer MANAGER even in their own Department, only a `USER`-role
-> account (`assertCanSetActiveStatus`). **Nobody can disable/re-enable or change the role
-> of their own account**, including ADMIN — this closes the entire "accidental ADMIN
+> **Implemented, Phase 10** (`features/users/use-cases/set-user-active-status.ts`,
+> `change-user-role.ts`, the `/users` list page's row actions): "MANAGER can disable
+> USERs" is implemented literally — a MANAGER cannot disable a peer MANAGER even in their
+> own Department, only a `USER`-role account (`assertCanSetActiveStatus`). **Nobody can
+> disable/re-enable or change the role of their own account**, including ADMIN
+> (verified against the real database) — this closes the entire "accidental ADMIN
 > lockout" question for these two operations without needing a "last remaining ADMIN"
 > count check; that kind of safeguard for other paths (e.g. a bulk operation, if one is
-> ever built) remains `OPEN DECISION`. Changing an _existing_ user's role is currently
+> ever built) remains `OPEN DECISION` (OD-47). Changing an _existing_ user's role is
 > ADMIN-only regardless of actor — the matrix's MANAGER cell for that operation is itself
-> `OPEN DECISION`, so the code denies it entirely rather than guessing a partial rule.
+> `OPEN DECISION` (OD-05), so the code denies it entirely rather than guessing a partial
+> rule. Both operations are idempotent (setting a status/role a user already has is a
+> no-op, not an error) and department-scoped via `findUserInScope` (folds "doesn't exist"
+> and "exists in another department" into the same `not_found`, matching every other
+> feature's 403-vs-404 convention).
 
 ## What Users own
 

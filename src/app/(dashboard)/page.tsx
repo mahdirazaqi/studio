@@ -10,19 +10,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { navigationForRole } from "@/lib/navigation";
 import { requireUser } from "@/server/auth/current-user";
 
 export const metadata: Metadata = { title: "Overview" };
 
-const foundation = [
-  "Next.js App Router + TypeScript (strict)",
-  "Tailwind CSS v4 + shadcn/ui, Light / Dark / System themes",
-  "Feature-based architecture with server/UI layer separation",
-  "PostgreSQL + Prisma, authentication, and department-scoped authorization",
-  "Validation (Zod), typed error model, structured logging",
-];
-
+/**
+ * The dashboard landing page (Phase 10). Replaces the Phase 1 placeholder
+ * ("Foundation in place" / "Planned areas") now that every listed area is a
+ * real, working feature — that copy had become actively misleading (it still
+ * called Jobs/Templates/Files/Users/Departments/YouTube "planned" long after
+ * they shipped). Deliberately stays a set of role-filtered quick links, not a
+ * new stats/analytics dashboard — that would be a new feature, out of
+ * Phase 10's scope (CLAUDE.md §4/Phase 10 brief §4).
+ */
 export default async function OverviewPage() {
   const user = await requireUser();
   // Same source the sidebar uses (`navigationForRole`) — this list must never
@@ -45,29 +47,25 @@ export default async function OverviewPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Foundation in place</CardTitle>
-            <CardDescription>
-              Infrastructure ready for feature work.
-            </CardDescription>
+            <CardTitle className="text-base">Your account</CardTitle>
+            <CardDescription>Signed in as {user.email}</CardDescription>
           </CardHeader>
-          <CardContent>
-            <ul className="space-y-2 text-sm">
-              {foundation.map((item) => (
-                <li key={item} className="flex gap-2">
-                  <span className="text-muted-foreground">•</span>
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
+          <CardContent className="space-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Role:</span>
+              <Badge variant="outline">{user.role}</Badge>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Name:</span>
+              <span>{user.displayName}</span>
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Planned areas</CardTitle>
-            <CardDescription>
-              Routes exist; features arrive in later phases.
-            </CardDescription>
+            <CardTitle className="text-base">Quick links</CardTitle>
+            <CardDescription>Everything your role can access.</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="divide-y text-sm">
