@@ -27,13 +27,19 @@ Final schema: [`prisma/schema.prisma`](../../prisma/schema.prisma). Rationale:
 [../architecture/authentication.md](../architecture/authentication.md) for how
 `passwordHash`/`status` gate login.
 
+**Implemented (Phase 8, ADR-0036):** `phone` (nullable, `@unique`, digits-only normalized
+— `features/telegram/domain/phone.ts`'s `normalizePhone`), `telegramUserId` (nullable,
+`@unique`, set once by `features/telegram/use-cases/link-telegram-account.ts`). Neither
+field has a self-service or admin editing UI yet — `phone` is set today only via
+`prisma db seed`'s optional `SEED_ADMIN_PHONE` or a direct administrative write, pending a
+real user-management phase; Phase 8's own scope was the linking _mechanism_, not a
+phone-editing surface (see ADR-0036 for why this is a deliberate boundary, not a gap).
+
 **Not yet implemented** — added when the feature that needs them lands:
 
-| Field                            | Notes                                                        | Lands with                   |
-| -------------------------------- | ------------------------------------------------------------ | ---------------------------- |
-| `phone`                          | Used to link a Telegram account (match on phone). Optional.  | Telegram integration         |
-| `telegramUserId`                 | Nullable. Set when the user links Telegram. Unique when set. | Telegram integration         |
-| `disabledAt`, `disabledByUserId` | Audit of the disable action.                                 | User management / disable UI |
+| Field                            | Notes                        | Lands with                   |
+| -------------------------------- | ---------------------------- | ---------------------------- |
+| `disabledAt`, `disabledByUserId` | Audit of the disable action. | User management / disable UI |
 
 > **`OPEN DECISION` — ADMIN and Departments.** An ADMIN still has a `departmentId` for
 > their "home" department, but their authority is system-wide. Whether ADMIN can exist
@@ -48,21 +54,21 @@ Final schema: [`prisma/schema.prisma`](../../prisma/schema.prisma). Rationale:
 > special meaning beyond "home"; it only means the schema doesn't need nullable-department
 > handling. Revisit if a concrete requirement needs a department-less ADMIN.
 
-## Telegram linkage
+## Telegram linkage — implemented, Phase 8 (ADR-0036)
 
-- A Telegram user proves identity by sharing their phone number with the bot.
-- Studio matches the phone against `User.phone`. On a unique match, it sets
-  `telegramUserId`.
+- A Telegram user proves identity by sharing their phone number with the bot (Telegram's
+  native "share contact" button — never a typed number, and never accepted from a
+  forwarded contact card belonging to someone else).
+- Studio matches the phone against `User.phone`. On a match, it sets `telegramUserId`.
+  `User.phone` is `@unique`, so this match is never ambiguous (resolves OD-06) — the only
+  real "no match" outcome gets one generic, safe rejection message.
 - **Legacy behavior preserved:** phone-based linking, no separate password/OTP for
   Telegram.
 - **Legacy behavior changed:** after linking, the Telegram user is subject to the full
   role + department authorization model — not an unchecked "any linked user can do
   anything" surface. See [known-issues.md](../legacy/known-issues.md) item on Telegram
   permissions.
-
-> **`OPEN DECISION` — ambiguous / no phone match.** If zero or multiple Users share the
-> phone number, what happens? _Options:_ reject with a generic message (legacy behavior,
-> safe); require an admin to link manually; support an invite/claim token flow.
+- See [../integrations/telegram.md](../integrations/telegram.md) for the full mechanism.
 
 ## Creation
 

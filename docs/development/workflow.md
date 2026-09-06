@@ -325,22 +325,67 @@ Worker-initiated cancel/retry (never part of the legacy Worker's REST contract),
 Worker file-upload endpoint, per-Worker-credential rate limiting (OD-41 stays open), a
 Worker-timeout requeue sweep (OD-31 stays open), Telegram, YouTube delivery, rendering.
 
-### Phase 8+ (not started)
+### Phase 8 — Telegram Bot integration _(complete)_
+
+**Goal:** a conversational front-end for creating and monitoring Jobs, reusing the
+Phase 5–7 application services verbatim — no second Job/Template/File implementation.
+
+**Delivered:**
+
+- Webhook transport (`telegraf`, `POST /api/telegram/webhook`, ADR-0035) — resolves
+  OD-34. A single `globalThis`-cached bot instance; handlers attached exactly once.
+  `TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET` are both optional (unlike
+  `WORKER_API_KEY`) — Studio runs fully with Telegram unconfigured.
+- Phone-based identity linking (`User.phone`/`User.telegramUserId`, both new `@unique`
+  columns) — resolves OD-06 (ADR-0036): a phone match can never be ambiguous by
+  construction, and only a self-shared Telegram contact can link an account.
+- Durable `TelegramWizardState` conversation rows, lazily TTL'd (60 min default, no
+  active sweep — OD-40 stays open) and protected against duplicate/racing Telegram
+  updates by the same atomic-conditional-update primitive `Job.state` uses — resolves
+  OD-12 (no Album grouping entity) and OD-35 (TTL length), ADR-0037.
+- Single Track, Album (redesigned as N repetitions of Single Track's own per-slot
+  collection loop, not legacy's schema-free asset-map splicing), List Jobs, Retry,
+  Cancel, and a department-scoped Cancel All — the direct fix for a real legacy
+  authorization bug (system-wide cancel). Every flow calls the **unmodified** Phase 6/7
+  use cases; `cancelAllJobsForTelegram` is the one new piece of Telegram-side
+  orchestration, and it composes the existing single-Job `cancelJob` in a loop rather
+  than adding a Jobs-feature bulk-cancel capability.
+- Telegram-collected files upload through the unmodified `upload-file.ts` and become
+  ordinary Gallery assets — no new temporary-upload lifecycle, no Telegram-specific
+  aspect-ratio check (matches the dashboard; OD-14 stays open) — ADR-0038.
+- Manually verified against a real database (a standalone script exercising the real
+  composer + use cases + repositories with a mocked Telegram Bot API): identity linking,
+  both Single Track and Album job creation (including a real downloaded-and-sniffed
+  image upload), list/detail/retry/cancel, Cancel All, `/cancel` mid-flow, and
+  cross-department isolation (a tampered callback naming another department's Template
+  is rejected). The webhook route's own auth boundary (missing/wrong secret →
+  `401`) was verified against a real running server.
+
+**Explicitly NOT in Phase 8:** outbound Job-lifecycle notifications (Rendered/Uploaded/
+Error DMs — no trigger point exists since no real Worker/render pipeline runs yet, and no
+durable delivery mechanism exists either, OD-40), `deliverToTelegram` as a Job field,
+aspect-ratio validation, any Template-authoring surface via Telegram, a self-service
+phone-editing UI (Users-feature scope, not built), YouTube delivery, rendering.
+
+### Phase 9+ (not started)
 
 Sequencing is not finalized, but a sensible order:
 
 1. User management (create/disable/role-change) + Department management — wires
    Phase 3's `authorize-user-management.ts` policy to real repositories/Server Actions/UI.
+   This would also be the natural place to add a `User.phone`-editing surface, closing
+   the gap Phase 8 deliberately left open (ADR-0036).
 2. Result/output upload (`JOB_ARTIFACT` creation, screenshot/thumbnail pipeline via safe
    `execFile`/`spawn`, ADR-0015) + durable delivery scaffold — wires Phase 4's
    `File.category = JOB_ARTIFACT` and Phase 6/7's `RENDERED`/`DELIVERING`/`UPLOADED`
-   states to a real pipeline.
+   states to a real pipeline. This is also the prerequisite for Telegram's deferred
+   outbound Job-lifecycle notifications (see Phase 8 above).
 3. YouTube delivery adapter.
-4. Telegram adapter + durable wizard state.
-5. Cleanup jobs, retention, hardening, observability (resolves OD-18, OD-20's remaining
-   half, OD-31's requeue sweep, OD-41's rate limiting).
+4. Cleanup jobs, retention, hardening, observability (resolves OD-18, OD-20's remaining
+   half, OD-31's requeue sweep, OD-41's rate limiting, a `TelegramWizardState` sweep to
+   complement Phase 8's lazy expiration).
 
-Each Phase 8+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
+Each Phase 9+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
 the product owner, implement behind the layering rules, test (unit + the integration
 tests listed in `conventions.md` §9), update the docs.
 

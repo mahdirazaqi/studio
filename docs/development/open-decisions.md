@@ -101,11 +101,14 @@ is undecided. No such operation exists yet.
 - _No safeguard beyond the self-service block:_ simpler; relies on operational discipline
   (e.g. always keep ≥ 2 ADMINs) instead of code.
 
-### OD-06 — Ambiguous / no phone match on Telegram link
+### OD-06 — Ambiguous / no phone match on Telegram link — ✅ RESOLVED (ADR-0036)
 
 _Where:_ [../domain/users.md](../domain/users.md), [../integrations/telegram.md](../integrations/telegram.md).
-Options: reject with a generic message (legacy); admin links manually; invite/claim token
-flow.
+
+**Resolved, Phase 8:** ambiguity cannot occur — `User.phone` is `@unique`, so at most one
+User can ever match a given phone number. Only "no match" remains possible, handled with
+one generic, safe rejection message (legacy's behavior, kept) that never reveals whether a
+differently-statused account exists for that number.
 
 ### OD-07 — Department deletion policy
 
@@ -146,14 +149,14 @@ on every write, and protected from File deletion by `assertNoActiveTemplateDepen
 See ADR-0027 for the full contract, including how this composes with ADR-0025's File
 deletion-safety design.
 
-### OD-12 — Album grouping entity
+### OD-12 — Album grouping entity — ✅ RESOLVED (ADR-0037)
 
 _Where:_ [../integrations/telegram.md](../integrations/telegram.md), [../architecture/data-flow.md](../architecture/data-flow.md).
-The Telegram "Album" flow creates N Jobs. Do they share an `albumGroupId` / a parent
-`AlbumJob` entity, or are they just independent Jobs?
 
-- _Grouping entity:_ nicer UI (see an album as a unit), progress rollup.
-- _Independent:_ less schema; matches legacy (which just made N jobs).
+**Resolved, Phase 8: independent Jobs, no grouping entity.** Matches legacy (which just
+made N jobs) and avoids speculative schema for a "view an album as a unit" UI nobody has
+asked for yet. Album's N Jobs are traceable as a batch only by having been created via the
+same confirmation (same template, close timestamps), not by a schema relationship.
 
 ### OD-13 — Delivery-only retry
 
@@ -206,11 +209,18 @@ after successful delivery + grace)? Keep screenshot+thumbnail longer? Grace peri
 **Recommendation:** purge video after successful required delivery + 7-day grace; keep
 screenshot + thumbnail 90 days; all configurable.
 
-### OD-19 — One-off Telegram/upload inputs: artifact or promotable?
+### OD-19 — One-off Telegram/upload inputs: artifact or promotable? — Telegram's input side ✅ RESOLVED (ADR-0038)
 
 _Where:_ [../data/lifecycle-rules.md](../data/lifecycle-rules.md).
-**Recommendation:** default `JOB_ARTIFACT`, explicit "save to gallery" action. Still open
-— no Job/Telegram feature exists yet to make this choice concrete.
+
+**Resolved for Telegram, Phase 8:** a Telegram-collected file is uploaded through the
+unmodified `features/files/use-cases/upload-file.ts` and becomes an ordinary
+`GALLERY_ASSET` immediately — not a distinct temporary/`JOB_ARTIFACT` category with its
+own promote step. There is no separate "temporary" state to promote _from_, so this
+phase's original recommendation (default `JOB_ARTIFACT`, explicit promote) does not apply
+once Telegram is the entry point. **Still open:** the general "does a Job's _output_ need a
+`JOB_ARTIFACT`-like temporary category" question — unaffected, no result-upload endpoint
+exists yet (see [../integrations/worker-api.md](../integrations/worker-api.md) §6).
 
 ### OD-20 — File dedup mechanism & scope
 
@@ -327,16 +337,21 @@ _Where:_ [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).
 does not accept the legacy `duration` key. A real Worker integration needs its own
 matching update; this was not kept as a dual-key compatibility shim.
 
-### OD-34 — Telegram: webhook vs long-polling
+### OD-34 — Telegram: webhook vs long-polling — ✅ RESOLVED (ADR-0035)
 
 _Where:_ [../integrations/telegram.md](../integrations/telegram.md).
-**Recommendation:** webhook (fits the single-deployable model), with Telegram's secret
-token verified per request.
 
-### OD-35 — Telegram wizard TTL length
+**Resolved, Phase 8: webhook.** `POST /api/telegram/webhook`, authenticated by Telegram's
+own `X-Telegram-Bot-Api-Secret-Token` header mechanism. Fits the single-deployable model;
+no second process, no polling-consumer coordination.
+
+### OD-35 — Telegram wizard TTL length — ✅ RESOLVED (ADR-0037)
 
 _Where:_ [../data/lifecycle-rules.md](../data/lifecycle-rules.md), [../integrations/telegram.md](../integrations/telegram.md).
-e.g. 1 hour vs 24 hours.
+
+**Resolved, Phase 8: 60 minutes**, configurable via `TELEGRAM_WIZARD_TTL_MINUTES`.
+Expiration is checked lazily on next read, not by a scheduled sweep (OD-40's durable-work
+mechanism doesn't exist yet).
 
 ### OD-36 — YouTubeTarget scoping
 
@@ -367,7 +382,13 @@ unknown. Confirm whether Studio needs any on-upload processing.
 
 _Where:_ ADR-0016, [../architecture/data-flow.md](../architecture/data-flow.md), [../data/lifecycle-rules.md](../data/lifecycle-rules.md).
 Transactional outbox + poller / a real queue (BullMQ, pg-boss, …) / scheduled tasks.
-Needed for: durable delivery, artifact cleanup, wizard TTL sweep, stuck-job recovery.
+Needed for: durable delivery, artifact cleanup, wizard TTL sweep, stuck-job recovery, and
+(Phase 8) Telegram Job-lifecycle notifications (DM the creator on `RENDERED`/`UPLOADED`/
+`ERROR`) — not implemented this phase for exactly this reason: nothing yet drives a Job
+into those states in the first place (no real Worker/render pipeline is running), so there
+is no live trigger point to notify from, and no durable delivery mechanism to hand a
+notification attempt to if there were. See [../integrations/telegram.md](../integrations/telegram.md)
+"Notifications".
 
 ### OD-41 — Rate-limiting layer
 

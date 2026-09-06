@@ -100,6 +100,52 @@ export const env = createEnv({
         16,
         "WORKER_API_KEY is required (see .env.example) and should be a long, random value.",
       ),
+
+    /**
+     * The Telegram Bot API token from @BotFather (docs/integrations/telegram.md,
+     * ADR-0035). **Optional** — unlike `WORKER_API_KEY`, the Telegram bot is an
+     * optional deployment feature, not a required one: Studio runs perfectly
+     * well with it unset (the webhook route responds `dependency` / 503, and
+     * outbound sends are skipped and logged, rather than the whole process
+     * failing to start). Never logged, never echoed in any Telegram message or
+     * error response — the logger's key-based redaction also catches any
+     * accidental context field named with "token" in it.
+     */
+    TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
+
+    /**
+     * The secret token Studio expects on Telegram's `X-Telegram-Bot-Api-Secret-Token`
+     * webhook header (set via the `secret_token` parameter when calling
+     * Telegram's `setWebhook`) — verified on every inbound webhook request
+     * before anything else runs (docs/integrations/telegram.md "Webhook
+     * security", ADR-0035). Optional for the same reason `TELEGRAM_BOT_TOKEN`
+     * is; required in practice whenever `TELEGRAM_BOT_TOKEN` is set, checked
+     * at the route, not here, so one missing variable never crashes the whole
+     * app at startup the way `WORKER_API_KEY` does.
+     */
+    TELEGRAM_WEBHOOK_SECRET: z.string().min(16).optional(),
+
+    /**
+     * How long a Telegram conversation may sit untouched before it's treated
+     * as expired and lazily reset to idle on the next message
+     * (docs/integrations/telegram.md "Conversation state", ADR-0037, resolves
+     * OD-35). No active sweep exists — expiry is checked only when a row is
+     * next read, per OD-40's still-open durable-work-mechanism question.
+     */
+    TELEGRAM_WIZARD_TTL_MINUTES: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(1440)
+      .default(60),
+
+    /**
+     * Local development seed (`prisma/seed.ts`) only — never read by the
+     * running application. Lets a developer link the seeded ADMIN's Telegram
+     * account locally without a raw SQL/`prisma studio` edit. Never a real
+     * phone number in any committed value.
+     */
+    SEED_ADMIN_PHONE: z.string().min(1).optional(),
   },
 
   client: {
@@ -126,6 +172,10 @@ export const env = createEnv({
     JOB_RETRY_WINDOW_DAYS: process.env.JOB_RETRY_WINDOW_DAYS,
     JOB_UPLOAD_DAILY_CAP: process.env.JOB_UPLOAD_DAILY_CAP,
     WORKER_API_KEY: process.env.WORKER_API_KEY,
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
+    TELEGRAM_WIZARD_TTL_MINUTES: process.env.TELEGRAM_WIZARD_TTL_MINUTES,
+    SEED_ADMIN_PHONE: process.env.SEED_ADMIN_PHONE,
   },
 
   /** Treat empty strings as undefined so blank .env lines don't pass validation. */

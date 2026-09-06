@@ -1162,3 +1162,244 @@ principal**. There is no per-Worker identity, so:
 
 **Status:** DECIDED. Resolves OD-30 (Worker claim scope) as "no per-claim restriction,
 by design."
+
+---
+
+## ADR-0035 — Telegram runtime: webhook + a single Telegraf instance
+
+**Context.** OD-34 left webhook vs. long-polling open, with a lean toward webhook (fits
+the single-deployable model). Phase 8 has to actually build a Telegram bot, and needs a
+library and a concrete runtime shape.
+
+**Decision.**
+
+- **Library:** `telegraf` (the same one legacy used, via `nestjs-telegraf` — no reason to
+  evaluate alternatives when the incumbent is the standard, actively maintained choice for
+  Node/TypeScript and legacy's own use of it already validates the fit).
+- **Transport: webhook**, resolving OD-34. `POST /api/telegram/webhook`
+  (`src/app/api/telegram/webhook/route.ts`) is a thin `defineRouteHandler`, matching every
+  other external entry point's shape: authenticate (Telegram's own secret-token webhook
+  mechanism, `@/server/telegram-webhook-auth`) → parse → `bot.handleUpdate(update)` →
+  `204`. No polling worker process, no second deployable, no single-consumer coordination
+  problem to solve.
+- **One Telegraf instance per process** (`@/server/adapters/telegram/client.ts`,
+  `getTelegramBot()`), cached on `globalThis` exactly like `@/server/db`'s `PrismaClient`
+  singleton — necessary because Next.js dev-mode module reloads would otherwise construct
+  a second `Telegraf` (and, worse, register its handlers a second time) on every file
+  change. `getTelegramBot()` returns `null` when `TELEGRAM_BOT_TOKEN` is unset — unlike the
+  Worker API's `WORKER_API_KEY`, the Telegram bot is an **optional** deployment feature;
+  Studio runs completely normally without it configured.
+- **Handler registration is separated from the client**: `getTelegramBot()`
+  (`@/server/adapters/telegram`) constructs/returns the raw client only; a second,
+  feature-layer function, `getRegisteredTelegramBot()`
+  (`@/features/telegram/bot/register.ts`), attaches `telegramComposer` to it exactly once
+  (its own `globalThis`-cached boolean flag), mirroring the same split
+  `@/server/adapters/storage` already has from the `features/files` code that uses it.
+
+**Consequences.**
+
+- No `ENABLE_TELEGRAM` flag (legacy had one) — "configured" (`TELEGRAM_BOT_TOKEN` set) and
+  "enabled" are the same thing; there is no state where the token is set but the bot is
+  deliberately switched off.
+- Local development without a real bot token still runs the whole app normally; only the
+  webhook route (`dependency`/503) and any outbound send are affected, and outbound sends
+  are logged rather than thrown when Telegram is disabled.
+- Resolves OD-34.
+
+**Status:** DECIDED.
+
+---
+
+## ADR-0036 — Telegram identity: unique phone-based linking, no session for the Actor
+
+**Context.** `docs/domain/users.md` already sketched phone-based linking as future schema
+("`phone`, `telegramUserId` ... land with Telegram integration") and OD-06 left the
+ambiguous/no-match case open. Phase 8 has to add the columns and the actual linking
+use case, and decide how a Telegram update becomes an authorized `Actor` without a session
+cookie.
+
+**Decision.**
+
+- **`User.phone` and `User.telegramUserId` are both nullable, `@unique` columns**, added
+  in this phase. Matching is `/start` → Telegram's native "share contact" button →
+  `normalizePhone` (digits-only, `features/telegram/domain/phone.ts`) → look up an
+  `ACTIVE` User by that normalized phone → set `telegramUserId`.
+- **OD-06 resolved:** because `phone` is unique, an _ambiguous_ match can never occur by
+  construction — the only real outcome besides a match is "no match", handled with one
+  generic, safe message that never reveals whether a differently-statused account exists
+  for that number.
+- **A self-shared contact only** — `message.contact.user_id` (Telegram sets this to the
+  sender's own numeric id when _they_ tapped "share my phone number"; it is absent or
+  different for a forwarded contact card) is checked against the inbound `ctx.from.id`
+  before attempting a match, so forwarding a colleague's contact card can never link their
+  phone to the forwarder's Telegram account.
+- **No self-service phone-editing UI.** Setting `User.phone` in the first place is treated
+  as **Users-feature** scope (the fields were always documented as landing there,
+  independent of who builds the UI), not Telegram-feature scope — matching legacy, where
+  phone was set through the (separate) admin/user-management surface, not the bot. Studio
+  has no user-management UI yet (Phase 3 note, unchanged), so `phone` is set today via
+  `prisma db seed` (a new optional `SEED_ADMIN_PHONE` var) or a direct administrative
+  write, until a future user-management phase adds a real field for it. This was a
+  deliberate scope boundary, not an oversight — see Phase 8 brief §65 ("do not implement
+  ... new business features not required by the legacy workflow").
+- **The Telegram `Actor` is built directly, without a session.**
+  `resolveTelegramIdentity(telegramUserId)`
+  (`features/telegram/use-cases/resolve-telegram-identity.ts`) looks up the linked User by
+  `telegramUserId` (only `ACTIVE`, mirroring `@/server/auth/session`'s identical status
+  filter) and constructs an `Actor` the same shape `toActor(currentUser)` builds for a web
+  session — `@/server/authz`'s own doc comment anticipated exactly this. Every downstream
+  use case runs `authorize(actor, ...)` identically regardless of which transport built the
+  `Actor` (Phase 8 brief §66).
+
+**Consequences.**
+
+- A disabled User's Telegram identity is inert the instant they're disabled — the same
+  lookup that gates web sessions gates this one, with no separate revocation step.
+- No OTP/password step for Telegram — matches legacy's UX exactly, since phone possession
+  (proven via Telegram's own "share contact" button, not a typed number) is the entire
+  proof of identity, same as legacy.
+- Resolves OD-06. `phone`'s normalization is intentionally simple (digits-only, no
+  `libphonenumber`) — documented as a known, accepted limitation in
+  `features/telegram/domain/phone.ts` rather than a general phone-number solution.
+
+**Status:** DECIDED. Resolves OD-06.
+
+---
+
+## ADR-0037 — Durable, TTL'd wizard state with atomic-conditional-update duplicate protection
+
+**Context.** ADR-0014 already decided wizard state must be durable (PostgreSQL), fixing
+legacy's in-process `TelegrambotDataset`/`TelegrambotJobDataset`. Phase 8 has to design the
+concrete schema, expiration mechanism (OD-35), and — new requirements not present when
+ADR-0014 was written — protection against a duplicate Telegram update re-advancing the
+same step twice, and against a duplicate confirmation tap creating two batches of Jobs.
+
+**Decision.**
+
+- **`TelegramWizardState`** (`prisma/schema.prisma`): one row per Telegram user
+  (`telegramUserId @unique`), linking to exactly one `User` (`userId @unique` — a Studio
+  User has at most one active conversation), an explicit `flow`
+  (`SINGLE_TRACK`/`ALBUM`) and `step` enum (`PICK_TEMPLATE`/`ASK_DELIVERY`/
+  `ASK_TRACK_COUNT`/`COLLECT_ASSETS`/`CONFIRM`/`CREATING`/`COMPLETED`) — never an arbitrary
+  string scattered through handlers — a validated JSONB `payload`
+  (`features/telegram/schemas/wizard-payload.schema.ts`, re-validated on every read,
+  Phase 8 brief §46), and `lastUpdateId`.
+- **Expiration is lazy, not swept** (resolves OD-35): `TELEGRAM_WIZARD_TTL_MINUTES`
+  (default 60) is checked against `updatedAt` the next time a row is read
+  (`load-active-wizard-state.ts`); an expired row is deleted on the spot and treated as
+  "no active conversation." There is no scheduled sweep — OD-40's durable-work mechanism
+  doesn't exist yet to hang one on, and building a bespoke scheduler for this alone would
+  be exactly the "sophisticated distributed session system" the brief says not to build
+  (§15). A stale, never-revisited row simply sits until either the same user returns (and
+  it's lazily cleared) or a future OD-40 mechanism adds a real sweep.
+- **A corrupted payload never crashes the bot** (§17): if a row's `payload` fails
+  `wizardPayloadSchema`, it's logged (no sensitive data — just the telegram id and step)
+  and deleted, exactly like an expired row.
+- **Every step change is one atomic conditional `UPDATE ... WHERE step IN (fromSteps)`**
+  (`advanceWizardState`, `features/telegram/repository/telegram-repository.ts`) — the
+  identical primitive `job-repository.ts`'s `transitionJobRow` uses for `Job.state`
+  (ADR-0029), applied here for the same reason: a duplicate/racing Telegram update finds
+  the row no longer in `fromSteps`, the `updateMany` matches zero rows, and the use case
+  treats that as "already handled" rather than silently re-applying an action.
+- **The CONFIRM → CREATING step change is the actual duplicate-Job-creation guard**
+  (Phase 8 brief §51/§52): only the caller that wins this specific conditional update goes
+  on to call `createJob` (once per track); a second, near-simultaneous confirmation tap
+  finds the row already moved to `CREATING` and reports "already being processed" instead
+  of creating a second batch. This is the same reasoning ADR-0031 already used for
+  dashboard-initiated retry (a row-level lock/conditional-update serializes the race,
+  not a generic idempotency-key framework) — deliberately not a bigger mechanism than the
+  brief asks for (§51 "choose the simplest robust approach").
+- **Album is a redesign, not a port** (Phase 8 brief §25): legacy's Album flow spliced
+  ad hoc `Audio N`/`Song N` keys into a schema-less asset map that has no equivalent in
+  Studio's typed `TemplateAsset` model (every Job input must match a real, author-declared
+  slot key — `resolveJobAssets` rejects anything else). Studio's Album is instead: pick a
+  Template once, ask a track count, then run the **exact same per-slot collection loop**
+  Single Track uses, once per track (`advanceTrackCursor`,
+  `features/telegram/domain/wizard.ts` — a pure function parameterized only by
+  `trackCount`), producing `trackCount` independent `createJob` calls at confirmation. No
+  `albumGroupId`/grouping entity was added (resolves OD-12 as "independent Jobs", the
+  simpler option, matching what legacy's actual N-`addJob`-calls behavior already amounted
+  to) — an Album's Jobs are traceable as a batch only by having been created in the same
+  short time window, not by a schema relationship.
+- **Partial-failure reporting, not a transaction** (§26): Jobs are created sequentially
+  inside `confirmWizard`; the loop stops at the first failure (matching legacy's actual
+  behavior — an unhandled exception mid-loop aborted every remaining `addJob` call) and the
+  reply names exactly how many succeeded, never claiming full success when it wasn't. No
+  distributed/saga transaction was built — a partial batch is a real, valid, list-visible
+  set of Jobs, not a rolled-back attempt.
+
+**Consequences.**
+
+- No new idempotency-key table, no in-memory lock, no generic distributed session
+  framework — every guarantee here is enforced at the PostgreSQL level (one conditional
+  `UPDATE`), the same reasoning ADR-0029/ADR-0034 already established for the Worker API.
+- Resolves OD-35 (TTL length: 60 minutes, configurable) and OD-12 (independent Jobs, no
+  grouping entity).
+- A department with an Album template whose slot set later changes doesn't affect an
+  in-progress conversation — `pick-template.ts` snapshots the Template's slots into the
+  wizard payload at pick time (`WizardSlot[]`), and `createJob` re-validates against the
+  _live_ Template at confirmation regardless, so the snapshot is a conversational
+  convenience only, never a trust boundary.
+
+**Status:** DECIDED. Resolves OD-12, OD-35.
+
+---
+
+## ADR-0038 — Telegram reuses the File/Job application services verbatim; no new artifact lifecycle
+
+**Context.** Phase 8 brief §22–24 asks how Telegram-collected media becomes a Job input
+without duplicating File Gallery rules or inventing a temporary-upload concept Studio
+doesn't otherwise have. Legacy guessed a MIME type from the downloaded URL's extension and
+uploaded directly to disk from the bot — a known defect (`docs/legacy/known-issues.md`).
+
+**Decision.**
+
+- **A Telegram-collected file becomes an ordinary `GALLERY_ASSET` File**, uploaded through
+  the same `features/files/use-cases/upload-file.ts` the dashboard's own upload form
+  calls — full content-type sniffing from the downloaded bytes (never Telegram's declared
+  media type or a URL-extension guess), the same size limits, the same department scoping
+  (`uploadedByUserId`/department always the linked User's own — never a
+  cross-department authoring surface via Telegram, even for ADMIN). A slot's declared
+  `TemplateAssetKind` is checked against the _sniffed_ kind after upload — a video sent for
+  an `AUDIO` slot is rejected exactly as if the mismatch had been submitted from the
+  dashboard.
+- **No new "temporary upload" or Telegram-specific `JOB_ARTIFACT`-on-input concept was
+  built.** Every File the dashboard's Job-creation form can reference is already an
+  ordinary, persistent Gallery File chosen from existing assets — Telegram's own uploads
+  simply join that same pool the moment they're uploaded, consistent with how the
+  dashboard has always worked. This means there is no cleanup/lifecycle design needed for
+  "abandoned" Telegram uploads (§24/§53): a file uploaded mid-conversation that never ends
+  up in a confirmed Job is not different from a web user uploading to the Gallery and never
+  using it in a Job — an ordinary, reusable, explicitly-deletable Gallery asset, not a
+  leak. Building real `JOB_ARTIFACT`-on-input semantics (a distinct temporary category with
+  its own retention window) is deferred to whenever a real artifact-lifecycle feature
+  exists to justify it — Phase 7 already left `JOB_ARTIFACT` creation itself unimplemented
+  on the _output_ side for the identical reason (no consuming feature yet).
+- **No Telegram-specific aspect-ratio validation was added.** The dashboard's own
+  `create-job.ts`/`resolve-job-assets.ts` do not compare an uploaded image's dimensions
+  against a Template slot's `imageRatio` either — OD-14 (the tolerance value) is still
+  open, and no feature performs this comparison yet. Adding a Telegram-only check here
+  would give Job creation two different validation behaviors depending on entry point,
+  which Phase 8 brief §66 explicitly forbids. Legacy's own check used exact float equality
+  (a known bug) — not reproduced either way, on either surface.
+- **The Album/track loop calls the unmodified `createJob` use case once per track** — no
+  Prisma call, no Job-domain logic, is written inside the Telegram feature at all (Phase 8
+  brief §20). `cancelAllJobsForTelegram` (the one genuinely new piece of Telegram-side
+  orchestration) is likewise a loop over the unmodified single-Job `cancelJob` use case,
+  scoped to the actor's own Department's cancelable Jobs — not a new Jobs-feature
+  bulk-cancel capability (`CLAUDE.md` §11 still defers that).
+
+**Consequences.**
+
+- `docs/domain/files.md`'s OD-19 ("one-off Telegram/upload inputs: artifact or
+  promotable?") is answered for Telegram specifically: **promotable-by-default is
+  moot** because there is no separate "temporary" state to promote _from_ — every
+  Telegram upload is already a first-class Gallery asset. The general "does a Job's input
+  File ever need a JOB_ARTIFACT-like temporary category" question stays open for the
+  _output_ side, unaffected.
+- Telegram inherits every future improvement to `upload-file.ts` (dedup notices, new
+  allowed types, size-limit changes) automatically, with zero Telegram-side code changes —
+  the whole point of reusing the use case verbatim.
+- Resolves the file-handling half of OD-19 for Telegram's input path.
+
+**Status:** DECIDED.

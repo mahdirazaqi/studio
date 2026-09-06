@@ -407,7 +407,63 @@ ADR-0004/ADR-0032/ADR-0033/ADR-0034. **Implemented, Phase 7** — versioned unde
   without re-reading `docs/integrations/worker-api.md` §6 first — each has a documented
   reason it was deferred, not merely forgotten.
 
-## 14. Security rules (summary)
+## 14. Telegram rules (summary)
+
+Full detail: [`docs/integrations/telegram.md`](docs/integrations/telegram.md),
+[`docs/architecture/decisions.md`](docs/architecture/decisions.md)
+ADR-0035/0036/0037/0038. **Implemented, Phase 8** — webhook transport
+(`app/api/telegram/webhook`), phone-based identity linking, durable wizard state, and
+Single Track/Album/List/Retry/Cancel/Cancel-All flows.
+
+- **Telegram is an adapter, never a second Job/Template/File implementation.** The
+  composer (`features/telegram/bot/composer.ts`) maps updates to use-case calls and
+  renders replies — it never decides authorization, Template/Job state, or validation
+  itself. Every one of those checks lives in the same use case a dashboard Server Action
+  calls (`createJob`, `getTemplateForJobForm`, `cancelJob`, `retryJob`,
+  `listDepartmentJobs`, `uploadFile`) — **imported directly by the Telegram feature**,
+  the one deliberate exception to "a use case never imports another feature's use cases"
+  (see `docs/architecture/project-structure.md` §3). Do not add a Telegram-only variant
+  of any Job/Template/File rule; extend the shared use case instead.
+- **No Telegram-specific authorization function.** Every handler resolves an `Actor`
+  (`resolveTelegramIdentity`) and calls the exact same `authorize()`-gated use case a
+  human would reach — never a `telegramCanCreateJob()`-style parallel check. An unlinked
+  Telegram user, or one linked to a since-`DISABLED` User, resolves to no `Actor` at all
+  and is shown the linking prompt.
+- **Identity linking is phone-based and unique** (`User.phone`/`User.telegramUserId`,
+  both `@unique` — ADR-0036). Only a **self**-shared Telegram contact can link an
+  account; a forwarded contact card can never link someone else's phone. Setting
+  `User.phone` in the first place is Users-feature scope, not Telegram-feature scope —
+  there is no phone-editing UI yet (`prisma db seed`'s `SEED_ADMIN_PHONE` only).
+- **Conversation state is durable, never in-memory.** `TelegramWizardState`
+  (`features/telegram/repository/telegram-repository.ts`) is the only place a
+  conversation's progress lives — the composer itself holds nothing between requests.
+  Every step change is one atomic conditional `UPDATE ... WHERE step IN (fromSteps)`
+  (`advanceWizardState`), the same primitive `transitionJobRow` uses for `Job.state` —
+  never a read-then-write. Expiration is lazy (checked on next read against
+  `TELEGRAM_WIZARD_TTL_MINUTES`), not a scheduled sweep.
+- **Every callback id is re-validated server-side, every time** — `decodeCallbackData`
+  only parses shape; the use case it reaches re-resolves the id through the actor's own
+  department scope. Never trust a callback just because Studio generated the button, and
+  never put anything sensitive in `callback_data`.
+- **A Telegram-collected file is an ordinary `GALLERY_ASSET`**, uploaded through the
+  unmodified `uploadFile` use case (real content-type sniffing, never Telegram's declared
+  media type) — there is no separate temporary-upload/`JOB_ARTIFACT`-on-input concept to
+  build or clean up (ADR-0038).
+- **`TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET` are optional**, unlike
+  `WORKER_API_KEY` — Studio must run fully with Telegram unconfigured. The webhook
+  (`@/server/telegram-webhook-auth`) fails closed (`503`) when unconfigured, `401` on a
+  missing/wrong secret — never an open, unauthenticated endpoint.
+- **One Telegraf instance per process** (`@/server/adapters/telegram/client.ts`'s
+  `getTelegramBot()`, `globalThis`-cached like `@/server/db`); handlers are attached to it
+  exactly once (`features/telegram/bot/register.ts`). Never construct a second `Telegraf`
+  instance or re-run `bot.use(telegramComposer)`.
+- **Not implemented, deliberately**: outbound Job-lifecycle notifications
+  (Rendered/Uploaded/Error DMs — no trigger point or durable delivery mechanism exists
+  yet, OD-40), `deliverToTelegram` as a Job field, aspect-ratio validation (matches the
+  dashboard — OD-14 stays open), any Template-authoring surface via Telegram, a
+  self-service phone-editing UI.
+
+## 15. Security rules (summary)
 
 Full document: [`docs/security/security.md`](docs/security/security.md). Highlights:
 
@@ -421,14 +477,14 @@ Full document: [`docs/security/security.md`](docs/security/security.md). Highlig
 - Validate every input at the boundary (Zod or equivalent) — Server Actions included.
 - Secrets only via environment / secret manager; never in the repo.
 
-## 15. Frontend conventions (summary)
+## 16. Frontend conventions (summary)
 
 Panel-only app, **no landing page**. Next.js App Router + React + TypeScript + Tailwind +
 shadcn/ui. **LTR**, **English** UI and messages. Responsive with an excellent mobile
 experience. **Light / Dark / System** themes. Full detail:
 [`docs/frontend/conventions.md`](docs/frontend/conventions.md).
 
-## 16. Phase status
+## 17. Phase status
 
 - **Phase 0 (documentation & architecture foundation) — complete.**
 - **Phase 1 (Next.js foundation & application skeleton) — complete.** Dashboard shell,
@@ -482,8 +538,24 @@ jobs/:id/state, jobs/:id/progress, jobs/:id/duration}` — thin `defineRouteHand
   needed (ADR-0034). No Worker rendering, FFmpeg/ImageMagick, result/output upload,
   `JOB_ARTIFACT` creation, Telegram, or YouTube delivery — those remain later phases.
   The app runs (`npm run dev`), builds (`npm run build`), and passes `npm run check`
-  (lint + typecheck + format + tests). **Still no user/department management UI, no
-  result upload, no Telegram/YouTube.**
+  (lint + typecheck + format + tests).
+- **Phase 8 (Telegram Bot integration) — complete.** Webhook transport (`telegraf`,
+  `POST /api/telegram/webhook`, ADR-0035), a single `globalThis`-cached bot instance with
+  handlers attached exactly once; phone-based identity linking with `User.phone`/
+  `User.telegramUserId` (both new `@unique` columns, ADR-0036, resolves OD-06); durable,
+  lazily-TTL'd `TelegramWizardState` conversation rows with atomic-conditional-update
+  duplicate protection (ADR-0037, resolves OD-12/OD-35); Single Track, Album (redesigned
+  onto Studio's typed Template model, not legacy's schema-free hack), List/Retry/Cancel,
+  and a department-scoped Cancel All (the direct fix for a real legacy authorization bug)
+  — every flow calling the **unmodified** Phase 5–7 use cases (`createJob`, `getJob`,
+  `retryJob`, `cancelJob`, `listDepartmentJobs`, `getTemplateForJobForm`, `uploadFile`),
+  adding no parallel Job/Template/File logic (ADR-0038). Telegram-collected files are
+  ordinary Gallery assets — no new temporary-upload lifecycle. `npm run check` and
+  `npm run build` both pass. **Not implemented, deliberately**: outbound Job-lifecycle
+  notifications (no trigger point or durable delivery mechanism exists yet — OD-40),
+  `deliverToTelegram`, aspect-ratio validation (matches the dashboard), any Telegram
+  Template-authoring surface, a self-service phone-editing UI. **Still no user/department
+  management UI, no result upload, no YouTube.**
 
 Do **not** start the next phase (user/department management, then result upload +
 delivery) unless explicitly asked. See

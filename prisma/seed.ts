@@ -16,6 +16,7 @@ import { PrismaClient } from "@prisma/client";
 
 import { env } from "@/server/env";
 import { hashPassword } from "@/server/auth/password";
+import { normalizePhone } from "@/features/telegram/domain/phone";
 
 const db = new PrismaClient();
 
@@ -39,10 +40,15 @@ async function main() {
 
   const email = env.SEED_ADMIN_EMAIL.trim().toLowerCase();
   const passwordHash = await hashPassword(env.SEED_ADMIN_PASSWORD);
+  const seedPhone = env.SEED_ADMIN_PHONE
+    ? normalizePhone(env.SEED_ADMIN_PHONE)
+    : null;
 
   const admin = await db.user.upsert({
     where: { email },
-    update: {},
+    // Re-running the seed after adding `SEED_ADMIN_PHONE` to `.env` updates
+    // an already-seeded admin too, not just a freshly created one.
+    update: seedPhone ? { phone: seedPhone } : {},
     create: {
       email,
       fullName: env.SEED_ADMIN_NAME ?? "Development Admin",
@@ -50,6 +56,11 @@ async function main() {
       role: "ADMIN",
       status: "ACTIVE",
       departmentId: department.id,
+      // Optional, dev-only: lets a developer link the seeded ADMIN's own
+      // Telegram account locally (docs/domain/users.md "Telegram linkage",
+      // ADR-0035/ADR-0036) without a raw SQL/`prisma studio` edit — there is
+      // no phone-editing UI yet (out of Phase 8's scope).
+      phone: seedPhone,
     },
   });
   console.log(

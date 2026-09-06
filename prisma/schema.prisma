@@ -1,12 +1,14 @@
 // Studio — Prisma schema.
 //
 // Phase 2: Department, User, Session. Phase 4: File. Phase 5: Template,
-// TemplateAsset. Phase 6: Job, JobAsset. See docs/data/database.md and
+// TemplateAsset. Phase 6: Job, JobAsset. Phase 8: User.phone/telegramUserId,
+// TelegramWizardState. See docs/data/database.md and
 // docs/architecture/decisions.md (ADR-0002, ADR-0005, ADR-0006, ADR-0007,
-// ADR-0008, ADR-0010, ADR-0011, ADR-0013, ADR-0020, ADR-0024, ADR-0025,
-// ADR-0027, ADR-0028, ADR-0029, ADR-0030, ADR-0031) for the decisions behind
-// this shape. Do not add speculative models here — later phases (Worker API,
-// Telegram, YouTube delivery) add their own schema when those features land.
+// ADR-0008, ADR-0010, ADR-0011, ADR-0013, ADR-0014, ADR-0020, ADR-0024,
+// ADR-0025, ADR-0027, ADR-0028, ADR-0029, ADR-0030, ADR-0031, ADR-0035,
+// ADR-0036, ADR-0037, ADR-0038) for the decisions behind this shape. Do not
+// add speculative models here — later phases (YouTube delivery) add their own
+// schema when those features land.
 
 generator client {
   provider = "prisma-client-js"
@@ -53,11 +55,10 @@ model Department {
 
 /// A Studio operator (docs/domain/users.md, ADR-0007).
 ///
-/// Only the fields Phase 2 needs exist here. `phone`, `telegramUserId`,
-/// `disabledAt`/`disabledByUserId` etc. are documented as future fields in
-/// docs/domain/users.md and are added when the features that need them
-/// (Telegram linking, user management/disable UI) are implemented — adding them
-/// now would be speculative schema.
+/// `disabledAt`/`disabledByUserId` are still documented-future-only (land with
+/// a user management/disable UI, not part of this phase). `phone` and
+/// `telegramUserId` land here, Phase 8 (ADR-0035) — see "Telegram linkage"
+/// in docs/domain/users.md.
 model User {
   id           String     @id @default(cuid())
   /// Unique login identifier. Lookups are case-sensitive at the DB level; the
@@ -69,6 +70,24 @@ model User {
   passwordHash String
   role         UserRole   @default(USER)
   status       UserStatus @default(ACTIVE)
+
+  /// Normalized digits-only phone number (`features/telegram/domain/phone.ts`
+  /// `normalizePhone`), used **only** to match an incoming Telegram "share
+  /// contact" against this User (ADR-0035, docs/domain/users.md "Telegram
+  /// linkage"). Unique so a phone match can never be ambiguous — resolves the
+  /// "ambiguous match" half of OD-06; only the "no match" case remains
+  /// possible, handled with a generic rejection. Set today only via
+  /// `prisma db seed` / a direct administrative write — there is no
+  /// self-service or admin UI to edit it yet (no user-management UI exists;
+  /// out of Phase 8's scope, see ADR-0035).
+  phone String? @unique
+
+  /// The stable Telegram numeric user id (sent as a string; Telegram ids
+  /// exceed JS's safe integer range in principle). Set once, by
+  /// `features/telegram/use-cases/link-telegram-account.ts`, after a
+  /// successful phone match. `null` = not linked. Unique — one Telegram
+  /// identity maps to at most one Studio User (ADR-0035).
+  telegramUserId String? @unique
 
   departmentId String
   department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
@@ -83,6 +102,11 @@ model User {
   canceledJobs Job[] @relation("JobCanceledBy")
   retriedJobs  Job[] @relation("JobRetriedBy")
 
+  /// Ephemeral Telegram conversation state (ADR-0014/ADR-0035) — not a
+  /// historical record, unlike everything else this User relates to; see
+  /// `TelegramWizardState`'s own doc comment.
+  telegramWizardState TelegramWizardState?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -90,7 +114,8 @@ model User {
   // pattern (ADR-0011). `email` already has an index via its unique constraint.
   // No separate `role` index — cardinality is 3, not selective enough to justify
   // one on its own; add a composite (departmentId, role) later if a real query
-  // needs it.
+  // needs it. `phone`/`telegramUserId` already have an index via their unique
+  // constraints — that's the only lookup either one needs (a single-row match).
   @@index([departmentId])
   @@map("users")
 }
@@ -103,8 +128,8 @@ model User {
 /// so disabling a User (a later phase's feature) takes effect on every existing
 /// session immediately, with no separate revocation sweep required.
 model Session {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
+  id        String @id @default(cuid())
+  tokenHash String @unique
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -157,12 +182,12 @@ model File {
   /// the browser only ever knows this row's `id` and reaches bytes through the
   /// authenticated `/api/files/[fileId]` route, which re-resolves `storageKey`
   /// server-side after an authorization check on every request.
-  storageKey   String       @unique
+  storageKey   String @unique
 
   /// Sniffed from the actual bytes (`file-type`), not the client's declared
   /// Content-Type — see `@/server/media`.
-  mimeType String
-  sizeBytes Int
+  mimeType    String
+  sizeBytes   Int
   /// SHA-256 hex digest of the bytes. Advisory-dedup groundwork only in Phase 4
   /// (OD-20 stays open) — nothing blocks or auto-merges on a match yet.
   contentHash String
@@ -273,12 +298,12 @@ model Template {
   status TemplateStatus @default(ACTIVE)
 
   /// Opaque to Studio — passed through to the Render Worker.
-  composition String
+  composition   String
   /// Legacy `src` — the Worker's source/project location. Opaque.
-  source String
+  source        String
   /// Legacy `script` — injected as the Job's first asset by the Worker
   /// contract. Opaque to Studio.
-  scriptRef String
+  scriptRef     String
   /// Legacy `output` — output naming/dir pattern, copied into a Job at
   /// creation.
   outputPattern String
@@ -288,7 +313,7 @@ model Template {
   /// YouTube tag templates, with `{{layer}}` placeholders substituted by the
   /// future delivery module — Templates only store the configuration
   /// (Phase 5 brief §16), never perform substitution themselves.
-  tags String[] @default([])
+  tags        String[] @default([])
 
   assets TemplateAsset[]
   jobs   Job[]
@@ -334,7 +359,7 @@ model TemplateAsset {
   /// Passed through to the Job asset the Worker receives. Opaque to Studio.
   composition String
   /// Passed through; also the `{{layer}}` substitution token for tags.
-  layer String
+  layer       String
 
   /// Only meaningful for `kind: IMAGE` — enforced at the application layer
   /// (`features/templates/domain`), not by a DB constraint (Postgres has no
@@ -448,7 +473,7 @@ model Job {
 
   /// 0–100, reported by the Worker (not yet — Phase 7). `null` before the
   /// Worker's first report.
-  progress Int?
+  progress        Int?
   /// Rendered output duration in seconds, reported by the Worker. `null`
   /// until reported.
   durationSeconds Int?
@@ -475,7 +500,7 @@ model Job {
   retryReason     String?
 
   canceledByUserId String?
-  canceledBy       User?   @relation("JobCanceledBy", fields: [canceledByUserId], references: [id], onDelete: Restrict)
+  canceledBy       User?     @relation("JobCanceledBy", fields: [canceledByUserId], references: [id], onDelete: Restrict)
   canceledAt       DateTime?
   cancelReason     String?
 
@@ -559,4 +584,77 @@ model JobAsset {
   @@index([fileId])
   @@index([jobId])
   @@map("job_assets")
+}
+
+/// The Telegram conversation flow a wizard row is progressing through
+/// (docs/integrations/telegram.md, ADR-0035). `ALBUM` never asks the
+/// delivery question (legacy behavior, kept — `docs/domain/jobs.md`'s
+/// `deliverToYouTube` defaults to `false` for the whole flow).
+enum TelegramWizardFlow {
+  SINGLE_TRACK
+  ALBUM
+}
+
+/// Explicit conversation steps (Phase 8 brief §16) — never an arbitrary
+/// string scattered through handlers. `ASK_DELIVERY`/`ASK_TRACK_COUNT` are
+/// flow-specific (only `SINGLE_TRACK` uses the former, only `ALBUM` the
+/// latter); the rest are shared by both flows.
+enum TelegramWizardStep {
+  PICK_TEMPLATE
+  ASK_DELIVERY
+  ASK_TRACK_COUNT
+  COLLECT_ASSETS
+  CONFIRM
+  CREATING
+  COMPLETED
+}
+
+/// Durable Telegram conversation/wizard state (ADR-0014, ADR-0035) — the
+/// direct fix for legacy's `TelegrambotDataset`/`TelegrambotJobDataset`,
+/// which were plain in-process `{}` singletons: lost on every restart, not
+/// shared across instances, unbounded growth, no TTL.
+///
+/// Deliberately **not** a historical record like `Job` — this is ephemeral
+/// conversational scratch space, TTL'd (`docs/data/lifecycle-rules.md`,
+/// `TELEGRAM_WIZARD_TTL_MINUTES`) and lazily expired by the use-case layer on
+/// next read (`features/telegram/use-cases/load-active-wizard-state.ts`); a
+/// row disappearing changes nothing about any Job/Template/File it may have
+/// referenced along the way.
+model TelegramWizardState {
+  id String @id @default(cuid())
+
+  /// The stable Telegram numeric user id — the natural key for "one active
+  /// conversation per Telegram chat", independent of `userId` so a lookup
+  /// never needs identity resolution to already have happened.
+  telegramUserId String @unique
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  flow TelegramWizardFlow
+  step TelegramWizardStep
+
+  /// Validated on every read/write against
+  /// `features/telegram/schemas/wizard-payload.schema.ts` — never trusted as
+  /// opaque JSON past that boundary (Phase 8 brief §46). Holds only what's
+  /// needed to resume the conversation: the chosen Template's id and a
+  /// snapshot of its slot definitions (so a mid-conversation Template edit
+  /// can't shift the slots being collected), the delivery choice, the track
+  /// count, and the asset values collected so far, per track. Never an
+  /// arbitrary/unvalidated Telegram update payload.
+  payload Json
+
+  /// The most recently processed Telegram update id for this conversation —
+  /// defense-in-depth against a duplicate webhook delivery re-advancing the
+  /// same step twice (docs/integrations/telegram.md "Duplicate updates").
+  lastUpdateId Int?
+
+  createdAt DateTime @default(now())
+  /// Drives TTL expiration — a row untouched for longer than
+  /// `TELEGRAM_WIZARD_TTL_MINUTES` is treated as expired and lazily deleted
+  /// the next time it's read (no separate sweep process — OD-40's durable-work
+  /// mechanism doesn't exist yet to hang a scheduled sweep on).
+  updatedAt DateTime @updatedAt
+
+  @@map("telegram_wizard_states")
 }

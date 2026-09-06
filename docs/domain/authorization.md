@@ -146,8 +146,9 @@ the most conservative reading until it's resolved, never a guessed answer:
    (`departmentScopeFilter(actor)` — implemented as a reusable helper; no list endpoint
    exists yet to call it).
 4. **Server Actions and Route Handlers both** go through the same authorized use case.
-5. **Telegram** resolves to a `User` and runs the same checks — a Telegram user with role
-   USER cannot do MANAGER things, and cannot touch other departments.
+5. **Telegram** (implemented, Phase 8) resolves to a `User` and runs the same checks — a
+   Telegram user with role USER cannot do MANAGER things, and cannot touch other
+   departments.
 6. **Session invalidation on disable** — disabling a user or archiving a department takes
    effect immediately.
 7. **Audit** every privileged action (user disable, role change, template delete, job

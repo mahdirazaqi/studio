@@ -1,6 +1,6 @@
 # Project Structure
 
-**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 7 tree.
+**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 8 tree.
 
 ## 1. Repository layout
 
@@ -53,11 +53,15 @@ src/
 │       ├── files/[fileId]/route.ts   binary content delivery (Phase 4) — plain handler,
 │       │                             not defineRouteHandler; session- **or**
 │       │                             Worker-authenticated (Phase 7, see boundaries.md)
-│       └── worker/v1/jobs/       IMPLEMENTED (Phase 7) — next/, [jobId]/,
-│                                 [jobId]/{state,progress,duration}/ — every route a thin
-│                                 defineRouteHandler over a Phase 6 use case;
-│                                 _lib/build-file-url.ts (route-local helper, excluded
-│                                 from routing by its `_` prefix)
+│       ├── worker/v1/jobs/       IMPLEMENTED (Phase 7) — next/, [jobId]/,
+│       │                         [jobId]/{state,progress,duration}/ — every route a thin
+│       │                         defineRouteHandler over a Phase 6 use case;
+│       │                         _lib/build-file-url.ts (route-local helper, excluded
+│       │                         from routing by its `_` prefix)
+│       └── telegram/webhook/route.ts IMPLEMENTED (Phase 8) — the Telegram webhook, a thin
+│                                 defineRouteHandler authenticated by
+│                                 @/server/telegram-webhook-auth; delegates entirely to
+│                                 features/telegram/bot/register.ts's registered bot
 │
 ├── features/                     one folder per module (see features/README.md)
 │   ├── auth/                     IMPLEMENTED (Phase 2) — schemas/, use-cases/
@@ -93,8 +97,28 @@ src/
 │   │                             the Phase 7 Worker adapters get-job-for-worker.ts /
 │   │                             transition-job-for-worker.ts), actions/, components/
 │   │                             (create form, list item, actions, toolbar, status badge)
-│   ├── telegram/
-│   └── (each of these: README.md describing scope + boundaries; no impl yet)
+│   └── telegram/                  IMPLEMENTED (Phase 8) — domain/ (wizard.ts —
+│                                 flow/step enums, advanceTrackCursor; callback-data.ts;
+│                                 phone.ts), schemas/ (wizard-payload.schema.ts, reusing
+│                                 jobs' job-asset-input.schema.ts), repository/
+│                                 (telegram-repository.ts — User.phone/telegramUserId
+│                                 lookups + TelegramWizardState CRUD, incl. the atomic
+│                                 advanceWizardState conditional update), use-cases/
+│                                 (resolve-telegram-identity, link-telegram-account,
+│                                 load-active-wizard-state, pick-template,
+│                                 enter-collection-phase, set-delivery-choice,
+│                                 set-track-count, collect-asset-value, confirm-wizard,
+│                                 cancel-wizard, cancel-all-jobs-for-telegram — several of
+│                                 these import directly from features/jobs|templates|files
+│                                 use-cases, the intended cross-feature pattern for this
+│                                 one feature, see §3 below), bot/ (composer.ts — the
+│                                 Telegraf Composer/adapter, no business logic;
+│                                 register.ts — attaches the composer to the singleton bot
+│                                 exactly once; keyboards.ts, messages.ts — pure
+│                                 rendering; incoming.ts — downloads Telegram media into a
+│                                 transport-neutral shape)
+│
+│   (each remaining placeholder feature: README.md describing scope + boundaries; no impl yet)
 │
 ├── components/
 │   ├── ui/                       shadcn/ui primitives (owned, copied in)
@@ -123,8 +147,15 @@ src/
 │   ├── authz/                   authorize() / requireRole / assertSameDepartment /
 │   │                             assertDepartmentScopeOrNotFound / departmentScopeFilter
 │   │                             — BOUNDARY, real capability registry (ADR-0022, Phase 3)
+│   ├── worker-auth/              authenticateWorker() — BOUNDARY, timing-safe
+│   │                             WORKER_API_KEY check (ADR-0032, Phase 7)
+│   ├── telegram-webhook-auth/    authenticateTelegramWebhook() — BOUNDARY, timing-safe
+│   │                             TELEGRAM_WEBHOOK_SECRET check (ADR-0035, Phase 8)
 │   ├── db/                      index.ts — the single PrismaClient instance
 │   ├── adapters/storage/        StorageAdapter interface + LocalStorageAdapter (ADR-0024, Phase 4)
+│   ├── adapters/telegram/       client.ts — getTelegramBot(), the singleton Telegraf
+│   │                             instance (globalThis-cached, ADR-0035, Phase 8); returns
+│   │                             null when TELEGRAM_BOT_TOKEN is unset (optional feature)
 │   └── media/                   probe.ts — sniffContentType / probeImageDimensions / hashContent (Phase 4)
 │
 ├── types/                       cross-cutting client-safe types (Maybe, Paginated, Result)
@@ -162,6 +193,21 @@ referenced File). This is **not** the same as reaching into another feature's
 may import each other" license: each instance exists because one feature's data must be
 validated against another's without duplicating that other feature's query logic, the
 same reasoning Files → Departments already established.
+
+**Telegram's cross-feature `use-cases` imports are a deliberate second pattern, not an
+extension of the one above (Phase 8):** `features/telegram/use-cases/*` and
+`features/telegram/bot/composer.ts` import directly from `features/jobs/use-cases`
+(`createJob`, `getJob`, `listDepartmentJobs`, `retryJob`, `cancelJob`),
+`features/templates/use-cases` (`getTemplateForJobForm`, `listDepartmentTemplates`), and
+`features/files/use-cases` (`uploadFile`) — reaching into another feature's `use-cases`
+layer, which the pattern above explicitly keeps off-limits everywhere else. This is
+correct here specifically because Telegram **is** a second entry point onto those same
+application services (docs/integrations/telegram.md's whole design), not a feature with
+its own competing business logic — the alternative (Telegram re-implementing Job/Template/
+File rules against their repositories directly) is exactly the duplicated-domain-logic
+outcome CLAUDE.md §66 forbids. Do not use this as precedent for any other feature to import
+another's `use-cases` — Telegram's role as a second UI surface over the existing
+application layer is what justifies it, not a general relaxation of the rule above.
 
 ## 4. Cross-cutting conventions
 

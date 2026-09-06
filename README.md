@@ -37,8 +37,15 @@ authorization), **not** a port.
 :id/progress,:id/duration}`, thin adapters over Phase 6's use cases; a single shared,
   required `WORKER_API_KEY` compared with a timing-safe check (no database model, no
   per-Worker identity — a deliberate simplification); `/api/files/[fileId]` extended so
-  the Worker can download input Files with the same credential. No user/department
-  management UI, no result/output upload, no Telegram/YouTube yet.
+  the Worker can download input Files with the same credential.
+- **Phase 8** — Telegram Bot integration — **complete**. A webhook-based bot (`telegraf`,
+  `POST /api/telegram/webhook`) reusing every Job/Template/File application service
+  unmodified — phone-based identity linking (`User.phone`/`User.telegramUserId`, both new
+  unique columns), durable and lazily-TTL'd conversation state (`TelegramWizardState`,
+  atomic-conditional-update safe against duplicate updates), Single Track / Album (a
+  redesign onto Studio's typed Template model) / List / Retry / Cancel / a
+  department-scoped Cancel All (fixing a real legacy system-wide-cancel authorization
+  bug). No user/department management UI, no result/output upload, no YouTube yet.
 
 ## Getting started
 
@@ -76,16 +83,19 @@ prisma/         schema.prisma, migrations/, seed.ts
 src/
 ├── app/          App Router — (auth) + (dashboard) route groups, /api/health,
 │                 /api/files/[fileId] (session- or Worker-authenticated binary delivery),
-│                 /api/worker/v1/jobs/{next,[jobId],[jobId]/state,progress,duration}
+│                 /api/worker/v1/jobs/{next,[jobId],[jobId]/state,progress,duration},
+│                 /api/telegram/webhook (Telegram webhook, Phase 8)
 ├── features/     one folder per module — auth (Phase 2), users (Phase 2/3, partial),
-│                 files (Phase 4), templates (Phase 5), and jobs (Phase 6/7) implemented;
-│                 departments (partial, Phase 4/5); telegram (README only, no impl yet)
+│                 files (Phase 4), templates (Phase 5), jobs (Phase 6/7), and telegram
+│                 (Phase 8) implemented; departments (partial, Phase 4/5)
 ├── components/   ui/ (shadcn), theme/, layout/ (sidebar, header, shells, forbidden page)
 ├── lib/          client-safe utilities (cn, roles, navigation, site-config)
 ├── server/       server-only: env, logger, errors, validation, actions, api,
 │                 auth (session/password/current-user), authz (capability registry),
-│                 worker-auth (Worker Bearer-key check, Phase 7), db,
-│                 adapters/storage (StorageAdapter, local disk), media (probe)
+│                 worker-auth (Worker Bearer-key check, Phase 7),
+│                 telegram-webhook-auth (Telegram secret-token check, Phase 8), db,
+│                 adapters/storage (StorageAdapter, local disk),
+│                 adapters/telegram (Telegraf singleton, Phase 8), media (probe)
 └── types/        cross-cutting client-safe types
 ```
 

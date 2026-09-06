@@ -119,12 +119,18 @@ If (1) or (2) fails, deletion is **blocked** with a clear reason.
 > the user get to promote it to a `GALLERY_ASSET`? Recommended: **default `JOB_ARTIFACT`,
 > with an explicit "save to gallery" action.**
 
-## TelegramWizardState — TTL
+## TelegramWizardState — TTL, implemented Phase 8 (ADR-0037, resolves OD-35)
 
-- A row represents an in-progress conversation. Updated on every inbound message.
-- A scheduled sweep deletes rows not updated within the TTL window.
-  > **`OPEN DECISION` — wizard TTL length.** e.g. 1 hour? 24 hours? Long enough that a
-  > user finishing a form after lunch doesn't lose progress; short enough to stay tidy.
+- A row represents an in-progress conversation. Updated on every inbound message/callback
+  that advances it.
+- **Expiration is lazy, not a scheduled sweep**: `TELEGRAM_WIZARD_TTL_MINUTES` (default
+  **60**) is checked against `updatedAt` the next time the row is read
+  (`features/telegram/use-cases/load-active-wizard-state.ts`); an expired row is deleted
+  on the spot and treated as "no active conversation." No scheduled sweep process exists
+  yet — OD-40 (background-work mechanism) is still open, and a stale, never-revisited row
+  simply sits untouched until either the user returns or a future sweep is built.
+- A row whose payload fails schema validation (e.g. a manual DB edit) is handled
+  identically — logged (no sensitive data) and deleted, never crashing the bot.
 
 ## Cleanup jobs
 

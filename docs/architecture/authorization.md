@@ -32,8 +32,9 @@ interface Actor {
 `toActor(currentUser)` builds one from the authenticated session. This is the **only**
 shape authorization logic operates on — deliberately not `CurrentUser` (which also carries
 display-only fields like `email`/`displayName` a use case has no business branching on)
-and deliberately not tied to cookies or `next/*` request APIs. A future Telegram adapter
-resolves a Telegram identity to a `User` row and builds an `Actor` the exact same way; the
+and deliberately not tied to cookies or `next/*` request APIs. **Implemented, Phase 8:**
+the Telegram adapter resolves a Telegram identity to a `User` row and builds an `Actor`
+the exact same way (`resolveTelegramIdentity`, `features/telegram/use-cases/`); the
 Render Worker never becomes an `Actor` at all — see "Non-user principals" below. This is
 the whole answer to "how does authorization stay reusable across transports" (§36 of the
 Phase 3 brief): there is nothing transport-specific to reuse _from_ — the mechanism only
@@ -231,13 +232,13 @@ layout/page/use-case chain above.
   and call Worker-specific use cases that never call `authorize()` with a human
   capability — mixing the two would let a compromised/misconfigured Worker credential
   reach human-authorization-gated code paths it has no business touching.
-- **Telegram resolves to a real `User`.** A future Telegram adapter maps a Telegram
-  identity to a `User` row (phone-linked, per [../domain/users.md](../domain/users.md)),
-  builds a `CurrentUser`-equivalent, and calls `toActor()` on it exactly like the web
-  session does — the same `authorize()` calls, the same department scope, the same
-  escalation rules, with no special-cased "Telegram path" anywhere in a use case. This is
-  the direct fix for the legacy defect where the Telegram surface enforced no permissions
-  at all ([../legacy/known-issues.md](../legacy/known-issues.md)).
+- **Telegram resolves to a real `User`. Implemented, Phase 8.** The Telegram adapter maps
+  a Telegram identity to a `User` row (phone-linked, per
+  [../domain/users.md](../domain/users.md)) and builds an `Actor` directly
+  (`resolveTelegramIdentity`) — the same `authorize()` calls, the same department scope,
+  the same escalation rules, with no special-cased "Telegram path" anywhere in a use case.
+  This is the direct fix for the legacy defect where the Telegram surface enforced no
+  permissions at all ([../legacy/known-issues.md](../legacy/known-issues.md)).
 
 ## Historical integrity is not an authorization concern
 

@@ -2,12 +2,15 @@
 
 **Implemented, Phase 6** (this page's business rules); **the Worker REST API is
 implemented, Phase 7** (see [../integrations/worker-api.md](../integrations/worker-api.md),
-ADR-0032/0033/0034). [../architecture/decisions.md](../architecture/decisions.md)
+ADR-0032/0033/0034); **Telegram is implemented, Phase 8** (see
+[../integrations/telegram.md](../integrations/telegram.md), ADR-0035–0038) — it creates
+Jobs through the unmodified `createJob`/`cancelJob`/`retryJob` use cases below, adding no
+Job-domain logic of its own. [../architecture/decisions.md](../architecture/decisions.md)
 ADR-0028/0029/0030/0031 records the decisions behind the shape below, and
 [`prisma/schema.prisma`](../../prisma/schema.prisma) is the final schema. **Still not
-implemented:** Telegram, YouTube delivery, rendering itself, and the result-upload
-endpoint — this page's "Completion & delivery" section describes the application
-services that exist for those to eventually call, not a working end-to-end pipeline.
+implemented:** YouTube delivery, rendering itself, and the result-upload endpoint — this
+page's "Completion & delivery" section describes the application services that exist for
+those to eventually call, not a working end-to-end pipeline.
 
 ## Purpose
 
@@ -142,8 +145,12 @@ QUEUED` edge exists in the graph for it, but no sweep exists yet — OD-31 (Work
 | `claimedAt`, `startedAt`, `renderedAt`, `deliveredAt`, `uploadedAt` | Timeline — each set once, the first time `transitionJob` reaches the corresponding state. Never reset.                                                                                   |
 | `createdAt`, `updatedAt`                                            |                                                                                                                                                                                          |
 
-**Not present, deliberately:** `deliverToTelegram` (no Telegram linking mechanism exists
-on `User` yet — the flag would be unusable in practice, not just unused-schema);
+**Not present, deliberately:** `deliverToTelegram` — Telegram linking now exists (Phase
+8), but the flag would still be unusable: Telegram delivery is an _outbound notification_
+concern, and nothing yet drives a Job into `RENDERED`/`UPLOADED` to notify from, nor does
+a durable delivery mechanism exist to hand a notification attempt to (OD-40 stays open —
+see [../integrations/telegram.md](../integrations/telegram.md) "Outbound Job-lifecycle
+notifications");
 `videoFileId`/`screenshotFileId`/`thumbnailFileId`/`deliveryOutcomes` (nothing produces a
 `JOB_ARTIFACT` or a delivery outcome yet, even after Phase 7 — that needs a result-upload
 endpoint and a delivery module, both still deferred; not speculative schema added ahead
@@ -177,9 +184,10 @@ Implemented in `features/jobs/use-cases/create-job.ts` +
 2. `authorize(actor, "job:manage", { departmentId: template.departmentId })` — the
    Job's Department **is** the Template's Department; there is no separate field to
    check or trust.
-3. Reject if the Template is soft-deleted or `status !== "ACTIVE"` — enforced here, the
-   only Job-creation path that exists today (no Telegram surface yet to also enforce it
-   on).
+3. Reject if the Template is soft-deleted or `status !== "ACTIVE"` — enforced here, once,
+   for both entry points that create Jobs (the dashboard's Server Action and, since Phase
+   8, the Telegram bot) — both call this exact function, so there is no second copy of
+   this check to keep in sync.
 4. For each Template asset slot, in order, require exactly one matching input value:
    - `DATA` → non-empty literal text; contributes to `title`.
    - file kinds → a `fileId` resolved **server-side**, scoped to the **Template's**
