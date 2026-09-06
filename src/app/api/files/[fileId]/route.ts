@@ -2,10 +2,13 @@ import { Readable } from "node:stream";
 
 import { requireUser } from "@/server/auth/current-user";
 import { toActor } from "@/server/authz";
+import { authenticateWorker } from "@/server/worker-auth";
 import { storage } from "@/server/adapters/storage";
 import { AppError } from "@/server/errors/app-error";
 import { logger } from "@/server/logger";
 import { getFileForServing } from "@/features/files/use-cases/get-file-for-serving";
+import { getFileForWorkerServing } from "@/features/files/use-cases/get-file-for-worker-serving";
+import type { FileForServing } from "@/features/files/repository/file-repository";
 
 /**
  * Serves a File's bytes to the browser (`<img>`/`<audio>`/`<video>` `src`).
@@ -19,11 +22,21 @@ import { getFileForServing } from "@/features/files/use-cases/get-file-for-servi
  * `src` as a plain GET and there is no Server Component/Action equivalent for
  * that. See docs/architecture/files.md "Access & preview".
  *
- * Every request re-authenticates the session and re-checks department scope
- * — there is no signed/cacheable URL. A cross-department or unknown id
- * resolves identically (404), matching `assertDepartmentScopeOrNotFound`'s
- * reasoning even though this path uses the query-scoping variant instead
- * (`findFileForServing`).
+ * Every request re-authenticates and re-checks scope — there is no
+ * signed/cacheable URL. A cross-department or unknown id resolves
+ * identically (404) for a dashboard session, matching
+ * `assertDepartmentScopeOrNotFound`'s reasoning even though this path uses
+ * the query-scoping variant instead (`findFileForServing`).
+ *
+ * **Two callers, two trust models (Phase 7):** an `Authorization` header
+ * present on the request is treated strictly as a Worker credential attempt
+ * — authenticated via `authenticateWorker` and, if valid, served **unscoped**
+ * (no Department check; see `findFileForWorkerServing`'s doc comment for why
+ * that is the honest reflection of Studio's single-shared-Worker trust
+ * model). No `Authorization` header falls back to the original session-cookie
+ * path, unchanged. A request is never silently retried on the other path —
+ * a malformed/incorrect `Authorization` header fails as a Worker auth
+ * failure, it does not fall back to session auth.
  */
 export async function GET(
   request: Request,
@@ -31,16 +44,9 @@ export async function GET(
 ): Promise<Response> {
   const { fileId } = await params;
 
-  let actor;
+  let file: FileForServing;
   try {
-    actor = toActor(await requireUser());
-  } catch {
-    return new Response(null, { status: 401 });
-  }
-
-  let file;
-  try {
-    file = await getFileForServing(actor, fileId);
+    file = await resolveFileForServing(request, fileId);
   } catch (error) {
     const status = AppError.isAppError(error) ? error.httpStatus : 500;
     if (status === 500) {
@@ -90,6 +96,23 @@ export async function GET(
     });
     return new Response(null, { status: 503 });
   }
+}
+
+/**
+ * An `Authorization` header means "this is a Worker" — authenticate and serve
+ * unscoped, or fail outright. No header means the original session-cookie
+ * path, unchanged. Never falls through from one to the other.
+ */
+async function resolveFileForServing(
+  request: Request,
+  fileId: string,
+): Promise<FileForServing> {
+  if (request.headers.get("authorization")) {
+    authenticateWorker(request);
+    return getFileForWorkerServing(fileId);
+  }
+  const actor = toActor(await requireUser());
+  return getFileForServing(actor, fileId);
 }
 
 function toWebStream(nodeStream: NodeJS.ReadableStream): ReadableStream {

@@ -1,6 +1,6 @@
 # Project Structure
 
-**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 6 tree.
+**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 7 tree.
 
 ## 1. Repository layout
 
@@ -50,8 +50,14 @@ src/
 │   │   └── departments/          → role-gated (ADMIN) PlaceholderPage or ForbiddenPage
 │   └── api/
 │       ├── health/route.ts       health check
-│       └── files/[fileId]/route.ts   binary content delivery (Phase 4) — plain handler,
-│                                     not defineRouteHandler; see boundaries.md
+│       ├── files/[fileId]/route.ts   binary content delivery (Phase 4) — plain handler,
+│       │                             not defineRouteHandler; session- **or**
+│       │                             Worker-authenticated (Phase 7, see boundaries.md)
+│       └── worker/v1/jobs/       IMPLEMENTED (Phase 7) — next/, [jobId]/,
+│                                 [jobId]/{state,progress,duration}/ — every route a thin
+│                                 defineRouteHandler over a Phase 6 use case;
+│                                 _lib/build-file-url.ts (route-local helper, excluded
+│                                 from routing by its `_` prefix)
 │
 ├── features/                     one folder per module (see features/README.md)
 │   ├── auth/                     IMPLEMENTED (Phase 2) — schemas/, use-cases/
@@ -62,25 +68,31 @@ src/
 │   ├── departments/               partial (Phase 4/5) — repository/ + read/ (ADMIN-only
 │   │                             reads for the upload form's and Template create form's
 │   │                             department pickers; no management CRUD yet)
-│   ├── files/                     IMPLEMENTED (Phase 4/5) — domain/, schemas/, repository/,
-│   │                             use-cases/ (upload, list, get, delete, authorize-*,
-│   │                             list-all-gallery-files-for-admin — Phase 5), actions/,
-│   │                             components/ (form, toolbar, card, delete button)
+│   ├── files/                     IMPLEMENTED (Phase 4/5/7) — domain/, schemas/,
+│   │                             repository/ (incl. findFileForWorkerServing —
+│   │                             unscoped, Phase 7), use-cases/ (upload, list, get,
+│   │                             delete, authorize-*, list-all-gallery-files-for-admin
+│   │                             — Phase 5, get-file-for-worker-serving — Phase 7),
+│   │                             actions/, components/ (form, toolbar, card, delete button)
 │   ├── templates/                 IMPLEMENTED (Phase 5) — domain/ (template.ts,
 │   │                             template-asset-rules.ts), schemas/, repository/,
 │   │                             use-cases/ (create, update, get, list, set-status,
 │   │                             soft-delete, verify-file-references,
 │   │                             resolve-target-department), actions/, components/
 │   │                             (form, asset editor, toolbar, list item, status actions)
-│   ├── jobs/                      IMPLEMENTED (Phase 6) — domain/ (job.ts,
+│   ├── jobs/                      IMPLEMENTED (Phase 6/7) — domain/ (job.ts,
 │   │                             job-state-machine.ts, build-job-title.ts,
-│   │                             job-asset-rules.ts), schemas/, repository/
-│   │                             (incl. the atomic claim + advisory-lock quota),
-│   │                             use-cases/ (create, get, list, cancel, retry,
-│   │                             claim-next-job, transition-job, update-job-progress/
-│   │                             duration, resolve-job-assets, get-template-for-job-form),
-│   │                             actions/, components/ (create form, list item,
-│   │                             actions, toolbar, status badge)
+│   │                             job-asset-rules.ts, legacy-state-mapping.ts and
+│   │                             worker-job-payload.ts — Phase 7), schemas/ (incl.
+│   │                             worker-transition.schema.ts — Phase 7), repository/
+│   │                             (incl. the atomic claim + advisory-lock quota, and
+│   │                             findJobById — unscoped, Phase 7), use-cases/ (create,
+│   │                             get, list, cancel, retry, claim-next-job,
+│   │                             transition-job, update-job-progress/duration,
+│   │                             resolve-job-assets, get-template-for-job-form, and
+│   │                             the Phase 7 Worker adapters get-job-for-worker.ts /
+│   │                             transition-job-for-worker.ts), actions/, components/
+│   │                             (create form, list item, actions, toolbar, status badge)
 │   ├── telegram/
 │   └── (each of these: README.md describing scope + boundaries; no impl yet)
 │

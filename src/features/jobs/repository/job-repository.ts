@@ -283,6 +283,23 @@ export async function findJobInScope(
   return row ? toSafeJobDetail(row) : null;
 }
 
+/**
+ * Worker-facing, unscoped lookup — no department filter (Phase 7,
+ * docs/integrations/worker-api.md "Worker Job ownership / claim semantics").
+ * The Worker is one shared, non-departmental principal; honestly reflects
+ * that trust model rather than pretending a per-Worker restriction exists
+ * (resolves OD-30: the Worker may read any Job by id, claimed or not).
+ */
+export async function findJobById(
+  jobId: string,
+): Promise<SafeJobDetail | null> {
+  const row = await db.job.findUnique({
+    where: { id: jobId },
+    select: SAFE_JOB_DETAIL_SELECT,
+  });
+  return row ? toSafeJobDetail(row) : null;
+}
+
 export interface ListJobsFilters {
   state?: JobState;
   q?: string;

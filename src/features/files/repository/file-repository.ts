@@ -125,6 +125,30 @@ export async function findFileForServing(
   });
 }
 
+/**
+ * Worker-facing, unscoped — no department filter (Phase 7,
+ * docs/architecture/files.md "Access & preview: Worker access"). The Worker
+ * only ever learns a `fileId` from its own Job payload
+ * (`buildWorkerJobPayload`), which is itself built from a Job's immutable,
+ * already-validated `JobAsset` rows — by the time a Worker requests bytes
+ * here, the id is not a value it picked freely, it is one Studio already
+ * resolved and handed to it. Route-level `authenticateWorker` is the actual
+ * gate; this function does not re-check anything beyond "does this id exist."
+ */
+export async function findFileForWorkerServing(
+  fileId: string,
+): Promise<FileForServing | null> {
+  return db.file.findUnique({
+    where: { id: fileId },
+    select: {
+      storageKey: true,
+      mimeType: true,
+      sizeBytes: true,
+      originalName: true,
+    },
+  });
+}
+
 export interface ListFilesFilters {
   category: FileCategory;
   kind?: FileKind;

@@ -80,6 +80,26 @@ export const env = createEnv({
      * count).
      */
     JOB_UPLOAD_DAILY_CAP: z.coerce.number().int().min(0).default(3),
+
+    /**
+     * The Render Worker's shared service credential (docs/integrations/worker-api.md,
+     * ADR-0032, resolves OD-27). Sent as `Authorization: Bearer <key>` on every
+     * `/api/worker/v1/**` request and compared with a timing-safe check
+     * (`@/server/worker-auth`). **Required** — Studio never starts with Worker
+     * authentication silently disabled because this is unset (Phase 7 brief §8).
+     * Not hashed at rest: it lives only in environment configuration, never in a
+     * database table, so there is no "at rest" store to protect beyond the
+     * environment itself — the same trust boundary `DATABASE_URL` already relies
+     * on. Rotate by changing this value and redeploying; there is no
+     * revoke-without-redeploy mechanism (a `WorkerCredential` table would add
+     * one, deliberately deferred — see ADR-0032).
+     */
+    WORKER_API_KEY: z
+      .string()
+      .min(
+        16,
+        "WORKER_API_KEY is required (see .env.example) and should be a long, random value.",
+      ),
   },
 
   client: {
@@ -105,6 +125,7 @@ export const env = createEnv({
     SEED_ADMIN_NAME: process.env.SEED_ADMIN_NAME,
     JOB_RETRY_WINDOW_DAYS: process.env.JOB_RETRY_WINDOW_DAYS,
     JOB_UPLOAD_DAILY_CAP: process.env.JOB_UPLOAD_DAILY_CAP,
+    WORKER_API_KEY: process.env.WORKER_API_KEY,
   },
 
   /** Treat empty strings as undefined so blank .env lines don't pass validation. */

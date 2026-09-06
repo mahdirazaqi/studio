@@ -90,7 +90,7 @@ credential. Route Handlers are thin and call the same use cases as the rest of t
 - The REST surface is explicitly _not_ a general API — only what the Worker needs, plus
   input-file upload.
 
-**Status:** DECIDED (surface & auth requirement). Credential mechanism: OPEN DECISION.
+**Status:** DECIDED. Credential mechanism resolved in ADR-0032 (Phase 7).
 
 ---
 
@@ -970,3 +970,195 @@ non-destructive mechanism.
   re-enforced on the retry exactly as on a fresh creation.
 
 **Status:** DECIDED.
+
+---
+
+## ADR-0032 — Worker authentication: a single shared static API key, no database model
+
+**Context.** ADR-0004 already decided every Worker endpoint must be authenticated
+(OD-27, mechanism left open). Legacy's Worker routes were completely unauthenticated.
+`docs/security/security.md` and `docs/integrations/worker-api.md` had both floated a
+`WorkerCredential` table (hashed key, revocable, shown once at creation) as the
+recommended starting point. The Phase 7 brief explicitly pushed the other way: choose
+the simplest secure mechanism, do not build a Worker database model "unless genuinely
+required," no API-key CRUD, no multi-key administration.
+
+**Decision.** A single, shared static API key — `WORKER_API_KEY`, a **required**
+environment variable (`@/server/env`, process fails to start without it, matching how
+`DATABASE_URL` is already required) — sent as `Authorization: Bearer <key>` on every
+`/api/worker/v1/**` request and every Worker-authenticated `/api/files/[fileId]`
+request. `@/server/worker-auth` (`authenticateWorker`) is the sole place this credential
+is read or compared:
+
+- Compared with a **timing-safe** check: both the submitted token and the configured
+  key are SHA-256-hashed to a fixed-length digest first, then compared with
+  `crypto.timingSafeEqual` — this sidesteps `timingSafeEqual`'s own equal-length
+  requirement (which a naive length check would violate, and which itself leaks the
+  secret's length one guess at a time) while still being constant-time on the actual
+  secret comparison.
+- **Not hashed at rest.** The key lives only in environment configuration — there is no
+  database row to protect from a SQL-level leak, so hashing "at rest" has no additional
+  target here (unlike a bcrypt password hash, which protects against a stolen `User`
+  table). This is a deliberate departure from `docs/security/security.md`'s earlier
+  "stored hashed" language, since that assumed a `WorkerCredential` table this ADR
+  decides not to build.
+- **No revoke-without-redeploy, no rotation UI, no multiple keys.** Rotating the
+  credential means changing the environment variable and redeploying — the old value
+  simply stops working the moment the new one is live. This is the direct, accepted
+  cost of skipping a `WorkerCredential` table.
+- **The Worker never becomes an `Actor`.** It has no Department, no role, and is not a
+  `User` — the Job/File use cases it reaches (`claimNextJob`, `updateJobProgress`,
+  `updateJobDuration`, `transitionJob`, `getJobForWorker`,
+  `getFileForWorkerServing`) all take no `Actor` parameter at all, by design (Phase 6
+  already established this pattern for the Job side; Phase 7 extends it to the one File
+  read the Worker needs).
+
+**Consequences.**
+
+- A leaked key grants full Worker access to the entire Job queue and every File a Job
+  might reference, globally, with no per-instance or per-Department restriction —
+  documented honestly (ADR-0034) rather than implying a scoping that doesn't exist.
+- If Studio ever needs multiple Workers with independent revocation, rate limits, or
+  audit attribution, that is a new `WorkerCredential` table and a new ADR — not a
+  reinterpretation of this one. Nothing in the Job/File application layer assumes there
+  is only ever one Worker (no Worker identity is threaded through `Job`/`JobAsset` at
+  all), so adding that table later does not require touching the domain layer.
+- Resolves OD-27.
+
+**Status:** DECIDED.
+
+---
+
+## ADR-0033 — Worker API surface: versioned REST under the existing convention, `204` for an empty queue
+
+**Context.** `docs/integrations/worker-api.md` and `docs/architecture/rest-architecture.md`
+already sketched a `/api/worker/v1/...` surface and a `POST .../jobs/next` claim endpoint
+returning `204` when empty, ahead of Phase 6/7 existing — this phase had to decide
+whether to build that already-documented design or the Phase 7 brief's own throwaway
+illustrative example (`/api/v1/worker/...`, `POST .../jobs/claim`), which explicitly
+labels itself "examples only."
+
+**Decision.** Built exactly the already-documented surface, since "established Studio
+implementation" (the existing docs) outranks a brief's self-disclaimed illustration:
+
+| Method  | Path                               | Maps to legacy             | Calls                                             |
+| ------- | ---------------------------------- | -------------------------- | ------------------------------------------------- |
+| `POST`  | `/api/worker/v1/jobs/next`         | `GET /jobs/fetch`          | `claimNextJob()`                                  |
+| `GET`   | `/api/worker/v1/jobs/:id`          | `GET /jobs/:id`            | `getJobForWorker(id)`                             |
+| `PATCH` | `/api/worker/v1/jobs/:id/state`    | `PATCH /jobs/:id/state`    | `transitionJobForWorker(...)` (→ `transitionJob`) |
+| `PATCH` | `/api/worker/v1/jobs/:id/progress` | `PATCH /jobs/:id/progress` | `updateJobProgress(...)`                          |
+| `PATCH` | `/api/worker/v1/jobs/:id/duration` | `PATCH /jobs/:id/duration` | `updateJobDuration(...)`                          |
+
+Retry and cancel are **not** exposed to the Worker — legacy's Worker REST contract never
+called either (both were GraphQL-only, dashboard-initiated in legacy), and nothing in
+the actual Worker lifecycle requires it (Phase 7 brief §19/§18: don't expose an internal
+capability to the Worker just because it exists). Result/output upload is **not**
+implemented — see "Deferred" below.
+
+**Empty-queue semantics:** `POST .../jobs/next` returns **`204 No Content`** when no Job
+is eligible, using `defineRouteHandler`'s existing `null` → `204` mapping
+(`claimNextJob()` already returns `null` for this case, Phase 6) — not an error, not an
+ambiguous `200` with an empty body. A Worker's poll finding nothing to do is a normal,
+expected outcome.
+
+**Response contract:** the existing `defineRouteHandler` convention is used as-is — a
+success response is the handler's return value serialized directly as the JSON body (no
+extra `{"data": ...}` envelope); an error response is `{ error: PublicError, requestId
+}` with the error's own `httpStatus`. Introducing a different envelope for just the
+Worker surface would be inconsistent with the one REST convention Studio already has,
+for no benefit.
+
+**Worker→File download:** `/api/files/[fileId]` (Phase 4) is extended, not replaced — a
+request bearing an `Authorization` header is authenticated as a Worker (unscoped by
+Department, see ADR-0034) and served; a request without one falls back to the original,
+unchanged session-cookie path. This was the pragmatic resolution to a gap none of Phases
+4–6 explicitly closed: the Worker payload must include "resolved File information
+required for download" (Phase 7 brief §12), but Studio's storage abstraction (ADR-0024)
+never hands out a raw filesystem path the way legacy's `File.path` did — the Worker
+downloads bytes the same way a browser does, over HTTP, with its own credential instead
+of a session cookie.
+
+**Consequences.**
+
+- The claim/get-by-id payload (`buildWorkerJobPayload`,
+  `features/jobs/domain/worker-job-payload.ts`) keeps legacy's exact field names
+  (`output`/`title`/`composition`/`template`/`assets[].{composition,layer,type,src,text}`)
+  and only **adds** `state` and `key` — additive, non-breaking per
+  `docs/integrations/worker-api.md`'s own compatibility principle.
+- `PATCH .../state` accepts **either** a legacy integer (0–9, mapped via
+  `mapWorkerState`) **or** a Studio canonical name, exactly as
+  `docs/integrations/worker-api.md` already specified — the Worker's own upgrade to
+  Studio's new names can happen on its own schedule.
+- No result/output upload endpoint (`POST /jobs/:id/upload`'s Studio equivalent) exists
+  yet — it needs `JOB_ARTIFACT` creation and a screenshot/thumbnail pipeline, neither of
+  which exists (Phase 6 explicitly deferred both). Building a placeholder endpoint that
+  stores nothing real was explicitly rejected by the brief (§20) as worse than not
+  building it at all.
+
+**Status:** DECIDED. Resolves the versioning/empty-queue/response-contract half of
+OD-28/OD-29 (the Worker-fetch-compat OPEN DECISIONs);
+`docs/integrations/worker-api.md`'s remaining `GET`-alias-for-`fetch` compatibility
+question stays open since the actual Worker's tolerance for a `POST`-only claim
+endpoint is unconfirmed.
+
+---
+
+## ADR-0034 — Worker trust model and repeated-request (idempotency) semantics
+
+**Context.** Phase 7 brief §14/§31/§32 require the Worker API to state its trust model
+honestly (rather than implying protections that don't exist) and to survive repeated/
+retried HTTP requests without weakening any Phase 6 concurrency guarantee.
+
+**Decision — trust model.** Studio's Worker is **one shared, non-departmental
+principal**. There is no per-Worker identity, so:
+
+- `GET /api/worker/v1/jobs/:id` lets an authenticated Worker read **any** Job by id,
+  claimed or not, from any Department — resolves OD-30 as "no per-claim ownership
+  restriction," because none can be enforced honestly without a per-Worker identity
+  this phase deliberately does not build (ADR-0032). If two physical Worker processes
+  somehow share the one credential, each can read (and, via the state/progress/duration
+  endpoints, mutate) any Job the other is working on — documented, not hidden.
+- `GET /api/files/[fileId]` under Worker auth is similarly unscoped by Department — the
+  Worker already receives every `fileId` it should ever ask for via its own Job
+  payload, so there is no separate access decision to make at download time beyond "is
+  this a valid Worker credential."
+- This does **not** weaken dashboard-user Department isolation in any way — human
+  `Actor`-based paths are completely unchanged; the Worker's global reach is a property
+  of the Worker being a different kind of principal entirely, per
+  `docs/architecture/authorization.md` "Non-user principals."
+
+**Decision — repeated requests are safe without a generic idempotency framework:**
+
+- **Claim** (`POST .../jobs/next`): naturally safe. Each call independently runs the
+  atomic `SELECT ... FOR UPDATE SKIP LOCKED` claim (ADR-0029); a retried claim request
+  simply claims the _next_ eligible Job, if any — it can never re-claim a Job the first,
+  successful attempt already moved out of `QUEUED`. Manually verified with real
+  concurrent HTTP requests: two simultaneous `POST` calls claim two different Jobs.
+- **State transition** (`PATCH .../state`): safe via `transitionJob`'s existing atomic
+  conditional `UPDATE ... WHERE state IN (fromStates)` (ADR-0029) — a retried request for
+  a transition that already succeeded finds the Job no longer in the expected `from`
+  state and fails closed with `409 conflict`, never silently reapplying or corrupting
+  history. This is a deliberate "fail loud on repeat," not silent success — the Worker's
+  own retry logic is expected to treat a `409` on a state PATCH as "this likely already
+  went through" rather than an outage.
+- **Progress/duration** (`PATCH .../progress` / `.../duration`): naturally idempotent —
+  reporting the same value twice (or a retried request after a lost response) simply
+  writes the same number again; `updateJobProgress`/`updateJobDuration`'s only guard is
+  "not terminal," which a retry of a still-valid report always passes.
+- **No new idempotency-key mechanism was added** — every endpoint's safety comes from
+  the underlying Phase 6 primitive already being safe under concurrency, not from a
+  Worker-API-specific deduplication layer. This matches the brief's own "do not add a
+  generic distributed idempotency framework unless needed" (§31, mirroring ADR-0031's
+  identical reasoning for dashboard-initiated retry).
+
+**Consequences.**
+
+- No in-memory locks, no Redis, no idempotency-key table — every guarantee here already
+  survives multiple Next.js instances and process restarts, because it is enforced at
+  the PostgreSQL level (ADR-0029/0030), not in application memory.
+- A future per-Worker-identity feature (if ever needed) would change the trust-model
+  half of this ADR without touching the repeated-request half at all — the two are
+  independent.
+
+**Status:** DECIDED. Resolves OD-30 (Worker claim scope) as "no per-claim restriction,
+by design."

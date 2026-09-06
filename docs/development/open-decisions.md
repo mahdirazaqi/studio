@@ -270,28 +270,42 @@ timeline timestamp are left exactly as they were at the moment of cancellation.
 
 ## Integrations / infrastructure
 
-### OD-27 — Worker authentication mechanism
+### OD-27 — Worker authentication mechanism — ✅ RESOLVED (ADR-0032)
 
 _Where:_ [../integrations/worker-api.md](../integrations/worker-api.md), ADR-0004.
-Static API key (Bearer) / HMAC-signed requests / mTLS / short-lived token.
-**Recommendation:** hashed static API key as a Bearer token + documented rotation;
-revisit HMAC/mTLS if the Worker runs outside a trusted network.
 
-### OD-28 — Worker API versioning scheme
+**Resolved, Phase 7:** a single shared static API key (`WORKER_API_KEY`, required env
+var), sent as `Authorization: Bearer <key>`, compared with a timing-safe check. No
+`WorkerCredential` table, no per-Worker identity, no rotation-without-redeploy — a
+deliberate simplification (the original recommendation's "hashed at rest" language
+assumed a database table this phase decided not to build). Revisit HMAC/mTLS/per-Worker
+identity only if a concrete requirement calls for it.
+
+### OD-28 — Worker API versioning scheme — ✅ RESOLVED (ADR-0033)
 
 _Where:_ [../architecture/boundaries.md](../architecture/boundaries.md), [../integrations/worker-api.md](../integrations/worker-api.md).
-Path prefix (`/api/worker/v1`) vs version header.
 
-### OD-29 — Worker claim endpoint: keep `GET`/`404` compatibility?
+**Resolved, Phase 7:** path prefix, `/api/worker/v1/...` — matches what
+`docs/architecture/rest-architecture.md`'s own illustration and this page already
+assumed ahead of implementation.
+
+### OD-29 — Worker claim endpoint: keep `GET`/`404` compatibility? — partially resolved, Phase 7
 
 _Where:_ [../integrations/worker-api.md](../integrations/worker-api.md), [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).
-Studio prefers `POST /jobs/next` + `204` when empty. Does the current Worker hard-depend
-on `GET /jobs/fetch` + `404`? If unknown, support both until the Worker is updated.
 
-### OD-30 — Worker may read only its claimed jobs?
+**Resolved (Studio's own behavior):** `POST /api/worker/v1/jobs/next` + `204` when empty
+— no `GET` alias, no `404`-for-empty compatibility shim (ADR-0033). **Still open:**
+whether the actual, currently-deployed Worker can tolerate this without its own update —
+unconfirmed, since the real Worker's source is outside this repo.
+
+### OD-30 — Worker may read only its claimed jobs? — ✅ RESOLVED (ADR-0034)
 
 _Where:_ [../integrations/worker-api.md](../integrations/worker-api.md).
-Restrict `GET /jobs/:id` to jobs the Worker principal has claimed, or allow any.
+
+**Resolved, Phase 7:** no restriction — `GET /api/worker/v1/jobs/:id` returns any Job by
+id, claimed or not. Studio's Worker is one shared, non-departmental principal with no
+per-Worker identity (ADR-0032), so a per-claim restriction would be a restriction Studio
+cannot actually enforce; the docs say so honestly rather than implying one exists.
 
 ### OD-31 — Worker timeout / stuck-job recovery
 
@@ -305,10 +319,13 @@ _Where:_ [../domain/jobs.md](../domain/jobs.md).
 Keep `RENDERING` as one internal state, or track downloading/started/in-progress
 substates for UI detail. (The Worker API accepts legacy ints regardless.)
 
-### OD-33 — Duration field name on the Worker API
+### OD-33 — Duration field name on the Worker API — ✅ RESOLVED (Phase 7)
 
 _Where:_ [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).
-Keep legacy `{ duration }` key or rename to `{ durationSeconds }`.
+
+**Resolved:** renamed to `{ durationSeconds }` — `PATCH /api/worker/v1/jobs/:id/duration`
+does not accept the legacy `duration` key. A real Worker integration needs its own
+matching update; this was not kept as a dual-key compatibility shim.
 
 ### OD-34 — Telegram: webhook vs long-polling
 

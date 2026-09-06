@@ -362,14 +362,50 @@ WHERE state IN (fromStates)`** — never a read-then-write, never a direct
   whoever decides has what they need.
 - Do not "temporarily" pick an answer and build on it silently.
 
-## 13. Worker REST compatibility
+## 13. Worker API rules (summary)
 
-Studio must keep the existing Render Worker working with minimal changes. The legacy
-endpoints (`POST /files`, `GET /jobs/fetch`, `GET /jobs/:id`,
-`PATCH /jobs/:id/progress|duration|state`, `POST /jobs/:id/upload`) are the compatibility
-baseline. The **one deliberate break**: the Worker API **must be authenticated** (it was
-not in legacy). See [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md)
-and [`docs/legacy/compatibility-matrix.md`](docs/legacy/compatibility-matrix.md).
+Full detail: [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md),
+[`docs/architecture/decisions.md`](docs/architecture/decisions.md)
+ADR-0004/ADR-0032/ADR-0033/ADR-0034. **Implemented, Phase 7** — versioned under
+`/api/worker/v1/**`, plus a Worker-auth branch on `/api/files/[fileId]`.
+
+- **Every `/api/worker/v1/**` Route Handler is a thin `defineRouteHandler` wrapper**:
+  `authenticate: authenticateWorker` (`@/server/worker-auth`), a Zod `params`/`body`
+  schema, and a handler that calls a Phase 6 use case (or a small Phase 7 adapter over
+  one — `transitionJobForWorker`, `getJobForWorker` — for input mapping only) and maps
+  the result. **Never** write Job state-machine logic, quota logic, or a raw Prisma
+  mutation directly inside a route handler — that logic already exists in
+  `features/jobs/use-cases/*` (Phase 6); the Worker layer only authenticates, validates,
+  and delegates.
+- **`authenticateWorker` is the only place the Worker credential is read or compared.**
+  It compares fixed-length SHA-256 digests via `crypto.timingSafeEqual`, never a raw
+  string `===`. Do not add a second Worker-auth check anywhere else, and do not log the
+  `Authorization` header or any part of `WORKER_API_KEY`.
+- **The Worker never becomes an `Actor` and is never authenticated via the dashboard
+  session.** `claimNextJob`, `updateJobProgress`, `updateJobDuration`, `transitionJob`,
+  `getJobForWorker`, and `getFileForWorkerServing` all take **no `Actor` parameter** —
+  keep it that way; do not thread a fake/system `Actor` through them "for consistency."
+- **`WORKER_API_KEY` is a required environment variable** (`@/server/env`) — the process
+  must fail to start if it's missing, never silently run with Worker auth disabled.
+  There is deliberately no `WorkerCredential` database table, no per-Worker identity, and
+  no rotation-without-redeploy (ADR-0032) — do not add one without a new ADR revisiting
+  that trade-off.
+- **`/api/files/[fileId]` has two independent auth paths**: an `Authorization` header
+  present means "authenticate as the Worker, unscoped by Department, or reject" — it
+  never falls back to session auth. No header means the original session-cookie path,
+  unchanged. Do not blur this into a single combined check.
+- **The claim/get-by-id payload keeps legacy's exact field names**
+  (`output`/`title`/`composition`/`template`/`assets[].{composition,layer,type,src,text}`)
+  — only add fields, never rename or remove one without a compatibility review.
+  `PATCH .../state` must keep accepting both a legacy integer (0–9) and a Studio state
+  name (`mapWorkerState`).
+- **The empty-queue response is `204 No Content`**, never `404` or a `200` with an empty
+  body — `claimNextJob()` returning `null` already triggers this via
+  `defineRouteHandler`'s built-in mapping.
+- **Not implemented, deliberately**: result/output upload, `JOB_ARTIFACT` creation,
+  Worker-initiated cancel/retry, per-Worker rate limiting. Do not add any of these
+  without re-reading `docs/integrations/worker-api.md` §6 first — each has a documented
+  reason it was deferred, not merely forgotten.
 
 ## 14. Security rules (summary)
 
@@ -432,15 +468,26 @@ SKIP LOCKED` Worker claim (manually verified race-free); a global, UTC-day uploa
   copies the original's snapshot/assets verbatim (ADR-0031, resolves OD-02); `job:manage`
   resolved as whole-department for USER (resolves OD-03 for Jobs); the real
   `assertNoActiveJobDependencies` File-dependency check (closing the loop ADR-0025
-  opened in Phase 4); and a create/list/filter/detail/cancel/retry UI. No Worker REST
-  API, Telegram, YouTube delivery, or rendering — those are Phase 7+. The app runs
-  (`npm run dev`), builds (`npm run build`), and passes `npm run check` (lint +
-  typecheck + format + tests). **Still no user/department management UI, no Worker API,
-  no Telegram/YouTube.**
+  opened in Phase 4); and a create/list/filter/detail/cancel/retry UI.
+- **Phase 7 (Worker REST API) — complete.** `/api/worker/v1/{jobs/next, jobs/:id,
+jobs/:id/state, jobs/:id/progress, jobs/:id/duration}` — thin `defineRouteHandler`
+  wrappers over Phase 6's use cases, nothing more (ADR-0033); a single shared static
+  `WORKER_API_KEY` (required env var, timing-safe `Authorization: Bearer` check, no
+  database model — ADR-0032, resolves OD-27); the Worker's trust model documented
+  honestly as one global, non-departmental principal (ADR-0034, resolves OD-30);
+  `/api/files/[fileId]` extended with a second, Worker-authenticated path so the Worker
+  can download input Files by the URL its own Job payload gives it; every repeated-
+  request/concurrency guarantee (claim, state transition) verified safe with real
+  concurrent HTTP requests against the real database, no new idempotency-key mechanism
+  needed (ADR-0034). No Worker rendering, FFmpeg/ImageMagick, result/output upload,
+  `JOB_ARTIFACT` creation, Telegram, or YouTube delivery — those remain later phases.
+  The app runs (`npm run dev`), builds (`npm run build`), and passes `npm run check`
+  (lint + typecheck + format + tests). **Still no user/department management UI, no
+  result upload, no Telegram/YouTube.**
 
-Do **not** start the next phase (user/department management, then the Worker REST API)
-unless explicitly asked. See [`docs/development/workflow.md`](docs/development/workflow.md)
-for phase boundaries and
+Do **not** start the next phase (user/department management, then result upload +
+delivery) unless explicitly asked. See
+[`docs/development/workflow.md`](docs/development/workflow.md) for phase boundaries and
 [`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
 remains undecided.
 

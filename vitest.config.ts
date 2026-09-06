@@ -28,6 +28,7 @@ export default defineConfig({
       DATABASE_URL: "postgresql://test:test@localhost:5432/test",
       SESSION_COOKIE_NAME: "studio_session",
       SESSION_DURATION_DAYS: "30",
+      WORKER_API_KEY: "test-worker-api-key-not-a-real-secret",
     },
   },
 });

@@ -9,7 +9,7 @@ Binding security requirements for Studio. Many are direct responses to
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Web panel        | **Implemented, Phase 2.** Custom DB-backed session (opaque token, httpOnly cookie, SHA-256 hash stored server-side — ADR-0020, [../architecture/authentication.md](../architecture/authentication.md)). Only `ACTIVE` users authenticate — enforced by the same lookup that resolves the session, so disabling a user invalidates every session on the next request. Passwords hashed with bcrypt (`bcryptjs`, cost 12). Department archive doesn't exist yet (OD-07 open) so that half is not yet applicable. |
 | Server Actions   | Every action resolves and verifies the session before doing anything. No anonymous Server Action mutates state.                                                                                                                                                                                                                                                                                                                                                                                                |
-| Worker REST      | **Every** endpoint requires a Worker service credential (ADR-0004). No unauthenticated worker endpoint — ever. Mechanism = OPEN DECISION (default: hashed API key as Bearer token).                                                                                                                                                                                                                                                                                                                            |
+| Worker REST      | **Implemented, Phase 7.** **Every** `/api/worker/v1/**` endpoint (and the Worker-auth branch of `/api/files/[fileId]`) requires the shared `WORKER_API_KEY` as `Authorization: Bearer <key>`, checked with a timing-safe comparison (`@/server/worker-auth`, ADR-0004, ADR-0032). No unauthenticated worker endpoint — ever. Required env var; the process refuses to start without it.                                                                                                                        |
 | Telegram         | Identity via phone-linked `User`. Webhook requests verified with Telegram's secret token. Unlinked / disabled users are refused.                                                                                                                                                                                                                                                                                                                                                                               |
 | Health endpoints | No sensitive data; may be unauthenticated but must expose nothing about domain state.                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
@@ -130,14 +130,22 @@ Binding security requirements for Studio. Many are direct responses to
 - `.env` files are git-ignored; only `.env.example` with **placeholder** values is
   committed.
 - OAuth tokens for YouTube targets are **encrypted at rest**.
-- The Worker API key is stored **hashed**; the plaintext is shown once at creation.
+- **Implemented, Phase 7 (ADR-0032):** the Worker API key (`WORKER_API_KEY`) lives only
+  in environment configuration — **not** in a database table, so "hashed at rest" does
+  not apply the way it would to a stored credential; the environment itself is the trust
+  boundary, the same one `DATABASE_URL` already relies on. Compared with a timing-safe
+  check (`@/server/worker-auth`), never logged, never echoed in an error response.
+  Rotation is a redeploy with a new value — there is no revoke-without-redeploy path
+  (a deliberate simplification; see ADR-0032 for the trade-off).
 - No secret is logged. Log redaction for tokens/keys.
 - **Do not copy any real secret out of the legacy repo** (the legacy `.env` contains live
   keys — treat them as compromised, do not reuse).
 
 ## 10. Rate limiting
 
-- Worker API endpoints rate-limited per credential.
+- Worker API endpoints rate-limited per credential — **not implemented, Phase 7**
+  (OD-41 stays open; no rate-limiting infrastructure exists yet to hang this on).
+  Worker authentication remains mandatory regardless.
 - Auth endpoints (login, Telegram link) rate-limited per IP / per identity to slow
   brute force.
 - Telegram webhook protected by the secret token + basic flood control.
@@ -169,7 +177,10 @@ Binding security requirements for Studio. Many are direct responses to
 
 - Audit every privileged action: user create/disable/role-change, template
   disable/soft-delete, job cancel/retry, department archive, YouTube target
-  connect/disconnect, Worker credential create/revoke.
+  connect/disconnect. No `AuditEntry` model exists yet (all deferred, OD-23). "Worker
+  credential create/revoke" no longer applies as an auditable _action_ — ADR-0032's
+  single-env-var key has no create/revoke operation in the app; rotation is a redeploy,
+  outside Studio's own audit trail by construction.
 - Audit entries record actor, target, action, before/after where meaningful, timestamp,
   department. Never deleted (retention window = OPEN DECISION).
 - Job state transitions and delivery outcomes are themselves an audit trail (Jobs are
@@ -179,7 +190,8 @@ Binding security requirements for Studio. Many are direct responses to
 
 - Historical integrity (ADR-0009/0010) is also a security property: an audit record you
   can't trust to be complete is worthless.
-- YouTube OAuth tokens, Worker keys: encrypted / hashed as noted above. Session tokens:
+- YouTube OAuth tokens: encrypted as noted above. Worker key: environment-only, not a
+  database secret (ADR-0032) — see §9. Session tokens:
   hashed (SHA-256) at rest, same reasoning as a password hash — a database read alone
   never yields a usable session.
 - PII is minimal (name, email, phone). No user deletion → if legal erasure is ever

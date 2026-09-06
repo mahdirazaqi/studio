@@ -1,13 +1,13 @@
 # Domain: Jobs
 
-**Implemented, Phase 6.** This page is the business rules;
-[../architecture/decisions.md](../architecture/decisions.md) ADR-0028/0029/0030/0031
-records the decisions behind the shape below, and
-[`prisma/schema.prisma`](../../prisma/schema.prisma) is the final schema. **Not
-implemented this phase:** the Worker REST API (Phase 7), Telegram, YouTube delivery,
-rendering itself — this page's "Worker claim"/"Completion & delivery" sections describe
-the **application services** Phase 6 built for those to call, not a working end-to-end
-pipeline yet.
+**Implemented, Phase 6** (this page's business rules); **the Worker REST API is
+implemented, Phase 7** (see [../integrations/worker-api.md](../integrations/worker-api.md),
+ADR-0032/0033/0034). [../architecture/decisions.md](../architecture/decisions.md)
+ADR-0028/0029/0030/0031 records the decisions behind the shape below, and
+[`prisma/schema.prisma`](../../prisma/schema.prisma) is the final schema. **Still not
+implemented:** Telegram, YouTube delivery, rendering itself, and the result-upload
+endpoint — this page's "Completion & delivery" section describes the application
+services that exist for those to eventually call, not a working end-to-end pipeline.
 
 ## Purpose
 
@@ -117,9 +117,9 @@ QUEUED` edge exists in the graph for it, but no sweep exists yet — OD-31 (Work
   Cancel."
 
 > **`OPEN DECISION` — Worker fine-grained substates.** The Worker sends legacy numeric
-> states (2/3/4 for Downloading/Started/InProgress); Phase 7's Worker API must map all
-> three onto `RENDERING` (this phase's canonical state set has no substates). Unaffected
-> by Phase 6.
+> states (2/3/4 for Downloading/Started/InProgress); the Worker API (Phase 7) maps all
+> three onto `RENDERING` (this phase's canonical state set has no substates) — whether
+> Studio should ever track finer-grained render substates internally stays open.
 
 ### Fields (implemented; final schema in [`prisma/schema.prisma`](../../prisma/schema.prisma))
 
@@ -145,8 +145,9 @@ QUEUED` edge exists in the graph for it, but no sweep exists yet — OD-31 (Work
 **Not present, deliberately:** `deliverToTelegram` (no Telegram linking mechanism exists
 on `User` yet — the flag would be unusable in practice, not just unused-schema);
 `videoFileId`/`screenshotFileId`/`thumbnailFileId`/`deliveryOutcomes` (nothing produces a
-`JOB_ARTIFACT` or a delivery outcome yet — Phase 7/YouTube/Telegram's job, not
-speculative schema added ahead of a writer for it).
+`JOB_ARTIFACT` or a delivery outcome yet, even after Phase 7 — that needs a result-upload
+endpoint and a delivery module, both still deferred; not speculative schema added ahead
+of a writer for it).
 
 ### Job assets
 
@@ -207,10 +208,11 @@ yet compare an uploaded image's actual dimensions against it — no feature does
 `CLAIMED` in one atomic raw SQL statement: `UPDATE jobs SET state = 'CLAIMED', ... WHERE
 id = (SELECT id FROM jobs WHERE state = 'QUEUED' ORDER BY "createdAt" FOR UPDATE SKIP
 LOCKED LIMIT 1) RETURNING id`. Two concurrent Workers can never receive the same Job —
-manually verified against the real database with two genuinely concurrent calls. Legacy's
-non-atomic `fetch` is exactly what this fixes. **Not exposed over REST yet** — Phase 7's
-`POST /api/worker/v1/jobs/next` will call this directly, after its own Worker-credential
-authentication.
+manually verified against the real database with two genuinely concurrent calls, and
+again at the HTTP layer once Phase 7 exposed it. Legacy's non-atomic `fetch` is exactly
+what this fixes. **Exposed over REST, Phase 7**: `POST /api/worker/v1/jobs/next` calls
+this directly, after its own Worker-credential authentication — see
+[../integrations/worker-api.md](../integrations/worker-api.md).
 
 Global, not Department-scoped, FIFO by `createdAt` — matches legacy's single shared
 queue. Priority/fairness/capability filtering are not planned (unchanged OPEN DECISION,
@@ -259,19 +261,23 @@ Implemented in `features/jobs/use-cases/retry-job.ts` (ADR-0031):
 - Retry lineage is fully traceable via `retryOfJobId` + `attemptNumber` — a simple,
   bounded chain, not a general graph.
 
-### Completion & delivery — not implemented this phase
+### Completion & delivery — still not implemented
 
 The `RENDERED`/`DELIVERING`/`UPLOADED` states and their timeline timestamps
 (`renderedAt`/`deliveredAt`/`uploadedAt`) are real and reachable via `transitionJob`
-today (exercised directly in tests/manual verification), but nothing yet:
+— including over the Worker REST API as of Phase 7 (`PATCH
+/api/worker/v1/jobs/:id/state`) — but nothing yet:
 
-- Accepts a rendered result upload (`POST /jobs/:id/result` — Phase 7).
+- Accepts a rendered result upload (Studio's equivalent of legacy's
+  `POST /jobs/:id/upload` — deferred, see
+  [../integrations/worker-api.md](../integrations/worker-api.md) §6).
 - Generates a screenshot/thumbnail or creates `JOB_ARTIFACT` File rows.
 - Actually delivers to YouTube or Telegram, or records a delivery outcome.
 
-This is deliberate — Phase 6 brief §53 excludes all of it. The state machine and
-`transitionJob` primitive exist now so Phase 7 (Worker API) and later delivery phases
-have a correct, tested foundation to call into rather than designing it from scratch.
+This is deliberate — both the Phase 6 and Phase 7 briefs explicitly exclude all of it.
+The state machine and `transitionJob` primitive, now reachable from a real authenticated
+Worker, are a correct, tested foundation for a future delivery phase to call into rather
+than designing it from scratch.
 
 ### Upload cap
 
@@ -303,8 +309,10 @@ The Render Worker is **never** a `User` and never becomes an `Actor` (Phase 6 br
 docs/architecture/authorization.md "Non-user principals"). `claimNextJob`,
 `updateJobProgress`, `updateJobDuration`, and the underlying `transitionJob` primitive
 take **no `Actor` parameter at all** — they are system/Worker-level operations, not
-gated by the human capability registry. This keeps the application-service boundary
-ready for three distinct callers (User, Worker, a future system/scheduled caller)
-without inventing a fake User account for the Worker. Phase 7's Worker Route Handlers
-will authenticate the Worker's service credential first, then call these same functions
-directly — no logic duplicated, per the Phase 6 brief §48.
+gated by the human capability registry. This kept the application-service boundary ready
+for three distinct callers (User, Worker, a future system/scheduled caller) without
+inventing a fake User account for the Worker. **Implemented, Phase 7**: the Worker Route
+Handlers under `src/app/api/worker/v1/**` authenticate the Worker's service credential
+(`authenticateWorker`, ADR-0032) first, then call these same functions directly — no
+logic duplicated, exactly as planned. See
+[../integrations/worker-api.md](../integrations/worker-api.md).

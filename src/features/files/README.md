@@ -3,7 +3,7 @@
 **Scope:** the File Gallery — upload, catalog, browse, preview, reuse, and safe deletion
 of media assets.
 
-**Status: implemented (Phase 4; extended Phase 5).** See
+**Status: implemented (Phase 4; extended Phase 5 and Phase 7).** See
 [`docs/architecture/files.md`](../../../docs/architecture/files.md) for the mechanism and
 ADR-0024/0025/0026/0027, and [`docs/domain/files.md`](../../../docs/domain/files.md) for
 the business rules.
@@ -24,7 +24,11 @@ the business rules.
     capped listing for the Template asset editor's "default file" picker when ADMIN
     authors a Template for a department other than their own.
   - `get-file-for-serving.ts` — the one place `storageKey` is read for an actual byte
-    read; only `/api/files/[fileId]` calls it.
+    read; only `/api/files/[fileId]` calls it (session-authenticated path).
+  - `get-file-for-worker-serving.ts` (Phase 7) — the Worker-authenticated equivalent:
+    no `Actor`, unscoped by department (via `findFileForWorkerServing`), for the same
+    shared-credential trust model as `jobs/repository`'s `findJobById`. Also only
+    `/api/files/[fileId]` calls it.
   - `delete-file.ts` — DB row deleted before storage bytes.
   - `authorize-file-management.ts` — `assertCanDeleteFile` / `canDeleteFile` (a USER may
     delete only their own upload), `assertNoActiveJobDependencies` (still a documented
@@ -40,7 +44,9 @@ The storage adapter (`@/server/adapters/storage`) and media probing
 `docs/architecture/files.md`.
 
 **Not built yet:** `ownerJobId` and real `JOB_ARTIFACT` creation (the reverse direction —
-a Job _producing_ a File — needs a result-upload endpoint, Phase 7+), a dedup/reuse UI
-(OD-20 stays open), audio/video duration probing (needs `ffprobe`), scheduled artifact
-cleanup. Templates (Phase 5) and Jobs (Phase 6, the input direction — see
-`features/jobs/README.md`) already reference Files.
+a Job _producing_ a File — needs a result-upload endpoint, still not built in Phase 7), a
+dedup/reuse UI (OD-20 stays open), audio/video duration probing (needs `ffprobe`),
+scheduled artifact cleanup. Templates (Phase 5) and Jobs (Phase 6, the input direction —
+see `features/jobs/README.md`) already reference Files; the Worker (Phase 7) downloads
+input Files through the same `/api/files/[fileId]` route, authenticated with its shared
+credential instead of a session.

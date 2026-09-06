@@ -32,8 +32,13 @@ authorization), **not** a port.
   immutable historical snapshot (Template config as JSONB + resolved asset values as
   relational rows), an explicit validated state machine, an atomic (race-free) Worker
   claim, non-destructive retry, and a concurrency-safe daily upload quota — plus a
-  create/list/detail/cancel/retry UI. No user/department management UI, no Worker REST
-  API, no Telegram/YouTube yet.
+  create/list/detail/cancel/retry UI.
+- **Phase 7** — Worker REST API — **complete**. `/api/worker/v1/jobs/{next,:id,:id/state,
+:id/progress,:id/duration}`, thin adapters over Phase 6's use cases; a single shared,
+  required `WORKER_API_KEY` compared with a timing-safe check (no database model, no
+  per-Worker identity — a deliberate simplification); `/api/files/[fileId]` extended so
+  the Worker can download input Files with the same credential. No user/department
+  management UI, no result/output upload, no Telegram/YouTube yet.
 
 ## Getting started
 
@@ -70,14 +75,16 @@ Zod · Vitest · ESLint 9 · Prettier · npm · **PostgreSQL + Prisma** · **bcr
 prisma/         schema.prisma, migrations/, seed.ts
 src/
 ├── app/          App Router — (auth) + (dashboard) route groups, /api/health,
-│                 /api/files/[fileId] (authenticated binary content delivery)
+│                 /api/files/[fileId] (session- or Worker-authenticated binary delivery),
+│                 /api/worker/v1/jobs/{next,[jobId],[jobId]/state,progress,duration}
 ├── features/     one folder per module — auth (Phase 2), users (Phase 2/3, partial),
-│                 files (Phase 4), templates (Phase 5), and jobs (Phase 6) implemented;
+│                 files (Phase 4), templates (Phase 5), and jobs (Phase 6/7) implemented;
 │                 departments (partial, Phase 4/5); telegram (README only, no impl yet)
 ├── components/   ui/ (shadcn), theme/, layout/ (sidebar, header, shells, forbidden page)
 ├── lib/          client-safe utilities (cn, roles, navigation, site-config)
 ├── server/       server-only: env, logger, errors, validation, actions, api,
-│                 auth (session/password/current-user), authz (capability registry), db,
+│                 auth (session/password/current-user), authz (capability registry),
+│                 worker-auth (Worker Bearer-key check, Phase 7), db,
 │                 adapters/storage (StorageAdapter, local disk), media (probe)
 └── types/        cross-cutting client-safe types
 ```

@@ -280,22 +280,67 @@ creation, a Worker-timeout requeue sweep, bulk cancel, `deliverToTelegram` (no T
 linking mechanism exists on `User` yet), `youtubeTargetId` on Template (no
 `YouTubeTarget` table exists).
 
-### Phase 7+ (not started)
+### Phase 7 — Worker REST API _(complete)_
+
+**Goal:** expose Phase 6's Job application services to an external Worker over a small,
+authenticated, versioned REST surface — a thin adapter layer, no new business logic.
+
+**Delivered:**
+
+- `WORKER_API_KEY` — a single, shared, required environment variable, checked with a
+  timing-safe comparison (`@/server/worker-auth`) — resolves OD-27 (ADR-0032). No
+  `WorkerCredential` table, no per-Worker identity, no rotation without a redeploy: a
+  deliberate simplification, not an oversight.
+- `/api/worker/v1/jobs/next` (`POST`, atomic claim, `204` on an empty queue),
+  `/api/worker/v1/jobs/:id` (`GET`), `.../state` / `.../progress` / `.../duration`
+  (`PATCH`) — every handler a thin `defineRouteHandler` wrapper calling straight into
+  Phase 6's use cases (`claimNextJob`, `getJobForWorker`, `transitionJob` via
+  `transitionJobForWorker`, `updateJobProgress`, `updateJobDuration`). Resolves OD-28
+  (versioning) and the empty-queue half of OD-29 (ADR-0033).
+- `mapWorkerState` — accepts both a legacy integer (0–9) and a Studio state name on the
+  state-update endpoint, exactly as `docs/integrations/worker-api.md` had already
+  specified.
+- The claim/get-by-id payload (`buildWorkerJobPayload`) keeps legacy's exact field
+  names, built entirely from the Job's immutable snapshot/`JobAsset` rows.
+- `/api/files/[fileId]` gained a second, Worker-authenticated path (unscoped by
+  Department) so the Worker can download input Files by the URL its own Job payload
+  provides — closing a gap no earlier phase addressed, since Studio's storage
+  abstraction (ADR-0024) never hands out a raw filesystem path the way legacy did.
+- The Worker's trust model (one shared, non-departmental principal — no per-claim
+  ownership restriction) and repeated-request safety (claim/state/progress/duration all
+  safe under retries via Phase 6's existing atomic primitives, no new idempotency-key
+  mechanism) are both documented honestly rather than implying protections that don't
+  exist (ADR-0034, resolves OD-30).
+- Manually verified against a real database and a real server: authentication
+  (missing/wrong/malformed credential), the full claim → progress → duration → state →
+  terminal lifecycle (including the `ERROR` + `errorReason` path), invalid-transition
+  rejection, a real concurrent-claim HTTP test (two simultaneous `POST` calls claim two
+  different Jobs), Worker file download, and that dashboard session-based file access is
+  completely unaffected.
+
+**Explicitly NOT in Phase 7:** the result/output upload endpoint and `JOB_ARTIFACT`
+creation (needs a screenshot/thumbnail pipeline that doesn't exist — a placeholder
+endpoint storing nothing real was explicitly rejected as worse than not building it),
+Worker-initiated cancel/retry (never part of the legacy Worker's REST contract), a
+Worker file-upload endpoint, per-Worker-credential rate limiting (OD-41 stays open), a
+Worker-timeout requeue sweep (OD-31 stays open), Telegram, YouTube delivery, rendering.
+
+### Phase 8+ (not started)
 
 Sequencing is not finalized, but a sensible order:
 
 1. User management (create/disable/role-change) + Department management — wires
    Phase 3's `authorize-user-management.ts` policy to real repositories/Server Actions/UI.
-2. Worker API (atomic claim/progress/state/result over REST, service-credential auth;
-   resolves OD-27, OD-28, OD-29) — wires Phase 6's `claimNextJob`/`updateJobProgress`/
-   `updateJobDuration`/`transitionJob` application services to real HTTP endpoints, and
-   Phase 6's `JOB_ARTIFACT` result-upload gap to real artifact creation.
+2. Result/output upload (`JOB_ARTIFACT` creation, screenshot/thumbnail pipeline via safe
+   `execFile`/`spawn`, ADR-0015) + durable delivery scaffold — wires Phase 4's
+   `File.category = JOB_ARTIFACT` and Phase 6/7's `RENDERED`/`DELIVERING`/`UPLOADED`
+   states to a real pipeline.
 3. YouTube delivery adapter.
 4. Telegram adapter + durable wizard state.
 5. Cleanup jobs, retention, hardening, observability (resolves OD-18, OD-20's remaining
-   half, OD-31's requeue sweep).
+   half, OD-31's requeue sweep, OD-41's rate limiting).
 
-Each Phase 7+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
+Each Phase 8+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
 the product owner, implement behind the layering rules, test (unit + the integration
 tests listed in `conventions.md` §9), update the docs.
 
