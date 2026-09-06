@@ -37,39 +37,39 @@ these three fixed roles. If finer granularity is ever needed, that is a new ADR.
 
 Legend: ✅ allowed · 🟨 allowed, own department only · ⬛ not allowed · — n/a
 
-| Capability                        | USER                            | MANAGER                                  | ADMIN                             | Notes                                                                                             |
-| --------------------------------- | ------------------------------- | ---------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------- |
-| **Auth**                          |                                 |                                          |                                   |                                                                                                   |
-| Sign in                           | ✅                              | ✅                                       | ✅                                | Only if `status = ACTIVE`.                                                                        |
-| **Departments**                   |                                 |                                          |                                   |                                                                                                   |
-| View own department               | ✅                              | ✅                                       | ✅                                |                                                                                                   |
-| List all departments              | ⬛                              | ⬛                                       | ✅                                |                                                                                                   |
-| Create / rename department        | ⬛                              | ⬛                                       | ✅                                |                                                                                                   |
-| Archive / deactivate department   | ⬛                              | ⬛                                       | ✅                                | Deletion policy = OPEN DECISION.                                                                  |
-| **Users**                         |                                 |                                          |                                   |                                                                                                   |
-| View users                        | ⬛                              | 🟨                                       | ✅                                |                                                                                                   |
-| Create user                       | ⬛                              | 🟨 (role USER; MANAGER? = OPEN DECISION) | ✅                                |                                                                                                   |
-| Disable / re-enable user          | ⬛                              | 🟨 (USERs only)                          | ✅                                | Never physical delete.                                                                            |
-| Change a user's role              | ⬛                              | 🟨 (OPEN DECISION — see users.md)        | ✅                                |                                                                                                   |
-| Change a user's department        | ⬛                              | ⬛                                       | ✅ (OPEN DECISION — reassignment) |                                                                                                   |
-| **Templates**                     |                                 |                                          |                                   |                                                                                                   |
-| View / list templates             | 🟨                              | 🟨                                       | ✅                                | Soft-deleted templates hidden from pickers for all; visible in management views to MANAGER/ADMIN. |
-| Create template                   | ⬛ (confirmed, Phase 5 — OD-04) | 🟨                                       | ✅                                | See below.                                                                                        |
-| Edit template                     | ⬛ (confirmed, Phase 5 — OD-04) | 🟨                                       | ✅                                | Edits never alter existing Jobs (snapshots).                                                      |
-| Disable template                  | ⬛                              | 🟨                                       | ✅                                |                                                                                                   |
-| Soft-delete template              | ⬛                              | 🟨                                       | ✅                                | No hard delete exists.                                                                            |
-| **Files / Gallery**               |                                 |                                          |                                   |                                                                                                   |
-| Upload file                       | ✅                              | ✅                                       | ✅                                | Into own department (ADMIN: any).                                                                 |
-| Browse / reuse gallery files      | 🟨                              | 🟨                                       | ✅                                |                                                                                                   |
-| Delete a Persistent Gallery Asset | 🟨 (own uploads? OPEN DECISION) | 🟨                                       | ✅                                | Only when safe (no required dependency).                                                          |
-| Delete a Job Artifact manually    | ⬛                              | 🟨                                       | ✅                                | Normally automatic.                                                                               |
-| **Jobs**                          |                                 |                                          |                                   |                                                                                                   |
-| View / list jobs                  | 🟨                              | 🟨                                       | ✅                                |                                                                                                   |
-| Create job                        | 🟨                              | 🟨                                       | ✅                                |                                                                                                   |
-| Cancel job                        | 🟨 (own? OPEN DECISION)         | 🟨 (any in dept)                         | ✅                                | Only from a cancelable state.                                                                     |
-| Retry job                         | 🟨 (own? OPEN DECISION)         | 🟨 (any in dept)                         | ✅                                | Creates a new linked job; original untouched.                                                     |
-| Delete job                        | ⬛                              | ⬛                                       | ⬛                                | **Nobody. Ever.** (ADR-0005)                                                                      |
-| **Worker API**                    | —                               | —                                        | —                                 | Only the Worker principal. No human role can call it.                                             |
+| Capability                        | USER                            | MANAGER                                  | ADMIN                             | Notes                                                                                                |
+| --------------------------------- | ------------------------------- | ---------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Auth**                          |                                 |                                          |                                   |                                                                                                      |
+| Sign in                           | ✅                              | ✅                                       | ✅                                | Only if `status = ACTIVE`.                                                                           |
+| **Departments**                   |                                 |                                          |                                   |                                                                                                      |
+| View own department               | ✅                              | ✅                                       | ✅                                |                                                                                                      |
+| List all departments              | ⬛                              | ⬛                                       | ✅                                |                                                                                                      |
+| Create / rename department        | ⬛                              | ⬛                                       | ✅                                |                                                                                                      |
+| Archive / deactivate department   | ⬛                              | ⬛                                       | ✅                                | Deletion policy = OPEN DECISION.                                                                     |
+| **Users**                         |                                 |                                          |                                   |                                                                                                      |
+| View users                        | ⬛                              | 🟨                                       | ✅                                |                                                                                                      |
+| Create user                       | ⬛                              | 🟨 (role USER; MANAGER? = OPEN DECISION) | ✅                                |                                                                                                      |
+| Disable / re-enable user          | ⬛                              | 🟨 (USERs only)                          | ✅                                | Never physical delete.                                                                               |
+| Change a user's role              | ⬛                              | 🟨 (OPEN DECISION — see users.md)        | ✅                                |                                                                                                      |
+| Change a user's department        | ⬛                              | ⬛                                       | ✅ (OPEN DECISION — reassignment) |                                                                                                      |
+| **Templates**                     |                                 |                                          |                                   |                                                                                                      |
+| View / list templates             | 🟨                              | 🟨                                       | ✅                                | Soft-deleted templates hidden from pickers for all; visible in management views to MANAGER/ADMIN.    |
+| Create template                   | ⬛ (confirmed, Phase 5 — OD-04) | 🟨                                       | ✅                                | See below.                                                                                           |
+| Edit template                     | ⬛ (confirmed, Phase 5 — OD-04) | 🟨                                       | ✅                                | Edits never alter existing Jobs (snapshots).                                                         |
+| Disable template                  | ⬛                              | 🟨                                       | ✅                                |                                                                                                      |
+| Soft-delete template              | ⬛                              | 🟨                                       | ✅                                | No hard delete exists.                                                                               |
+| **Files / Gallery**               |                                 |                                          |                                   |                                                                                                      |
+| Upload file                       | ✅                              | ✅                                       | ✅                                | Into own department (ADMIN: any).                                                                    |
+| Browse / reuse gallery files      | 🟨                              | 🟨                                       | ✅                                |                                                                                                      |
+| Delete a Persistent Gallery Asset | 🟨 (own uploads? OPEN DECISION) | 🟨                                       | ✅                                | Only when safe (no required dependency).                                                             |
+| Delete a Job Artifact manually    | ⬛                              | 🟨                                       | ✅                                | Normally automatic.                                                                                  |
+| **Jobs (implemented, Phase 6)**   |                                 |                                          |                                   |                                                                                                      |
+| View / list jobs                  | 🟨 (any in dept)                | 🟨                                       | ✅                                | Resolves OD-03 for Jobs: whole department, not just own.                                             |
+| Create job                        | 🟨 (any in dept)                | 🟨                                       | ✅                                | Department is derived from the chosen Template — never a client-supplied field.                      |
+| Cancel job                        | 🟨 (any in dept — resolved)     | 🟨 (any in dept)                         | ✅                                | Only from a cancelable state (`QUEUED`/`CLAIMED`/`RENDERING`).                                       |
+| Retry job                         | 🟨 (any in dept — resolved)     | 🟨 (any in dept)                         | ✅                                | Creates a new linked job; original untouched. Only from `ERROR`/`CANCELED`, within the retry window. |
+| Delete job                        | ⬛                              | ⬛                                       | ⬛                                | **Nobody. Ever.** (ADR-0005)                                                                         |
+| **Worker API**                    | —                               | —                                        | —                                 | Only the Worker principal. No human role can call it.                                                |
 
 > **OD-04 — USER vs MANAGER split on Templates — confirmed, Phase 5.** Does a plain USER
 > author and edit Templates, or only consume them? The Phase 5 brief's own draft
@@ -89,18 +89,19 @@ Legend: ✅ allowed · 🟨 allowed, own department only · ⬛ not allowed · �
 > to reason about. Recommended pending decision: **whole department for view; own-or-
 > department for cancel/retry (confirm); MANAGER+ for destructive file ops.**
 
-### Implemented in Phase 3/5 — conservative defaults where still OPEN
+### Implemented in Phase 3/5/6 — conservative defaults where still OPEN
 
 The mechanism (role floor per capability + department scope) is implemented for every row
 above via `@/server/authz` (see [../architecture/authorization.md](../architecture/authorization.md)).
-Users/Departments/Templates now have a real policy behind them
+Users/Departments/Templates/Jobs now have a real policy behind them
 (`src/features/users/use-cases/authorize-user-management.ts`;
 `src/features/templates/use-cases/*` call `authorize(actor, "template:manage"|"template:view", ...)`
+directly; `src/features/jobs/use-cases/*` call `authorize(actor, "job:manage", ...)`
 directly, needing no extra fine-grained policy function the way Users' escalation rules
-did) — Jobs/Files' `OPEN DECISION` rows are still just a registered capability role-floor,
-no use case yet for the parts that remain open. Where a cell above is marked
-`OPEN DECISION`, the code takes the most conservative reading until it's resolved, never
-a guessed answer:
+did) — Files' remaining `OPEN DECISION` row (destructive-op-only, already resolved via
+`assertCanDeleteFile`) is the one row left without a use case of its own; Jobs' OD-03 is
+now resolved (see below). Where a cell above is marked `OPEN DECISION`, the code takes
+the most conservative reading until it's resolved, never a guessed answer:
 
 - **Create user (MANAGER):** implemented as role `USER` only. OD-05 (can MANAGER mint
   another MANAGER) stays open; the code simply doesn't allow it yet.
@@ -123,10 +124,15 @@ a guessed answer:
   Template use case's first step is `authorize(actor, "template:manage"|"template:view",
 { departmentId })` — a USER never even reaches the department-scope check for a
   mutation, since `template:manage`'s `MANAGER` role floor rejects it first.
-- Jobs/Files' remaining `OPEN DECISION` rows (own-vs-department scope) are **not**
-  implemented at all yet — no code path exists for them to default anything,
-  conservatively or otherwise. Only their **role floor** (decided, not open) is
-  registered as a capability today.
+- **Jobs' OD-03 is resolved (Phase 6): whole department, not "own resources only."** A
+  USER may view, create, cancel, and retry any Job in their own Department — matching
+  MANAGER's own scope and the collaborative model Templates already uses. Every Jobs use
+  case's first step is `authorize(actor, "job:manage", { departmentId })`, with no
+  additional "is this actor the creator" check layered on top (unlike Files' delete
+  rule, which does add one).
+- **Files' "own uploads?" row stays resolved as it already was** (ADR-0025): a USER may
+  delete only a File they uploaded; MANAGER/ADMIN may delete any File in scope. Jobs'
+  resolution above does not change this — the two capabilities were always independent.
 
 ## 4. Enforcement requirements
 

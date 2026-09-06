@@ -72,11 +72,13 @@ columns**, never combined into one field (Phase 5 brief §7). `templateLifecycle
   - Soft-deleting an already-deleted Template is likewise a no-op.
   - There is no "restore a deleted Template" action in this phase — not a requirement,
     and not built speculatively.
-- Disabling/deleting is enforced in the one place Job creation will ever check it (a
-  future Jobs feature's own use case) — Studio does **not** repeat legacy's leak where
-  the GraphQL path bypassed the Telegram picker's `disabled` filter. See
-  [../legacy/known-issues.md](../legacy/known-issues.md) and "Template / Job contract"
-  below.
+- Disabling/deleting is enforced where Job creation checks it —
+  **implemented, Phase 6**: `features/jobs/use-cases/create-job.ts` rejects a
+  `DISABLED`/soft-deleted Template. Studio does **not** repeat legacy's leak where the
+  GraphQL path bypassed the Telegram picker's `disabled` filter — there is only one Job
+  creation path today (the dashboard), and it enforces this rule; a future Telegram
+  surface must too. See [../legacy/known-issues.md](../legacy/known-issues.md) and
+  "Template / Job contract" below.
 
 ### Fields (implemented; final schema in
 
@@ -201,24 +203,22 @@ only be created from a Template in the Job's own Department.
   check exists yet because no feature accepts an image against a specific Template slot
   yet (that's Jobs, a later phase). The exact tolerance value stays **OD-14, still open**.
 
-### Template / Job contract
+### Template / Job contract — implemented, Phase 6
 
-Not implemented this phase — but explicitly designed for:
+> **Template is mutable. A Job's history is immutable.**
 
-> **Template is mutable. A future Job's history is immutable.**
-
-A future Job-creation use case will: (1) identify a Template by id, (2) verify it is
-`ACTIVE` and not soft-deleted (both checked fresh, at Job-creation time — never trusting
-that a UI picker already filtered it), (3) resolve its ordered asset slots, (4) require a
-value for every slot (there is no optional-slot concept), and (5) copy everything it needs
-— the Template's render-relevant fields and the resolved asset values — into the Job's own
-immutable creation-time snapshot (ADR-0010). After that point, editing or even soft-deleting
-the Template has **zero** effect on that Job's meaning; the `templateId` FK stays for
+`features/jobs/use-cases/create-job.ts`: (1) identifies a Template by id via
+`findTemplateInScope` (department-scoped for USER/MANAGER, all departments for ADMIN),
+(2) verifies it is `ACTIVE` and not soft-deleted, checked fresh at Job-creation time —
+never trusting that a UI picker already filtered it, (3) resolves its ordered asset
+slots, (4) requires a value for every slot (there is no optional-slot concept), and (5)
+copies everything it needs — the Template's render-relevant fields into `Job.snapshot`
+(JSONB) and the resolved asset values into `JobAsset` rows — at creation time (ADR-0010,
+ADR-0028). After that point, editing or even soft-deleting the Template has **zero**
+effect on that Job's meaning — verified end-to-end: editing a Template after creating a
+Job from it leaves the Job's snapshot untouched. The `templateId` FK stays for
 convenience/joins and active-dependency checks, never as the source of truth for a
-historical Job's content. This Template feature does not implement any of steps 1–5 above
-— it only guarantees the Template-side data (stable `id`, stable asset `key`s, a Department
-match, a real File reference where one exists) will be there for Jobs to read when that
-phase lands.
+historical Job's content.
 
 ### Template versioning
 

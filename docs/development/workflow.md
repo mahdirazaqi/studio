@@ -236,22 +236,66 @@ Worker REST API, Telegram Bot, YouTube delivery, rendering/transcoding,
 schema), aspect-ratio tolerance comparison (OD-14 stays open; nothing yet accepts an
 image against a Template slot), a Template version-history/restore mechanism.
 
-### Phase 6+ (not started)
+### Phase 6 — Job management & state machine _(complete)_
+
+**Goal:** the Job domain — creation, immutable historical snapshot, the state machine,
+atomic Worker claim, progress/duration reporting, cancellation, non-destructive retry,
+and the daily upload quota — as reusable application services plus a dashboard UI. No
+Worker REST API, Telegram, YouTube delivery, or rendering.
+
+**Delivered:**
+
+- `Job`/`JobAsset` models. Historical snapshot split (ADR-0028): `Job.snapshot` (JSONB,
+  Template-level fields) + `JobAsset` rows (resolved values, each with copied File
+  metadata) — a relational model for assets per the phase's explicit requirement, not a
+  single JSONB blob (resolves OD-16, OD-22's Job half).
+- An 8-state, explicitly validated state machine (`QUEUED → CLAIMED → RENDERING →
+RENDERED → DELIVERING → UPLOADED`, plus `ERROR`/`CANCELED` exits) — every write to
+  `Job.state` goes through one atomic conditional `UPDATE` (ADR-0029), never a
+  read-then-write.
+- Atomic Worker claim (`SELECT ... FOR UPDATE SKIP LOCKED`) — manually verified
+  race-free against the real database with concurrent calls.
+- Non-destructive retry (ADR-0031): copies the original's snapshot/assets verbatim,
+  never re-resolves the live Template/Files; eligible only from `ERROR`/`CANCELED`,
+  within a configurable window (resolves OD-02).
+- Global, UTC-day upload quota, concurrency-safe via a Postgres advisory transaction
+  lock (ADR-0030) — a real bug (missing `::int` casts on the lock's arguments) was
+  caught during manual verification and fixed.
+- `job:manage` authorization resolved as whole-department for USER, not "own resources
+  only" (resolves OD-03 for Jobs).
+- The real `assertNoActiveJobDependencies` File-dependency check, closing the loop
+  ADR-0025 opened in Phase 4 when no Job model existed yet.
+- UI: list (search, state filter, pagination), create form (template picker → dynamic
+  asset inputs, scoped Gallery File pickers), detail view (status, timeline, snapshot,
+  assets, retry lineage), and cancel/retry actions.
+- Docs: rewrote `domain/jobs.md` Part B; updated `domain/authorization.md`,
+  `domain/files.md`, `architecture/{authorization,files,integrations/worker-api}.md`,
+  `data/{database,lifecycle-rules,historical-integrity}.md`,
+  `legacy/compatibility-matrix.md`, `open-decisions.md` (OD-02/16/22/26 resolved; OD-01/
+  OD-03 partially resolved), `CLAUDE.md`.
+
+**Explicitly NOT in Phase 6:** the Worker REST API, Worker authentication, Telegram Bot,
+YouTube upload, FFmpeg/ImageMagick, rendering, a result-upload endpoint, `JOB_ARTIFACT`
+creation, a Worker-timeout requeue sweep, bulk cancel, `deliverToTelegram` (no Telegram
+linking mechanism exists on `User` yet), `youtubeTargetId` on Template (no
+`YouTubeTarget` table exists).
+
+### Phase 7+ (not started)
 
 Sequencing is not finalized, but a sensible order:
 
 1. User management (create/disable/role-change) + Department management — wires
    Phase 3's `authorize-user-management.ts` policy to real repositories/Server Actions/UI.
-2. Jobs (creation, snapshot, state machine) + Worker API (atomic claim, auth,
-   progress/state/result, durable delivery scaffold; resolves OD-03, OD-19, OD-27, OD-40)
-   — wires Phase 4's `assertNoActiveJobDependencies` hook and `JOB_ARTIFACT` category, and
-   Phase 5's documented Template/Job contract, to real Job rows.
+2. Worker API (atomic claim/progress/state/result over REST, service-credential auth;
+   resolves OD-27, OD-28, OD-29) — wires Phase 6's `claimNextJob`/`updateJobProgress`/
+   `updateJobDuration`/`transitionJob` application services to real HTTP endpoints, and
+   Phase 6's `JOB_ARTIFACT` result-upload gap to real artifact creation.
 3. YouTube delivery adapter.
 4. Telegram adapter + durable wizard state.
 5. Cleanup jobs, retention, hardening, observability (resolves OD-18, OD-20's remaining
-   half).
+   half, OD-31's requeue sweep).
 
-Each Phase 6+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
+Each Phase 7+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
 the product owner, implement behind the layering rules, test (unit + the integration
 tests listed in `conventions.md` §9), update the docs.
 

@@ -39,8 +39,8 @@ The storage adapter (`@/server/adapters/storage`) and media probing
 (`@/server/media`) live outside this feature, as generic `server/*` infrastructure — see
 `docs/architecture/files.md`.
 
-**Not built yet:** the Jobs feature that will actually reference a File (`ownerJobId`,
-real `JOB_ARTIFACT` creation, the real `assertNoActiveJobDependencies` check), a
-dedup/reuse UI (OD-20 stays open), audio/video duration probing (needs `ffprobe`),
-scheduled artifact cleanup. Templates (Phase 5) already reference Files — see
-`features/templates/README.md`.
+**Not built yet:** `ownerJobId` and real `JOB_ARTIFACT` creation (the reverse direction —
+a Job _producing_ a File — needs a result-upload endpoint, Phase 7+), a dedup/reuse UI
+(OD-20 stays open), audio/video duration probing (needs `ffprobe`), scheduled artifact
+cleanup. Templates (Phase 5) and Jobs (Phase 6, the input direction — see
+`features/jobs/README.md`) already reference Files.

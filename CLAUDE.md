@@ -88,7 +88,7 @@ The legacy repository is at `/home/mahdirazaqi/Projects/qtical-backend-node`
    actual behavior. Do not trust summaries alone for security- or correctness-sensitive
    work.
 4. Implement following the architecture rules below.
-5. If the docs do not answer a question, see rule §11 (ambiguity).
+5. If the docs do not answer a question, see rule §12 (ambiguity).
 6. Record any architectural decision you make in
    [`docs/architecture/decisions.md`](docs/architecture/decisions.md).
 
@@ -104,7 +104,7 @@ When sources conflict, resolve in this order (highest wins):
 
 The legacy code **never** overrides a deliberate Studio architectural decision.
 But do **not** silently discard legacy business behavior — if it looks important and
-Studio requirements are silent, record it as an **OPEN DECISION** (rule §11).
+Studio requirements are silent, record it as an **OPEN DECISION** (rule §12).
 
 ## 5. Architectural rules (non-negotiable)
 
@@ -247,17 +247,20 @@ Full detail: [`docs/architecture/files.md`](docs/architecture/files.md),
   sniffed from the actual bytes (`@/server/media`); the allow-list and per-kind size
   limits live in `features/files/domain/file-types.ts` (ADR-0026) — centralized, not
   re-implemented per form/action.
-- **A deleted File must never break a historical record.** A future Job that resolves a
-  File must copy the metadata it needs into its own immutable snapshot at creation time
-  (ADR-0010) rather than depending on the File row surviving — see
+- **A deleted File must never break a historical record.** A Job that resolves a File
+  copies the metadata it needs into its own `JobAsset` row at creation time (ADR-0010,
+  ADR-0028) rather than depending on the File row surviving — see
   `docs/architecture/files.md` "Historical integrity contract for Job/Template features"
   (ADR-0025) before wiring a new feature to Files. **Templates are different**: a
   Template's File reference (`TemplateAsset.defaultFileId`) is a live field on a mutable
   resource, not a historical record — see §10 below.
-- **`File.category = JOB_ARTIFACT` and the `assertNoActiveJobDependencies` hook exist for
-  the Jobs feature to use — implement the real check there, don't add a parallel one.**
-  `assertNoActiveTemplateDependencies` (the same file) is Templates' already-real
-  counterpart — see §10.
+- **`File.category = JOB_ARTIFACT` still exists but nothing creates one yet** — that
+  needs a result-upload endpoint (Phase 7+), not part of Phase 6. The **input** side of
+  the Job↔File relationship is implemented: `assertNoActiveJobDependencies`
+  (`features/files/use-cases/authorize-file-management.ts`) is a real check, not a
+  no-op — implement any future artifact-side check _inside that same function_, never a
+  parallel one. `assertNoActiveTemplateDependencies` (the same file) is Templates'
+  equivalent — see §10.
 
 ## 10. Templates rules (summary)
 
@@ -293,12 +296,63 @@ verify-file-references.ts`.
   extend this one if the rule ever needs to change.
 - **Editing a Template replaces its entire asset list wholesale** (delete all, recreate),
   not a per-asset diff — this is deliberate and documented, not a shortcut to fix later.
-- **No Job feature exists yet** — Template state (disabled/deleted) is designed to be
-  checked by a future Job-creation use case, but nothing enforces it end-to-end today
-  (there is no Job creation path to enforce it in). Do not build Job creation as part of a
-  Templates change; that is its own phase.
+- **Job creation now enforces Template state (disabled/deleted) — implemented, Phase 6.**
+  `features/jobs/use-cases/create-job.ts` rejects a `DISABLED` or soft-deleted Template —
+  the enforcement point Templates' own design always deferred to "a future Job feature."
 
-## 11. Handling ambiguity
+## 11. Jobs rules (summary)
+
+Full detail: [`docs/domain/jobs.md`](docs/domain/jobs.md),
+[`docs/architecture/decisions.md`](docs/architecture/decisions.md)
+ADR-0005/ADR-0028/ADR-0029/ADR-0030/ADR-0031. **Implemented, Phase 6** (domain/application
+layer + dashboard UI only — no Worker REST API yet, that's Phase 7).
+
+- **A Job is never deleted, never soft-deleted, and never generically edited.** No
+  `deleteJob`/`editJob` exists or should ever exist. Every mutation is one of the named
+  lifecycle operations: `createJob`, `transitionJob` (+ its callers `claimNextJob`/
+  `cancelJob`), `updateJobProgress`, `updateJobDuration`, `retryJob`.
+- **`Job.state` is written only via `transitionJobRow`'s atomic conditional `UPDATE ...
+WHERE state IN (fromStates)`** — never a read-then-write, never a direct
+  `db.job.update({ data: { state } })` anywhere else. This is what makes a Worker-vs-human
+  state race safe. Adding a new state-changing operation means calling `transitionJob`
+  (or `transitionJobRow` directly, if `transitionJob`'s pre-check doesn't fit), not
+  inventing a new update path.
+- **The Job's Department is always derived from its Template** (`template.departmentId`)
+  — there is no separate `departmentId` input to a Job-creation request, by construction.
+  Never add one.
+- **Historical integrity is two pieces, not one**: `Job.snapshot` (JSONB, Template-level
+  fields, immutable) and `JobAsset` rows (resolved per-slot values, each with its own
+  copied File metadata, immutable). Neither is ever updated after creation. Do not fold
+  `JobAsset` into the JSONB blob, and do not add an update path to either.
+- **Retry copies the original Job's `snapshot`/`JobAsset` rows verbatim — never re-loads
+  the live Template or re-resolves Files.** This is not an optimization; it is the
+  historical-integrity guarantee itself (ADR-0031). If a future change makes `retryJob`
+  touch `features/templates/repository` or `features/files/repository`, that is a bug.
+- **Retry eligibility is `ERROR`/`CANCELED` only, within `JOB_RETRY_WINDOW_DAYS`** —
+  narrower than legacy on purpose (resolves OD-02). Cancel eligibility is
+  `QUEUED`/`CLAIMED`/`RENDERING` only. Both live in
+  `features/jobs/domain/job-state-machine.ts` — the one place these sets are defined.
+- **The daily upload quota (`JOB_UPLOAD_DAILY_CAP`, default 3, global, UTC-day) is
+  enforced via a Postgres advisory transaction lock inside the same transaction as the
+  Job insert** (`features/jobs/repository/job-repository.ts`) — never a plain
+  count-then-insert. The two-int `pg_advisory_xact_lock` overload needs explicit `::int`
+  casts on both arguments (a real bug caught during manual verification); do not remove
+  them.
+- **The Worker is never a `User` and never becomes an `Actor`.** `claimNextJob`,
+  `updateJobProgress`, `updateJobDuration`, and `transitionJob` take no `Actor`
+  parameter — do not add one "for consistency." Phase 7's Worker Route Handlers will
+  authenticate the Worker's service credential first, then call these functions
+  directly.
+- **`job:manage` (view/create/cancel/retry) is USER+, whole-department** — resolves OD-03
+  for Jobs as collaborative, not "own resources only." Do not narrow this to
+  creator-only without the same level of explicit confirmation Phase 5's OD-04 required.
+- **Not implemented, deliberately**: the Worker REST API, Telegram, YouTube delivery,
+  rendering, result upload, `JOB_ARTIFACT` creation, a requeue sweep for stuck
+  `CLAIMED`/`RENDERING` jobs, bulk cancel. `RENDERED`/`DELIVERING`/`UPLOADED` are real,
+  reachable states with no adapter driving a Job into them yet — that's the point of
+  building the state machine ahead of the features that will use it.
+
+## 12. Handling ambiguity
 
 - **Never invent business requirements when the documentation does not define them.**
 - Mark the gap as **`OPEN DECISION`** inline in the doc you are editing, add it to
@@ -308,7 +362,7 @@ verify-file-references.ts`.
   whoever decides has what they need.
 - Do not "temporarily" pick an answer and build on it silently.
 
-## 12. Worker REST compatibility
+## 13. Worker REST compatibility
 
 Studio must keep the existing Render Worker working with minimal changes. The legacy
 endpoints (`POST /files`, `GET /jobs/fetch`, `GET /jobs/:id`,
@@ -317,7 +371,7 @@ baseline. The **one deliberate break**: the Worker API **must be authenticated**
 not in legacy). See [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md)
 and [`docs/legacy/compatibility-matrix.md`](docs/legacy/compatibility-matrix.md).
 
-## 13. Security rules (summary)
+## 14. Security rules (summary)
 
 Full document: [`docs/security/security.md`](docs/security/security.md). Highlights:
 
@@ -331,14 +385,14 @@ Full document: [`docs/security/security.md`](docs/security/security.md). Highlig
 - Validate every input at the boundary (Zod or equivalent) — Server Actions included.
 - Secrets only via environment / secret manager; never in the repo.
 
-## 14. Frontend conventions (summary)
+## 15. Frontend conventions (summary)
 
 Panel-only app, **no landing page**. Next.js App Router + React + TypeScript + Tailwind +
 shadcn/ui. **LTR**, **English** UI and messages. Responsive with an excellent mobile
 experience. **Light / Dark / System** themes. Full detail:
 [`docs/frontend/conventions.md`](docs/frontend/conventions.md).
 
-## 15. Phase status
+## 16. Phase status
 
 - **Phase 0 (documentation & architecture foundation) — complete.**
 - **Phase 1 (Next.js foundation & application skeleton) — complete.** Dashboard shell,
@@ -367,15 +421,28 @@ experience. **Light / Dark / System** themes. Full detail:
   File reference — all ADR-0027, resolving OD-09/OD-10/OD-11); `template:manage`
   (MANAGER+) / `template:view` (USER+) authorization, confirmed against OD-04; a full
   create/list/search/filter/edit/enable-disable/soft-delete UI; and the documented (not
-  yet enforceable — no Job feature exists) Template/Job contract for Phase 6. The app
-  runs (`npm run dev`), builds (`npm run build`), and passes `npm run check` (lint +
-  typecheck + format + tests). **Still no user/department management UI, no Jobs, no
-  Worker/Telegram/YouTube.**
+  yet enforceable — no Job feature exists) Template/Job contract for Phase 6.
+- **Phase 6 (Job management & state machine) — complete.** `Job`/`JobAsset` models —
+  historical snapshot split across immutable JSONB (`Job.snapshot`, Template-level
+  fields) and relational rows (`JobAsset`, resolved values with copied File metadata,
+  ADR-0028); an explicit, validated 8-state state machine with every transition written
+  through one atomic conditional `UPDATE` (ADR-0029); an atomic `SELECT ... FOR UPDATE
+SKIP LOCKED` Worker claim (manually verified race-free); a global, UTC-day upload
+  quota enforced via a Postgres advisory lock (ADR-0030); non-destructive retry that
+  copies the original's snapshot/assets verbatim (ADR-0031, resolves OD-02); `job:manage`
+  resolved as whole-department for USER (resolves OD-03 for Jobs); the real
+  `assertNoActiveJobDependencies` File-dependency check (closing the loop ADR-0025
+  opened in Phase 4); and a create/list/filter/detail/cancel/retry UI. No Worker REST
+  API, Telegram, YouTube delivery, or rendering — those are Phase 7+. The app runs
+  (`npm run dev`), builds (`npm run build`), and passes `npm run check` (lint +
+  typecheck + format + tests). **Still no user/department management UI, no Worker API,
+  no Telegram/YouTube.**
 
-Do **not** start the next phase (user/department management, then Jobs) unless explicitly
-asked. See [`docs/development/workflow.md`](docs/development/workflow.md) for phase
-boundaries and [`docs/development/open-decisions.md`](docs/development/open-decisions.md)
-for what remains undecided.
+Do **not** start the next phase (user/department management, then the Worker REST API)
+unless explicitly asked. See [`docs/development/workflow.md`](docs/development/workflow.md)
+for phase boundaries and
+[`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
+remains undecided.
 
 ### Quick start
 

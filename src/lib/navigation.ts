@@ -51,7 +51,8 @@ export const navigation: NavGroup[] = [
   {
     label: "Rendering",
     items: [
-      { label: "Jobs", href: "/jobs", icon: ListVideo, placeholder: true },
+      // Implemented, Phase 6.
+      { label: "Jobs", href: "/jobs", icon: ListVideo },
       {
         // Implemented, Phase 5 — the `placeholder` badge was still on Templates
         // from before this feature existed; also fixing the same leftover flag

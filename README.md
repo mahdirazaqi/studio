@@ -27,8 +27,13 @@ authorization), **not** a port.
 - **Phase 5** — Template management — **complete**. Create/list/search/filter/edit/
   enable-disable/soft-delete for department-scoped render recipes, an asset-slot editor
   with an optional Gallery File default per slot (department-verified, deletion-protected),
-  and the documented (not yet enforceable) Template/Job contract for Phase 6. No
-  user/department management UI, no Jobs, no Worker/Telegram/YouTube yet.
+  and the documented (not yet enforceable) Template/Job contract for Phase 6.
+- **Phase 6** — Job management & state machine — **complete**. Job creation with an
+  immutable historical snapshot (Template config as JSONB + resolved asset values as
+  relational rows), an explicit validated state machine, an atomic (race-free) Worker
+  claim, non-destructive retry, and a concurrency-safe daily upload quota — plus a
+  create/list/detail/cancel/retry UI. No user/department management UI, no Worker REST
+  API, no Telegram/YouTube yet.
 
 ## Getting started
 
@@ -67,8 +72,8 @@ src/
 ├── app/          App Router — (auth) + (dashboard) route groups, /api/health,
 │                 /api/files/[fileId] (authenticated binary content delivery)
 ├── features/     one folder per module — auth (Phase 2), users (Phase 2/3, partial),
-│                 files (Phase 4) and templates (Phase 5) implemented; departments
-│                 (partial, Phase 4/5); jobs, telegram (README only, no impl yet)
+│                 files (Phase 4), templates (Phase 5), and jobs (Phase 6) implemented;
+│                 departments (partial, Phase 4/5); telegram (README only, no impl yet)
 ├── components/   ui/ (shadcn), theme/, layout/ (sidebar, header, shells, forbidden page)
 ├── lib/          client-safe utilities (cn, roles, navigation, site-config)
 ├── server/       server-only: env, logger, errors, validation, actions, api,

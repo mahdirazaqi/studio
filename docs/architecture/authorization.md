@@ -66,17 +66,24 @@ Registering a capability is a one-line addition transcribed directly from a deci
 of [../domain/authorization.md](../domain/authorization.md)'s permission matrix — never a
 new invented rule. `job:manage`, `file:manage`, `template:manage`, `template:view` were
 registered ahead of Jobs/Templates/Files existing, precisely so those phases wouldn't have
-to design this registry from scratch. **Templates (Phase 5)** is the first of the three to
-actually land: every `features/templates/use-cases/*` function calls `authorize(actor,
-"template:manage" | "template:view", { departmentId })` as its first step, with no
-additional fine-grained policy function needed (OD-04, "can USER author Templates", is
-confirmed as MANAGER+ only — see [../domain/authorization.md](../domain/authorization.md)
-— so the registered role floor alone is the complete answer; there is no "own resource"
-nuance for Templates the way Files' delete rule needed one). `job:manage`/`file:manage`
-still encode only the role floor, not the finer "own resource vs. department resource"
-granularity that OD-03 leaves open — a Jobs use case still adds its own narrower check
-once it exists, the way `features/files/use-cases/authorize-file-management.ts` already
-does for Files.
+to design this registry from scratch. All three have now landed:
+
+- **Templates (Phase 5)**: every `features/templates/use-cases/*` function calls
+  `authorize(actor, "template:manage" | "template:view", { departmentId })` as its first
+  step, with no additional fine-grained policy function needed (OD-04, "can USER author
+  Templates", is confirmed as MANAGER+ only — so the registered role floor alone is the
+  complete answer; there is no "own resource" nuance for Templates the way Files' delete
+  rule needed one).
+- **Jobs (Phase 6)**: every `features/jobs/use-cases/*` function that takes an `Actor`
+  calls `authorize(actor, "job:manage", { departmentId })` as its first step, resolving
+  OD-03 for Jobs the same way — **whole department**, no "own resource" narrowing. The
+  Worker-facing operations (`claimNextJob`, `updateJobProgress`, `updateJobDuration`, and
+  the underlying `transitionJob`) take no `Actor` at all — see
+  [../domain/jobs.md](../domain/jobs.md) "Worker identity vs User identity".
+- **Files (Phase 4)**: `file:manage`'s role floor is the coarse gate, plus
+  `assertCanDeleteFile`'s own finer "own upload vs. any in department" rule for
+  deletion — the one capability among the three where OD-03's "own resource" reading was
+  actually chosen, deliberately different from Jobs' whole-department resolution.
 
 ## Department scope: three tools, three situations
 
@@ -290,3 +297,22 @@ different departments:
 | MANAGER          | Soft-delete an already-deleted template                     | No-op, no error (idempotent)                                                        |
 | MANAGER          | Enable or edit a soft-deleted template                      | `business_rule`                                                                     |
 | MANAGER          | Create a template with the same name a just-deleted one had | Succeeds (partial unique index excludes soft-deleted rows — ADR-0027)               |
+
+Re-verified again for Phase 6 (Jobs), same real-server setup:
+
+| Actor             | Route/action                                                              | Result                                                                          |
+| ----------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| USER              | `/jobs`, `/jobs/[id]` (own dept, including a job created by someone else) | Real content rendered — Jobs' OD-03 resolved as whole-department                |
+| USER              | `createJob` for a Template outside their department                       | `not_found` (folded via `findTemplateInScope`)                                  |
+| USER              | `cancelJob`/`retryJob` on a job created by a different USER, same dept    | Succeeds — not limited to "own" jobs                                            |
+| MANAGER (dept A)  | `getJob`/`listDepartmentJobs` on dept B's job                             | `not_found` / excluded from the list                                            |
+| MANAGER (dept A)  | `createJob` with a dept-B File id for an image slot                       | `business_rule` (file reference not found in dept A's gallery)                  |
+| ADMIN             | `/jobs` (no department filter)                                            | Jobs from every department rendered                                             |
+| Any role          | `deleteFile` on a File an **active** Job references                       | `conflict`, file not deleted; released once that Job leaves an active state     |
+| MANAGER           | Cancel an already-canceled job                                            | No-op, no error (idempotent)                                                    |
+| MANAGER           | Cancel a `RENDERED`/`UPLOADED` job                                        | `business_rule`                                                                 |
+| MANAGER           | Retry a `QUEUED`/`RENDERING` job                                          | `business_rule` (not yet eligible)                                              |
+| MANAGER           | Retry a job past `JOB_RETRY_WINDOW_DAYS`                                  | `business_rule`                                                                 |
+| MANAGER           | Retry an `ERROR`/`CANCELED` job                                           | New linked Job created; original untouched                                      |
+| System (no Actor) | `claimNextJob()` called twice concurrently                                | Two different Jobs claimed, never the same one (real-database concurrency test) |
+| System (no Actor) | `createJob`/`retryJob` with `deliverToYouTube: true`, 4th of the UTC day  | `conflict` (daily quota, real-database concurrency test also passed)            |

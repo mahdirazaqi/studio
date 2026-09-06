@@ -4,6 +4,18 @@ The **Render Worker** is an external service (not in this repo) that performs th
 video rendering. It is the **only** first-class REST client of Studio. Studio must keep it
 working with **minimal changes** — the endpoint semantics are a compatibility contract.
 
+**Phase 6 status:** none of this REST surface is exposed yet — that's Phase 7. Phase 6
+built the application services this surface will call directly, with no `Actor`
+parameter (the Worker is never a `User` — see
+[../domain/jobs.md](../domain/jobs.md) "Worker identity vs User identity"):
+`claimNextJob()` (atomic, `features/jobs/use-cases/claim-next-job.ts`),
+`updateJobProgress()`/`updateJobDuration()` (`features/jobs/use-cases/`), and
+`transitionJob(jobId, targetState)` (`features/jobs/use-cases/transition-job.ts`) for
+state changes. A future `POST /api/worker/v1/jobs/next` Route Handler authenticates the
+Worker's service credential first, then calls `claimNextJob()` directly — no business
+logic is duplicated at the REST layer, per this page's own "thin handlers → shared use
+cases" principle below.
+
 ## 1. Legacy contract (baseline) `LEGACY`
 
 From `qtical-backend-node/src/render/job/job.controller.ts` and `file.controller.ts`.

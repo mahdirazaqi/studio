@@ -4,14 +4,21 @@ import type { Actor } from "@/server/authz";
 import type { SafeFile } from "@/features/files/domain/file";
 
 const countTemplateAssetReferencesToFile = vi.fn();
+const countActiveJobAssetReferencesToFile = vi.fn();
 
 vi.mock("@/features/templates/repository/template-repository", () => ({
   countTemplateAssetReferencesToFile: (...args: unknown[]) =>
     countTemplateAssetReferencesToFile(...args),
 }));
 
+vi.mock("@/features/jobs/repository/job-repository", () => ({
+  countActiveJobAssetReferencesToFile: (...args: unknown[]) =>
+    countActiveJobAssetReferencesToFile(...args),
+}));
+
 const {
   assertCanDeleteFile,
+  assertNoActiveJobDependencies,
   assertNoActiveTemplateDependencies,
   canDeleteFile,
 } = await import("./authorize-file-management");
@@ -94,6 +101,22 @@ describe("assertCanDeleteFile", () => {
         file({ departmentId: "dept-b", uploadedByUserId: "someone-else" }),
       ),
     ).not.toThrow();
+  });
+});
+
+describe("assertNoActiveJobDependencies", () => {
+  it("allows deletion when no active job asset references the file", async () => {
+    countActiveJobAssetReferencesToFile.mockResolvedValue(0);
+    await expect(
+      assertNoActiveJobDependencies(file()),
+    ).resolves.toBeUndefined();
+  });
+
+  it("throws conflict when an active job asset references the file", async () => {
+    countActiveJobAssetReferencesToFile.mockResolvedValue(1);
+    await expect(assertNoActiveJobDependencies(file())).rejects.toMatchObject({
+      kind: "conflict",
+    });
   });
 });
 

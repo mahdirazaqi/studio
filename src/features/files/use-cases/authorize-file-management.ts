@@ -2,6 +2,7 @@ import { conflictError, forbiddenError } from "@/server/errors/app-error";
 import { authorize, hasAtLeastRole, type Actor } from "@/server/authz";
 import type { SafeFile } from "@/features/files/domain/file";
 import { countTemplateAssetReferencesToFile } from "@/features/templates/repository/template-repository";
+import { countActiveJobAssetReferencesToFile } from "@/features/jobs/repository/job-repository";
 
 /**
  * Authorization policy for file mutations. `authorize(actor, "file:manage",
@@ -43,25 +44,28 @@ export function canDeleteFile(actor: Actor, file: SafeFile): boolean {
 }
 
 /**
- * Extension point for the future Jobs feature (docs/data/lifecycle-rules.md
- * "Files — hard delete when safe"). A File must not be deleted while an
- * **active** Job (`QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING`) depends on it as
- * an input — historical Jobs never depend on this row (they hold a snapshot,
- * ADR-0010), only in-flight ones do.
+ * A File must not be deleted while an **active** Job
+ * (`QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING`) depends on it as an input —
+ * historical (terminal-state) Jobs never depend on this row, because their
+ * `JobAsset` rows already carry a copy of everything they need
+ * (`fileOriginalName`/`fileMimeType`/`fileSizeBytes`/`fileWidth`/`fileHeight`,
+ * ADR-0028), only in-flight ones do (docs/data/lifecycle-rules.md "Files —
+ * hard delete when safe").
  *
- * No Job model exists yet, so there is nothing to check — this is
- * intentionally a no-op today, not a stand-in for real Job logic. When Jobs
- * land, this function (not the delete use case's caller) is where that query
- * goes: load any active Jobs referencing `file.id`, and throw
- * `conflictError()` naming them if any exist. See ADR-0025 for the full
- * contract this must satisfy.
+ * **Real, Phase 6** — this was a documented no-op through Phase 5 (ADR-0025)
+ * because no Job model existed; `countActiveJobAssetReferencesToFile`
+ * (`features/jobs/repository/job-repository.ts`) is the query that hook was
+ * always meant to gain.
  */
 export async function assertNoActiveJobDependencies(
-  _file: SafeFile,
+  file: SafeFile,
 ): Promise<void> {
-  // TODO(jobs-phase): query for active-state Jobs referencing _file.id and
-  // throw conflictError() if any exist. See this function's doc comment.
-  return Promise.resolve();
+  const referenceCount = await countActiveJobAssetReferencesToFile(file.id);
+  if (referenceCount > 0) {
+    throw conflictError(
+      "This file is used as an input by one or more active jobs and cannot be deleted until they finish, fail, or are canceled.",
+    );
+  }
 }
 
 /**

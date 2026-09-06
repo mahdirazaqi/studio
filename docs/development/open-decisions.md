@@ -10,34 +10,28 @@ Status: all **OPEN** unless noted. ID format `OD-nn`.
 
 ## Domain / business rules
 
-### OD-01 — Upload cap model
+### OD-01 — Upload cap model — partially resolved, Phase 6 (ADR-0030)
 
 _Where:_ [../domain/jobs.md](../domain/jobs.md), [../integrations/youtube.md](../integrations/youtube.md).
 Legacy: hard-coded **global** cap of **3 per UTC day**, all users.
-Decide: (a) value, (b) scope — global / per-Department / per-YouTube-target, (c) window,
-(d) configurable?, (e) behavior when exceeded — reject at creation (legacy) vs queue-and-defer.
 
-- _Global:_ simplest, protects one shared API quota; one department can starve others.
-- _Per-target:_ matches how the YouTube Data API quota is actually structured; fairer;
-  more configuration.
-  **Recommendation:** per-YouTube-target daily cap, configurable, reject at creation with a
-  clear message — pending confirmation of the real YouTube quota structure.
+**Resolved, Phase 6:** kept **global**, UTC-day, count-based, exactly as legacy —
+`JOB_UPLOAD_DAILY_CAP` (default 3, configurable via env), reject at creation with a clear
+`conflict` error. **Still open:** whether a future per-YouTube-target scope should replace
+the global cap once a `YouTubeTarget` model exists — no such model exists yet to scope
+against, so this half of the original question is deferred, not answered either way.
 
-### OD-02 — Retry eligibility window
+### OD-02 — Retry eligibility window — ✅ RESOLVED (ADR-0029)
 
 _Where:_ [../domain/jobs.md](../domain/jobs.md).
-Legacy: 3 days from creation; only non-terminal jobs.
-Decide the window length, whether it's configurable, and whether `CANCELED` jobs are
-retryable (in addition to `ERROR`).
+Legacy: 3 days from creation; allowed from almost any non-terminal state.
 
-- _Keep a short window:_ bounds queue churn; avoids retrying jobs whose input files were
-  already purged.
-- _No window:_ operators can always retry old failures; risk of failed renders on purged
-  inputs.
-  **Recommendation:** keep a window, default 3–7 days, configurable; retry from `ERROR`
-  (and `CANCELED`? — confirm).
+**Resolved, Phase 6:** retry eligible only from `ERROR` and `CANCELED` — narrower than
+legacy, which allowed retrying a Job that hadn't actually stopped yet (a design smell, not
+a rule worth preserving). Window: `JOB_RETRY_WINDOW_DAYS`, default **3 days** (matches
+legacy), configurable via env.
 
-### OD-03 — "Own resource" vs "department resource" scope for USER
+### OD-03 — "Own resource" vs "department resource" scope for USER — resolved for Jobs, Phase 6
 
 _Where:_ [../domain/authorization.md](../domain/authorization.md).
 For cancel / retry / delete-own-file, is a plain USER limited to resources they created
@@ -51,6 +45,13 @@ granularity a future Jobs/Files use case still has to add on top.
 - _Whole department:_ collaborative; matches MANAGER; simpler.
   **Recommendation:** whole department for view; confirm for cancel/retry; MANAGER+ for
   destructive file ops.
+
+**Resolved for Jobs, Phase 6:** whole department — a USER may view, create, cancel, and
+retry **any** Job in their own Department, not only ones they created. Matches the
+already-collaborative model MANAGER/Templates use, and matches the Phase 6 brief's own
+"USER: Can operate on Jobs belonging to their Department" (no "own only" qualifier). The
+Files half of this OD (destructive file ops = MANAGER+, own-upload = USER) remains
+resolved as it already was (ADR-0025) and is unaffected by this.
 
 ### OD-04 — Can a USER author/edit Templates?
 
@@ -177,11 +178,15 @@ Default on (DM the creator the file if they're linked) or opt-in?
 
 ## Data / lifecycle
 
-### OD-16 — Job snapshot storage form
+### OD-16 — Job snapshot storage form — ✅ RESOLVED (ADR-0028)
 
 _Where:_ [../data/historical-integrity.md](../data/historical-integrity.md), [../data/database.md](../data/database.md).
-JSONB column vs dedicated 1:1 table vs denormalized columns + JSON.
-**Recommendation:** JSONB `snapshot` + a few denormalized indexable columns.
+
+**Resolved, Phase 6:** a `JSONB` `Job.snapshot` column holds the Template-level half
+(render fields + ordered asset-slot definitions, as they were); a handful of
+denormalized, indexed top-level columns (`title`, `templateId`, `state`, `createdAt`, ...)
+cover filtering/sorting. The _resolved asset values_ are **not** part of this JSONB blob
+— see OD-22.
 
 ### OD-17 — Copy media bytes into the snapshot for critical inputs?
 
@@ -224,12 +229,16 @@ content, not client-declared. New per-kind size limits legacy never had: 25MB im
 100MB audio / 500MB video. See ADR-0026 and
 [../architecture/files.md](../architecture/files.md).
 
-### OD-22 — Assets & outcomes: child rows vs JSONB
+### OD-22 — Assets & outcomes: child rows vs JSONB — Job-asset half ✅ RESOLVED (ADR-0028)
 
 _Where:_ [../data/database.md](../data/database.md).
 Template asset slots / resolved Job assets / delivery outcomes — tables or JSON?
-**Recommendation:** Template assets = child rows; Job snapshot = JSONB; delivery outcomes
-= child rows or JSONB.
+
+**Resolved:** Template asset slots = child rows (Phase 5, ADR-0027). **Resolved, Phase
+6:** resolved Job assets = child rows too (`JobAsset`) — not JSONB, per the Phase 6
+brief's explicit relational-model requirement; each row carries its own copied File
+metadata for historical integrity (ADR-0028). **Still open:** delivery outcomes — no
+delivery mechanism exists yet.
 
 ### OD-23 — Audit entry retention
 
@@ -248,10 +257,14 @@ _Where:_ [../data/lifecycle-rules.md](../data/lifecycle-rules.md).
 Jobs are never deleted. Time-based partitioning / cold storage strategy — later concern,
 must preserve full readability, never a deletion.
 
-### OD-26 — Cancelled job: zero out progress/duration for display?
+### OD-26 — Cancelled job: zero out progress/duration for display? — ✅ RESOLVED (ADR-0029)
 
 _Where:_ [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).
 Legacy reset them to 0. Historical integrity favors keeping the values.
+
+**Resolved, Phase 6:** kept, never zeroed. `cancelJob` writes only `state`,
+`canceledByUserId`, `canceledAt`, `cancelReason` — `progress`/`durationSeconds`/every
+timeline timestamp are left exactly as they were at the moment of cancellation.
 
 ---
 

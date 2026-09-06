@@ -758,3 +758,215 @@ interact with Phase 4's File deletion-safety design, ADR-0025).
   `assertNoActiveJobDependencies` stays exactly the documented no-op ADR-0025 left it.
 
 **Status:** DECIDED. Resolves OD-09, OD-10, OD-11.
+
+---
+
+## ADR-0028 — Job historical snapshot: JSONB Template config + relational JobAsset rows
+
+**Context.** ADR-0010 already decided a Job must carry an immutable creation-time
+snapshot; OD-16/OD-22 left its storage form open ("JSONB column vs. dedicated table vs.
+child rows", "confirm when Jobs land"). The Phase 6 brief separately required a "proper
+relational Job Asset model... avoid storing arbitrary unstructured JSON when a strongly
+typed relational model is appropriate" — a stronger, more specific instruction than
+OD-22's own leaning ("the Job's snapshot = JSONB (immutable copy)"), which read as
+folding the resolved asset values into the same blob as the Template config.
+
+**Decision.** Split the snapshot in two, each stored the way its own shape actually
+calls for:
+
+- **`Job.snapshot` (JSONB)** — the Template-level half only: `templateId`,
+  `templateName`, `composition`, `source`, `scriptRef`, `outputPattern`, `description`,
+  `tags`, and the ordered `assetSlotDefinitions[]` (`key`/`kind`/`composition`/`layer`/
+  `imageRatio` as they were). Flat, has no relational structure of its own, and needs no
+  independent query access — a JSONB blob is the right shape (OD-16 resolved this way).
+- **`JobAsset` (relational rows)** — one row per resolved slot value (plus one injected
+  `SCRIPT` row), each carrying its own copied File metadata
+  (`fileOriginalName`/`fileMimeType`/`fileSizeBytes`/`fileWidth`/`fileHeight`) alongside a
+  nullable `fileId` FK (`onDelete: SetNull`). Resolves OD-22's Job-asset half as **child
+  rows**, matching the brief's explicit instruction and enabling real queries — most
+  importantly, `assertNoActiveJobDependencies`'s File-dependency check
+  (`countActiveJobAssetReferencesToFile`), which is not expressible as a JSONB scan
+  without an unindexed function scan.
+
+Both halves are **written once, at creation, inside the same transaction as the Job row,
+and never updated afterward** — there is no code path that writes either a second time.
+
+**Consequences.**
+
+- `assertNoActiveJobDependencies` (documented no-op since ADR-0025) becomes **real** in
+  this phase: it counts `JobAsset` rows with a matching `fileId` whose `Job` is in an
+  active state, and is scoped to active jobs only (unlike Templates' equivalent check) —
+  once a Job leaves an active state, its `JobAsset` rows already carry everything a
+  historical view needs, so a completed/failed/canceled Job never blocks a File's
+  deletion.
+- A deleted File never breaks a historical Job's readability: the `JobAsset` row's copied
+  columns remain intact even after `fileId` is set to `null`, so the UI can always show
+  "media no longer stored" with the original name/type/size still visible.
+- Resolves OD-16 (JSONB for the Template-level half) and the Job-asset half of OD-22
+  (child rows). The delivery-outcomes half of OD-22 remains open — no delivery mechanism
+  exists yet.
+- `Job.title` is computed once from the resolved `DATA` values (legacy rule, kept) and
+  stored as a plain column — not re-derived from either half of the snapshot — so it
+  survives even if the snapshot shape changes later.
+
+**Status:** DECIDED. Resolves OD-16; resolves OD-22's Job-asset half (Template's half
+already resolved by ADR-0027).
+
+---
+
+## ADR-0029 — Job state machine, transition primitive, and atomic Worker claim
+
+**Context.** Legacy's `state` was a raw integer accepted without validation
+(`changeStateJob`), and `fetch` claimed a Job via a non-atomic `findOne` → `save`,
+allowing two Workers to claim the same Job under load. ADR-0013 already decided Studio
+needs an explicit, validated state machine; this phase has to actually build it, plus the
+claim mechanism ADR-0013 assumed would exist.
+
+**Decision.**
+
+- **Eight canonical states** (`features/jobs/domain/job-state-machine.ts`): `QUEUED →
+CLAIMED → RENDERING → RENDERED → DELIVERING → UPLOADED`, with `ERROR`/`CANCELED` as
+  failure/cancellation exits and `CLAIMED → QUEUED` as a requeue path (for a future
+  Worker-timeout sweep — not implemented this phase). `UPLOADED`, `ERROR`, `CANCELED` are
+  terminal (no outgoing transitions). This is the exact graph
+  [`domain/jobs.md`](../domain/jobs.md) already proposed — Phase 6 makes it the only path
+  `Job.state` can ever change through.
+- **One transition primitive**, `transitionJob(jobId, targetState, extra?)`
+  (`features/jobs/use-cases/transition-job.ts`) — no `Actor` parameter, since it is a
+  system/Worker-level operation (the Worker is never a `User`, Phase 6 brief §38).
+  `cancelJob` (human, authorized) and every future Worker Route Handler (Phase 7) call
+  this _after_ their own separate authorization/authentication check, never around it. A
+  pre-check against the current state gives a specific, friendly error for the common
+  case; the actual correctness guarantee is the next point.
+- **Every write to `Job.state` is a single conditional `UPDATE ... WHERE state IN
+(fromStates)`** (`transitionJobRow`), not a read-then-write. Postgres executes that as
+  one atomic statement, so a concurrent conflicting change (e.g. a human cancel racing a
+  Worker's own state report) can never be silently overwritten — the loser's `UPDATE`
+  matches zero rows and the use case reports a `conflict`, never silently succeeding on
+  stale data.
+- **Atomic Worker claim** (`claimNextJobRow`): `UPDATE jobs SET state = 'CLAIMED', ...
+WHERE id = (SELECT id FROM jobs WHERE state = 'QUEUED' ORDER BY "createdAt" FOR UPDATE
+SKIP LOCKED LIMIT 1) RETURNING id` — one raw SQL statement (Prisma's query builder has
+  no `SKIP LOCKED` support), global and FIFO by `createdAt`, exactly matching legacy's
+  single shared queue but race-free. Manually verified: two genuinely concurrent
+  `claimNextJob()` calls against the real database never return the same Job id.
+- **Retry eligibility narrowed from legacy** (resolves OD-02's "which states" half):
+  legacy allowed retry from almost any non-terminal state (everything except
+  `Rendered`/`Uploading`/`Uploaded`, including mid-render states); Studio allows retry
+  only from `ERROR` and `CANCELED` — a Job that hasn't actually stopped has no reason to
+  be retried, and allowing it invites a confusing duplicate render. `JOB_RETRY_WINDOW_DAYS`
+  (default 3, matching legacy) resolves the window half.
+- **Cancel/timeline fields are never reset** (`progress`, `durationSeconds`,
+  `claimedAt`/`startedAt`/`renderedAt`/`deliveredAt`/`uploadedAt`) — legacy zeroed
+  `progress`/`duration` on cancel; Studio keeps them, since historical integrity favors
+  keeping the record over a cosmetic reset (resolves part of OD-26).
+
+**Consequences.**
+
+- No use case anywhere assigns `job.state = ...` directly — grep for `state:` assignments
+  outside `job-repository.ts` finds none, by construction.
+- Progress/duration updates are rejected once a Job reaches any terminal state (a small,
+  deliberate widening of legacy's "only blocked by Cancel") — `updateJobProgress`/
+  `updateJobDuration` reuse the same `state NOT IN (terminal)` guard as a plain
+  `updateMany`, without needing the full `transitionJob` machinery (they don't change
+  `state` itself).
+- Resolves the "which states"/window halves of OD-02. The Worker-timeout requeue policy
+  (`CLAIMED`/`RENDERING` stuck past a timeout) remains **OPEN DECISION** (OD-31) — the
+  `CLAIMED → QUEUED` transition exists in the graph for it, but no sweep exists yet.
+
+**Status:** DECIDED.
+
+---
+
+## ADR-0030 — Daily upload quota: global cap, advisory-lock concurrency
+
+**Context.** Legacy hard-coded a global cap of 3 upload-enabled Jobs per UTC day,
+enforced by `count, then insert` with no concurrency protection — two simultaneous
+requests could both pass the check and exceed the cap. OD-01 asked whether Studio should
+change the scope (global / per-Department / per-YouTube-target); the Phase 6 brief
+explicitly directed keeping the exact legacy rule for now.
+
+**Decision.**
+
+- **Scope stays global, UTC-day, count-based** — `JOB_UPLOAD_DAILY_CAP` (default 3,
+  configurable) counted against every `deliverToYouTube: true` Job created since the
+  start of the current UTC day, excluding `ERROR`/`CANCELED` ones (matches legacy's
+  `$nin` filter). No `YouTubeTarget` model exists yet to scope a per-target cap against —
+  OD-01 stays open on that count, revisited when YouTube delivery lands.
+- **Concurrency-safe via a Postgres advisory transaction lock**
+  (`pg_advisory_xact_lock`), keyed by a fixed namespace plus a hash of the current UTC
+  date, taken at the start of the same transaction that counts today's usage and inserts
+  the new Job (`assertUploadQuotaAvailable`, `features/jobs/repository/
+job-repository.ts`). Every concurrent upload-enabled creation for the same day
+  serializes through this lock; the count-then-insert inside it can never race, because
+  the next waiter only proceeds after the previous transaction commits or rolls back. The
+  lock is transaction-scoped (`_xact_`), so it releases automatically — no manual unlock,
+  no risk of a held lock outliving a crashed request.
+- The same lock (and its `Job` row-lock counterpart on the original, `SELECT ... FOR
+UPDATE`) protects `retryJob`'s quota re-check.
+- Manually verified against the real database: three upload-enabled Jobs succeed, a
+  fourth is rejected with a clean `conflict` error naming the limit, and a non-upload Job
+  is unaffected by the count.
+
+**Consequences.**
+
+- No separate `UploadQuotaUsage` counter table was introduced — counting `Job` rows
+  directly inside the lock is simple and correct at Studio's expected volume, and adding
+  a counter table would only trade a `COUNT` query for extra write-side bookkeeping with
+  its own consistency burden.
+- The advisory lock's two-argument form requires explicit `::int` casts on both
+  arguments (Postgres has no `(bigint, int)` overload) — a real bug caught during manual
+  verification and fixed before this ADR was written.
+- This is a repository-level business decision by necessity, not convention: the lock +
+  count + insert only work as one atomic unit inside a single `$transaction` callback,
+  and only the repository layer opens transactions (`project-structure.md` already lists
+  "atomic ops" as a repository responsibility).
+
+**Status:** DECIDED (global scope, concurrency mechanism). Per-target scope: **OPEN
+DECISION** (OD-01), pending YouTube delivery.
+
+---
+
+## ADR-0031 — Non-destructive retry: original preserved, historical snapshot copied verbatim
+
+**Context.** Legacy's `retryJob` **deleted the original Job** (`findOneAndDelete`) before
+creating its replacement, and checked the upload quota _after_ the delete — a failed
+quota check meant the original was already gone, a straightforward data-loss bug.
+ADR-0005 already forbids deleting a Job at all; this phase has to design the actual
+non-destructive mechanism.
+
+**Decision.**
+
+- **`retryJob` never modifies or deletes the original.** It creates a **new** Job row,
+  linked via `retryOfJobId`, with `attemptNumber = original.attemptNumber + 1`. The
+  original keeps its own `id`, state, timeline, and snapshot exactly as they were.
+- **The retry copies the original's `snapshot` and `JobAsset` rows verbatim** — it never
+  re-loads the live Template or re-resolves Files. If the Template was edited (or a File
+  deleted) since the original was created, the retry still renders exactly what the
+  original was supposed to (Phase 6 brief §26, "critical"). This is why `retryJob`
+  imports nothing from `features/templates/repository` at all.
+- **The retry keeps the original's creator** (`createdByUserId`, legacy `_createdBy`
+  behavior, kept) — `retriedByUserId` records who actually triggered the retry,
+  separately.
+- **Concurrency**: the retry transaction takes `SELECT ... FOR UPDATE` on the _original_
+  Job row before its eligibility/quota checks, serializing concurrent retry attempts of
+  the same original. This is deliberately **not** a full idempotency-key framework: two
+  genuinely simultaneous retry clicks can still each pass their checks (once the row-lock
+  releases) and produce two sibling retries — a client-side double-submit guard is the
+  intended defense against that specific case, not a server invariant, per the Phase 6
+  brief §46's explicit permission to skip a generic mechanism "unless needed."
+
+**Consequences.**
+
+- No Job is ever at risk of being lost by a failed or racing retry — the worst case of a
+  double-submit is two redundant retry Jobs, never zero.
+- Retry lineage is a simple, bounded chain (`retryOfJobId` + `attemptNumber`), not a
+  general graph — querying "all attempts of an original" is a single indexed lookup
+  (`@@index([retryOfJobId])`), and there is no unbounded recursive structure to guard
+  against.
+- Manually verified: retrying preserves the original's state/timeline untouched, the new
+  Job's title/snapshot match the original exactly, retry is correctly rejected outside
+  the eligibility states and past the retry window, and the daily upload quota is
+  re-enforced on the retry exactly as on a fresh creation.
+
+**Status:** DECIDED.

@@ -53,8 +53,9 @@ Every File has a `category`:
 
 - **Files are hard-deleted (row + bytes). There is no soft delete.**
 - A File may be deleted only when it breaks **no active or required dependency**:
-  - No `QUEUED` / `CLAIMED` / `RENDERING` / `DELIVERING` Job references it as an input
-    (not yet enforced — no Job model exists; see `assertNoActiveJobDependencies`).
+  - No `QUEUED` / `CLAIMED` / `RENDERING` / `DELIVERING` Job references it as an input —
+    **enforced, Phase 6** (`assertNoActiveJobDependencies`, real since Job/JobAsset
+    exist; see [jobs.md](jobs.md) and ADR-0028).
   - **No Template asset currently defaults to it** — enforced, Phase 5
     (`assertNoActiveTemplateDependencies`); see [templates.md](templates.md) and
     ADR-0027.
@@ -66,11 +67,13 @@ Every File has a `category`:
   crash.**
 - **Job Artifact auto-cleanup:**
 
-  > **Phase 4 status.** `category` exists in the schema (`GALLERY_ASSET` |
-  > `JOB_ARTIFACT`) and every current code path only ever creates `GALLERY_ASSET` — there
-  > is no Job feature yet to produce an artifact. The deletion-safety hook a future Job
-  > feature must fill in (`assertNoActiveJobDependencies`) is documented and unit-tested
-  > as a no-op in [../architecture/files.md](../architecture/files.md) (ADR-0025).
+  > **Phase 6 status.** `category` exists in the schema (`GALLERY_ASSET` |
+  > `JOB_ARTIFACT`) and every current code path still only ever creates `GALLERY_ASSET` —
+  > Job **input** assets reference existing Gallery Files, but nothing yet produces a
+  > `JOB_ARTIFACT` (that needs a result-upload endpoint, Phase 7+). The deletion-safety
+  > hook is no longer a no-op, though: `assertNoActiveJobDependencies` is now a real
+  > check against active-state `JobAsset` references (ADR-0025's contract, made concrete
+  > by ADR-0028).
 
   > **`OPEN DECISION` — artifact retention.** When exactly are `JOB_ARTIFACT` files
   > deleted? Options: immediately on `UPLOADED`; after a retention window (e.g. 30 days);
@@ -130,9 +133,11 @@ file already exists.
 | `createdAt`        |                                                                                        |
 
 **Not yet implemented:** `durationSeconds` (needs `ffprobe`, out of Phase 4's scope — see
-"Upload validation" below) and `ownerJobId` (no Job model exists to reference; added when
-the Jobs feature lands, per ADR-0025's contract in
-[../architecture/files.md](../architecture/files.md)).
+"Upload validation" below) and `ownerJobId` (no `JOB_ARTIFACT`-producing feature exists
+yet — see [jobs.md](jobs.md) "Completion & delivery"; added when a result-upload endpoint
+lands, per ADR-0025's contract in [../architecture/files.md](../architecture/files.md)).
+Job **input** references (the opposite direction — a `JobAsset` pointing at a Gallery
+File) are implemented, Phase 6 — see "Referencing from Jobs/Templates" below.
 
 ### Upload validation
 
@@ -152,18 +157,23 @@ the Jobs feature lands, per ADR-0025's contract in
 
 ### Referencing from Jobs/Templates
 
-> **Phase 4 note:** the exact contract a future Job/Template feature must follow — what
-> to snapshot, when, and how the deletion-safety hook works — is written out in
+> **Implemented, Phase 6** (Job half) **/ Phase 5** (Template half). The exact contract —
+> what to snapshot, when, and how the deletion-safety hook works — is written out in
 > [../architecture/files.md](../architecture/files.md) "Historical integrity contract for
-> future Job/Template features" (ADR-0025). The bullets below are the Phase 0 design
-> intent this now makes concrete.
+> Job/Template features" (ADR-0025, ADR-0028). The bullets below are the Phase 0 design
+> intent this now implements.
 
-- A Job asset that uses a File captures, at creation time, the **file reference the
-  Worker needs plus identifying metadata** — it does not rely on a live FK for historical
-  readability (see [../data/historical-integrity.md](../data/historical-integrity.md)).
-- A live FK (`ownerJobId`, and Job-asset → File) is still kept for **active** dependency
-  checks (so deletion can be blocked while a Job is in flight) and for the "media still
-  stored?" indicator.
+- **Implemented, Phase 6:** a `JobAsset` that uses a File captures, at creation time, the
+  file reference the Worker needs plus identifying metadata
+  (`fileOriginalName`/`fileMimeType`/`fileSizeBytes`/`fileWidth`/`fileHeight`) — it does
+  not rely on a live FK for historical readability (see
+  [../data/historical-integrity.md](../data/historical-integrity.md)).
+- A live FK (`JobAsset.fileId`, nullable, `onDelete: SetNull`) is kept for **active**
+  dependency checks (`assertNoActiveJobDependencies`, real since Phase 6 — blocks
+  deletion while a Job in `QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING` still references
+  the File) and for the "media still stored?" indicator. `ownerJobId` (the reverse
+  direction, for a `JOB_ARTIFACT` a Job produced) is not implemented yet — see "Fields"
+  above.
 - **Implemented, Phase 5:** a Template asset slot (`kind: IMAGE | AUDIO | VIDEO`) may
   store an optional **default** File reference (`TemplateAsset.defaultFileId`) —
   resolves the "template-level asset defaults" question (OD-11) as **yes**. Unlike a

@@ -207,3 +207,26 @@ export async function findGalleryFileIdsInDepartment(
   });
   return new Set(rows.map((row) => row.id));
 }
+
+/**
+ * The full-metadata counterpart to `findGalleryFileIdsInDepartment` — used by
+ * `features/jobs/use-cases/resolve-job-assets.ts` (Phase 6) to copy each
+ * referenced File's identifying metadata onto its `JobAsset` row at creation
+ * time (ADR-0025/0028's historical-integrity contract). Same department
+ * scoping and `GALLERY_ASSET`-only restriction as the id-only version.
+ */
+export async function findGalleryFilesByIdsInDepartment(
+  departmentId: string,
+  fileIds: readonly string[],
+): Promise<SafeFile[]> {
+  if (fileIds.length === 0) return [];
+  const rows = await db.file.findMany({
+    where: {
+      id: { in: [...fileIds] },
+      departmentId,
+      category: "GALLERY_ASSET",
+    },
+    select: SAFE_FILE_SELECT,
+  });
+  return rows.map(toSafeFile);
+}

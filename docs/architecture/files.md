@@ -11,6 +11,11 @@ contract" section anticipated is now real, not just documented — see
 [../domain/templates.md](../domain/templates.md) "Template → File dependency" /
 ADR-0027.
 
+**Phase 6 update:** the Job→File dependency is now real too —
+`assertNoActiveJobDependencies` is no longer a no-op; see
+`countActiveJobAssetReferencesToFile` below and
+[../domain/jobs.md](../domain/jobs.md) / ADR-0028.
+
 ## Layout
 
 ```
@@ -27,8 +32,8 @@ src/features/files/
 │   ├── get-file-for-serving.ts     storageKey read — only for the content route
 │   ├── delete-file.ts
 │   └── authorize-file-management.ts   assertCanDeleteFile, canDeleteFile,
-│                                       assertNoActiveJobDependencies (still a
-│                                       documented no-op, ADR-0025), and
+│                                       assertNoActiveJobDependencies (real,
+│                                       Phase 6 — ADR-0028), and
 │                                       assertNoActiveTemplateDependencies (real,
 │                                       Phase 5 — ADR-0027)
 ├── actions/               upload-file.action.ts, delete-file.action.ts
@@ -91,8 +96,11 @@ reject early, and nothing is written anywhere until validation fully passes.
    and nonexistent both resolve to the same `not_found`).
 2. `assertCanDeleteFile` — role floor + department match (`authorize`) plus: a USER may
    delete only their own upload; MANAGER/ADMIN may delete any file in scope.
-3. `assertNoActiveJobDependencies` — a documented no-op today (no Job model exists); the
-   exact extension point a future Jobs feature must fill in.
+3. `assertNoActiveJobDependencies` (Phase 6, ADR-0028) — a **real** check: counts every
+   `JobAsset` row referencing this File whose `Job` is in an active state
+   (`QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING`), and throws `conflict` if any exist. A
+   Job that has already reached a terminal state never blocks deletion — its `JobAsset`
+   rows already carry the copied metadata a historical view needs.
 4. `assertNoActiveTemplateDependencies` (Phase 5, ADR-0027) — a **real** check: counts
    every `TemplateAsset` row (of any Template, deleted or not) whose `defaultFileId`
    points at this File, and throws `conflict` if any exist. Not scoped to non-deleted
@@ -126,23 +134,22 @@ never its storage key. That route:
 
 This is the one Phase 4 decision every later feature that references a File must honor —
 see ADR-0025 and [../data/historical-integrity.md](../data/historical-integrity.md).
-**Templates (Phase 5) are the first real consumer**; Jobs still only has the documented
-extension point.
+**Templates (Phase 5) and Jobs (Phase 6) are both real consumers now.**
 
 - **Never hold a live File row as the only source of truth for a historical record.**
-  This governs a future **Job**, which will copy the fields it needs (`originalName`,
-  `mimeType`, `sizeBytes`, `width`/`height`, and the `fileId` for a "media still stored?"
-  check) into its own immutable snapshot (ADR-0010) at creation time. It does **not**
-  govern a Template's `defaultFileId` — that is a live, current-configuration field on a
-  mutable resource, not a historical record, so it is correctly a plain FK with no
-  snapshot of its own (ADR-0027).
+  This governs **Job** (`JobAsset`, ADR-0028), which copies the fields it needs
+  (`fileOriginalName`, `fileMimeType`, `fileSizeBytes`, `fileWidth`/`fileHeight`) into its
+  own immutable row at creation time, alongside a live `fileId` FK for the "media still
+  stored?" check. It does **not** govern a Template's `defaultFileId` — that is a live,
+  current-configuration field on a mutable resource, not a historical record, so it is
+  correctly a plain FK with no snapshot of its own (ADR-0027).
 - **Before deleting a File, the deleting feature is responsible for its own active-
   dependency check.** For Files today that's two checks, both called from `deleteFile`:
-  `assertNoActiveJobDependencies` (still a documented no-op — no Job model exists yet;
-  when Jobs land, implement the query _inside that function_, not a parallel check
-  elsewhere — `File.category = JOB_ARTIFACT` already exists in the schema for that phase
-  to use immediately) and `assertNoActiveTemplateDependencies` (real, Phase 5 — see
-  "Deletion" above).
+  `assertNoActiveJobDependencies` (real, Phase 6, ADR-0028 — counts active-state
+  `JobAsset` references, not a parallel check elsewhere) and
+  `assertNoActiveTemplateDependencies` (real, Phase 5 — see "Deletion" above).
+  `File.category = JOB_ARTIFACT` still exists in the schema unused — nothing produces
+  one yet; that's the result-upload endpoint's job (Phase 7+).
 - **A deleted File must never surface as a broken link or a crash** in a historical
   view — the UI reads the snapshot and shows "media no longer stored" (with the
   snapshot's name/type/size still intact) when the live File is gone, exactly like

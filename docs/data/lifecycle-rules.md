@@ -66,11 +66,16 @@ A File may be physically deleted (row + bytes) only when **all** hold:
 
 If (1) or (2) fails, deletion is **blocked** with a clear reason.
 
-> **Phase 4 status:** rule (1) has no Job model to check against yet —
-> `assertNoActiveJobDependencies` is a documented no-op today, not a stand-in
-> implementation; a future Jobs feature fills in the actual query (ADR-0025). Rule (3) is
+> **Phase 6 status:** rule (1) is **implemented** —
+> `assertNoActiveJobDependencies` (`features/files/use-cases/authorize-file-management.ts`)
+> counts active-state `JobAsset` references via `countActiveJobAssetReferencesToFile`
+> and blocks deletion with a clean `conflict` error (ADR-0025's contract, ADR-0028). It
+> was a documented no-op through Phase 5, before a Job model existed. Rule (3) was
 > already fully true by construction, independent of Jobs existing, because Studio never
-> made a historical record depend on a live File row in the first place.
+> made a historical record depend on a live File row in the first place — verified now
+> that Jobs are real: canceling the one active Job referencing a File releases the block
+> immediately, since a non-active Job's `JobAsset` row already carries everything the
+> historical record needs.
 >
 > The delete order itself is decided regardless of (1): the database row is deleted
 > **before** the storage bytes, so a failure partway through leaves an orphaned storage
@@ -89,6 +94,12 @@ If (1) or (2) fails, deletion is **blocked** with a clear reason.
   state (`UPLOADED`; possibly `CANCELED`/`ERROR` after a grace period).
 - The Job row keeps `videoFileId`/`screenshotFileId`/`thumbnailFileId` — these become
   `null` (or a tombstone flag) after cleanup; the Job stays coherent.
+
+> **Phase 6 status:** none of this exists yet. `Job` has no
+> `videoFileId`/`screenshotFileId`/`thumbnailFileId` columns, and nothing creates a
+> `JOB_ARTIFACT` File — Phase 6 explicitly excludes the result-upload endpoint and any
+> output-file processing (Phase 6 brief §53). These columns are added, and this section
+> becomes real, when that lands (Phase 7+).
 
 > **`OPEN DECISION` — Job Artifact retention specifics.**
 >

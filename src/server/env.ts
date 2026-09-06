@@ -65,6 +65,21 @@ export const env = createEnv({
     SEED_ADMIN_EMAIL: z.email().optional(),
     SEED_ADMIN_PASSWORD: z.string().min(8).optional(),
     SEED_ADMIN_NAME: z.string().min(1).optional(),
+
+    /**
+     * Job retry eligibility window, in days from the original Job's creation
+     * (docs/domain/jobs.md "Retry", resolves OD-02). Legacy hard-coded 3 days.
+     */
+    JOB_RETRY_WINDOW_DAYS: z.coerce.number().int().min(1).max(365).default(3),
+
+    /**
+     * Global daily cap on upload-enabled (`deliverToYouTube: true`) Jobs,
+     * reset at UTC midnight (docs/domain/jobs.md "Upload cap", ADR-0030).
+     * Legacy hard-coded 3. Kept global for Phase 6 — no `YouTubeTarget` model
+     * exists yet to scope a per-target cap against (OD-01 stays open on that
+     * count).
+     */
+    JOB_UPLOAD_DAILY_CAP: z.coerce.number().int().min(0).default(3),
   },
 
   client: {
@@ -88,6 +103,8 @@ export const env = createEnv({
     SEED_ADMIN_EMAIL: process.env.SEED_ADMIN_EMAIL,
     SEED_ADMIN_PASSWORD: process.env.SEED_ADMIN_PASSWORD,
     SEED_ADMIN_NAME: process.env.SEED_ADMIN_NAME,
+    JOB_RETRY_WINDOW_DAYS: process.env.JOB_RETRY_WINDOW_DAYS,
+    JOB_UPLOAD_DAILY_CAP: process.env.JOB_UPLOAD_DAILY_CAP,
   },
 
   /** Treat empty strings as undefined so blank .env lines don't pass validation. */

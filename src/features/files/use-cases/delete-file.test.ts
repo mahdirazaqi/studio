@@ -8,6 +8,7 @@ const findStorageKey = vi.fn();
 const deleteFileRow = vi.fn();
 const storageDelete = vi.fn();
 const countTemplateAssetReferencesToFile = vi.fn();
+const countActiveJobAssetReferencesToFile = vi.fn();
 
 vi.mock("@/features/files/repository/file-repository", () => ({
   findFileInScope: (...args: unknown[]) => findFileInScope(...args),
@@ -22,6 +23,11 @@ vi.mock("@/server/adapters/storage", () => ({
 vi.mock("@/features/templates/repository/template-repository", () => ({
   countTemplateAssetReferencesToFile: (...args: unknown[]) =>
     countTemplateAssetReferencesToFile(...args),
+}));
+
+vi.mock("@/features/jobs/repository/job-repository", () => ({
+  countActiveJobAssetReferencesToFile: (...args: unknown[]) =>
+    countActiveJobAssetReferencesToFile(...args),
 }));
 
 const { deleteFile } = await import("./delete-file");
@@ -55,6 +61,7 @@ beforeEach(() => {
   deleteFileRow.mockResolvedValue(undefined);
   storageDelete.mockResolvedValue(undefined);
   countTemplateAssetReferencesToFile.mockResolvedValue(0);
+  countActiveJobAssetReferencesToFile.mockResolvedValue(0);
 });
 
 describe("deleteFile", () => {
@@ -111,6 +118,16 @@ describe("deleteFile", () => {
   it("throws conflict when a template asset still defaults to this file", async () => {
     findFileInScope.mockResolvedValue(file());
     countTemplateAssetReferencesToFile.mockResolvedValue(1);
+
+    await expect(deleteFile(actor(), "file-1")).rejects.toMatchObject({
+      kind: "conflict",
+    });
+    expect(deleteFileRow).not.toHaveBeenCalled();
+  });
+
+  it("throws conflict when an active job still references this file", async () => {
+    findFileInScope.mockResolvedValue(file());
+    countActiveJobAssetReferencesToFile.mockResolvedValue(1);
 
     await expect(deleteFile(actor(), "file-1")).rejects.toMatchObject({
       kind: "conflict",

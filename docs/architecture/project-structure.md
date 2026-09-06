@@ -1,6 +1,6 @@
 # Project Structure
 
-**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 5 tree.
+**`DECIDED`** — feature-based, layered. This reflects the **actual** Phase 6 tree.
 
 ## 1. Repository layout
 
@@ -43,7 +43,7 @@ src/
 │   │   ├── layout.tsx            getCurrentUser() guard + redirect; SidebarProvider + AppSidebar + AppHeader
 │   │   ├── page.tsx              "/" overview — filtered to navigationForRole(user.role)
 │   │   ├── loading.tsx  error.tsx
-│   │   ├── jobs/                 → PlaceholderPage
+│   │   ├── jobs/                 → IMPLEMENTED (Phase 6) — list, `new/`, `[jobId]/`
 │   │   ├── templates/            → IMPLEMENTED (Phase 5) — list, `new/`, `[templateId]/`
 │   │   ├── files/                → IMPLEMENTED (Phase 4) — real gallery page
 │   │   ├── users/                → role-gated (MANAGER+) PlaceholderPage or ForbiddenPage
@@ -72,7 +72,16 @@ src/
 │   │                             soft-delete, verify-file-references,
 │   │                             resolve-target-department), actions/, components/
 │   │                             (form, asset editor, toolbar, list item, status actions)
-│   ├── jobs/  telegram/
+│   ├── jobs/                      IMPLEMENTED (Phase 6) — domain/ (job.ts,
+│   │                             job-state-machine.ts, build-job-title.ts,
+│   │                             job-asset-rules.ts), schemas/, repository/
+│   │                             (incl. the atomic claim + advisory-lock quota),
+│   │                             use-cases/ (create, get, list, cancel, retry,
+│   │                             claim-next-job, transition-job, update-job-progress/
+│   │                             duration, resolve-job-assets, get-template-for-job-form),
+│   │                             actions/, components/ (create form, list item,
+│   │                             actions, toolbar, status badge)
+│   ├── telegram/
 │   └── (each of these: README.md describing scope + boundaries; no impl yet)
 │
 ├── components/
@@ -127,17 +136,20 @@ src/
 | `lib/`, `types/`                      | each other, tiny libs                                                                                                                              | `@/server/*`, `next` server APIs                                                                      | pure client-safe helpers/types                                                           |
 | `server/*`                            | each other, the wrapped lib/SDK                                                                                                                    | domain rules (in `env`/`logger`/`errors`)                                                             | env, logging, error mapping, action/route conventions, auth & authz boundaries, adapters |
 
-**Cross-feature repository calls, established Phase 4/5:** a use case may import another
-feature's `repository` module directly for a small, narrow, read-only lookup —
+**Cross-feature repository calls, established Phase 4/5/6:** a use case may import
+another feature's `repository` module directly for a small, narrow, read-only lookup —
 `features/files/use-cases/upload-file.ts` → `departments/repository` (does this department
 exist), `features/templates/use-cases/*` → `files/repository` (does this File id resolve
 in this department), `features/files/use-cases/authorize-file-management.ts` →
-`templates/repository` (does any Template asset still default to this File). This is
-**not** the same as reaching into another feature's `use-cases`, `domain`, or UI — those
-stay off-limits — and it is not a general "features may import each other" license: each
-instance exists because one feature's data must be validated against another's without
-duplicating that other feature's query logic, the same reasoning Files → Departments
-already established.
+`templates/repository` (does any Template asset still default to this File) **and** →
+`jobs/repository` (does any active Job asset still reference this File),
+`features/jobs/use-cases/create-job.ts` → `templates/repository` (resolve and validate
+the chosen Template) and → `files/repository` (via `resolve-job-assets.ts`, resolve each
+referenced File). This is **not** the same as reaching into another feature's
+`use-cases`, `domain`, or UI — those stay off-limits — and it is not a general "features
+may import each other" license: each instance exists because one feature's data must be
+validated against another's without duplicating that other feature's query logic, the
+same reasoning Files → Departments already established.
 
 ## 4. Cross-cutting conventions
 

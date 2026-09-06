@@ -1,11 +1,12 @@
 // Studio — Prisma schema.
 //
 // Phase 2: Department, User, Session. Phase 4: File. Phase 5: Template,
-// TemplateAsset. See docs/data/database.md and docs/architecture/decisions.md
-// (ADR-0002, ADR-0006, ADR-0007, ADR-0008, ADR-0011, ADR-0020, ADR-0024,
-// ADR-0025, ADR-0027) for the decisions behind this shape. Do not add
-// speculative models here — later phases (Jobs, ...) add their own schema
-// when those features land.
+// TemplateAsset. Phase 6: Job, JobAsset. See docs/data/database.md and
+// docs/architecture/decisions.md (ADR-0002, ADR-0005, ADR-0006, ADR-0007,
+// ADR-0008, ADR-0010, ADR-0011, ADR-0013, ADR-0020, ADR-0024, ADR-0025,
+// ADR-0027, ADR-0028, ADR-0029, ADR-0030, ADR-0031) for the decisions behind
+// this shape. Do not add speculative models here — later phases (Worker API,
+// Telegram, YouTube delivery) add their own schema when those features land.
 
 generator client {
   provider = "prisma-client-js"
@@ -45,6 +46,7 @@ model Department {
   users     User[]
   files     File[]
   templates Template[]
+  jobs      Job[]
 
   @@map("departments")
 }
@@ -76,6 +78,10 @@ model User {
 
   createdTemplates Template[] @relation("TemplateCreatedBy")
   deletedTemplates Template[] @relation("TemplateDeletedBy")
+
+  createdJobs  Job[] @relation("JobCreatedBy")
+  canceledJobs Job[] @relation("JobCanceledBy")
+  retriedJobs  Job[] @relation("JobRetriedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -176,6 +182,13 @@ model File {
   /// (`assertNoActiveTemplateDependencies`) has something to query — never
   /// exposed to the client as-is.
   templateAssetDefaults TemplateAsset[]
+
+  /// Job assets that resolved this File at creation time (ADR-0028/0031).
+  /// `onDelete: SetNull` on `JobAsset.fileId` — a deleted File never breaks a
+  /// historical Job, because the identifying metadata is already copied onto
+  /// the `JobAsset` row itself, not re-read from here. Kept only so the real
+  /// `assertNoActiveJobDependencies` check (Phase 6) has something to query.
+  jobAssetReferences JobAsset[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -278,6 +291,7 @@ model Template {
   tags String[] @default([])
 
   assets TemplateAsset[]
+  jobs   Job[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -352,4 +366,197 @@ model TemplateAsset {
   @@unique([templateId, key])
   @@index([defaultFileId])
   @@map("template_assets")
+}
+
+/// Job lifecycle (docs/domain/jobs.md, ADR-0013, ADR-0029). Every transition is
+/// validated against the fixed graph in `features/jobs/domain/job-state-machine.ts` —
+/// nothing outside that module ever writes `Job.state` directly.
+///
+/// ```
+/// QUEUED    → CLAIMED, CANCELED
+/// CLAIMED   → RENDERING, QUEUED, ERROR, CANCELED
+/// RENDERING → RENDERED, ERROR, CANCELED
+/// RENDERED  → DELIVERING, UPLOADED, ERROR
+/// DELIVERING→ UPLOADED, ERROR
+/// ERROR, UPLOADED, CANCELED → (terminal — no outgoing transitions)
+/// ```
+enum JobState {
+  QUEUED
+  CLAIMED
+  RENDERING
+  RENDERED
+  DELIVERING
+  UPLOADED
+  ERROR
+  CANCELED
+}
+
+/// What a resolved `JobAsset` actually is. `SCRIPT` is the one kind with no
+/// `TemplateAssetKind` counterpart — the Worker-contract script asset Studio
+/// injects itself (from the Template's `scriptRef`), never author-supplied.
+enum JobAssetKind {
+  DATA
+  IMAGE
+  AUDIO
+  VIDEO
+  SCRIPT
+}
+
+/// One concrete render request — the permanent historical record of the
+/// pipeline (ADR-0005). **Never deleted, never soft-deleted, no generic edit.**
+/// Only the explicit lifecycle operations in `features/jobs/use-cases/*`
+/// (`createJob`, `transitionJob` and its callers, `updateJobProgress`,
+/// `updateJobDuration`, `cancelJob`, `retryJob`) ever write to this table.
+///
+/// Historical integrity (ADR-0028): `snapshot` captures the Template's
+/// render-relevant fields and ordered asset-slot definitions **as they were**
+/// at creation — immutable, written once, never updated. The per-slot
+/// *resolved* values live in the related `JobAsset` rows, which likewise
+/// carry their own copied File metadata so a later File deletion can never
+/// make a historical Job unreadable (ADR-0025's contract, now real).
+model Job {
+  id String @id @default(cuid())
+
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  createdByUserId String
+  createdBy       User   @relation("JobCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  /// Kept resolvable forever — Template is soft-deleted only, never hard-deleted,
+  /// so this FK always resolves even for a since-deleted/disabled Template. The
+  /// *meaning* of a historical Job never depends on this FK, only on `snapshot`
+  /// and `JobAsset` — this exists for convenience joins and active-dependency
+  /// checks, per ADR-0010's "FK for convenience, snapshot for truth" split.
+  templateId String
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  /// Immutable Template-level snapshot, captured once at creation
+  /// (ADR-0028): `{ templateName, composition, source, scriptRef,
+  /// outputPattern, description, tags, assetSlotDefinitions[] }`. See
+  /// `features/jobs/domain/job-snapshot.ts` for the exact shape. Never
+  /// updated after creation — there is no code path that writes this field a
+  /// second time.
+  snapshot Json
+
+  /// Built once at creation from the `DATA`-kind asset values, in Template
+  /// slot order, joined with `" | "` (legacy rule, kept). Stored, never
+  /// recomputed — editing the Template later must not change a Job's title.
+  title String
+
+  state JobState @default(QUEUED)
+
+  /// 0–100, reported by the Worker (not yet — Phase 7). `null` before the
+  /// Worker's first report.
+  progress Int?
+  /// Rendered output duration in seconds, reported by the Worker. `null`
+  /// until reported.
+  durationSeconds Int?
+
+  /// Whether this Job's output should be delivered to YouTube on completion
+  /// (legacy `upload`). Part of the Job's immutable historical configuration
+  /// — an unrelated later Template edit can never change whether an existing
+  /// Job uploads. Counted by the daily upload quota (ADR-0030) when `true`.
+  deliverToYouTube Boolean @default(false)
+
+  /// Non-destructive retry lineage (ADR-0005, ADR-0031): a retry is a new
+  /// Job row; the original is never touched. `onDelete: Restrict` because a
+  /// Job is never deleted, so this FK always resolves for the life of the
+  /// system.
+  retryOfJobId String?
+  retryOfJob   Job?    @relation("JobRetryLineage", fields: [retryOfJobId], references: [id], onDelete: Restrict)
+  retries      Job[]   @relation("JobRetryLineage")
+
+  /// 1 for an original Job; `retryOfJob.attemptNumber + 1` for a retry.
+  attemptNumber Int @default(1)
+
+  retriedByUserId String?
+  retriedBy       User?   @relation("JobRetriedBy", fields: [retriedByUserId], references: [id], onDelete: Restrict)
+  retryReason     String?
+
+  canceledByUserId String?
+  canceledBy       User?   @relation("JobCanceledBy", fields: [canceledByUserId], references: [id], onDelete: Restrict)
+  canceledAt       DateTime?
+  cancelReason     String?
+
+  /// Human-readable failure reason (render or delivery). Surfaced in the UI —
+  /// never a stack trace or internal detail (docs/security/security.md).
+  errorReason String?
+
+  /// Lifecycle timeline. All nullable — set by `transitionJob` the first time
+  /// the corresponding state is reached; never reset (Studio improvement over
+  /// legacy, which zeroed timing fields on cancel — historical integrity
+  /// favors keeping the record, resolves part of OD-26).
+  claimedAt   DateTime?
+  startedAt   DateTime?
+  renderedAt  DateTime?
+  deliveredAt DateTime?
+  uploadedAt  DateTime?
+
+  assets JobAsset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // The atomic claim query (`SELECT ... WHERE state = 'QUEUED' ORDER BY
+  // "createdAt" FOR UPDATE SKIP LOCKED LIMIT 1`) needs a plain `state` index;
+  // department-scoped list/detail pages need departmentId first.
+  @@index([state, createdAt])
+  @@index([departmentId, state, createdAt])
+  @@index([departmentId, createdAt])
+  @@index([templateId])
+  @@index([retryOfJobId])
+  @@map("jobs")
+}
+
+/// A single resolved Job asset value — one row per Template asset slot the
+/// Job filled in, plus one injected `SCRIPT` row (docs/domain/jobs.md "Job
+/// assets"; ADR-0028). Immutable after creation: nothing ever updates a
+/// `JobAsset` row once written — a corrected value means a new Job (edit or
+/// retry), never an in-place rewrite of history.
+model JobAsset {
+  id String @id @default(cuid())
+
+  jobId String
+  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  /// Matches the originating `TemplateAsset.key` — `null` for the injected
+  /// `SCRIPT` row, which has no author-defined slot.
+  slotKey String?
+
+  kind JobAssetKind
+
+  /// Passed through to the Worker payload. Opaque to Studio.
+  composition String?
+  layer       String?
+
+  /// Literal value for `DATA` (and the `SCRIPT` row's `scriptRef`, copied
+  /// verbatim from the Template snapshot at creation — never re-read live).
+  textValue String?
+
+  /// For file kinds: the resolved File, **at creation time**. `onDelete:
+  /// SetNull` — a later File deletion must never break this historical row,
+  /// and it doesn't, because every field the Worker/UI needs is already
+  /// copied onto this row below, not re-read from `File` (ADR-0025's
+  /// contract, ADR-0028).
+  fileId           String?
+  file             File?   @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  fileOriginalName String?
+  fileMimeType     String?
+  fileSizeBytes    Int?
+  fileWidth        Int?
+  fileHeight       Int?
+
+  /// Matches the Template asset's declared order; the injected `SCRIPT` row
+  /// is always `0`, ahead of every author-defined slot (legacy: script is
+  /// `assets[0]`).
+  order Int
+
+  createdAt DateTime @default(now())
+
+  // "does any active Job still depend on this File" — the real
+  // `assertNoActiveJobDependencies` query (Phase 6) joins through this index.
+  @@index([fileId])
+  @@index([jobId])
+  @@map("job_assets")
 }

@@ -40,7 +40,10 @@ components/   TemplateForm (shared create/edit, read-only mode for USER/deleted)
               TemplateStatusActions
 ```
 
-**Not built yet, deliberately:** Job creation/consumption of Templates (a future phase —
-this feature only guarantees the Template-side data will be there to read), a Template
-version-history/restore mechanism, `youtubeTargetId` (no `YouTubeTarget` table exists),
-aspect-ratio tolerance comparison against an actual uploaded image (OD-14 stays open).
+**Consumed by `features/jobs`, Phase 6:** `create-job.ts` calls `findTemplateInScope`
+directly (this feature's own repository) to resolve a Template, validate its
+`status`/`deletedAt`, and read its `assets` — the exact contract this README anticipated.
+
+**Not built yet, deliberately:** a Template version-history/restore mechanism,
+`youtubeTargetId` (no `YouTubeTarget` table exists), aspect-ratio tolerance comparison
+against an actual uploaded image (OD-14 stays open).
