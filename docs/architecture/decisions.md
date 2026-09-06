@@ -1403,3 +1403,140 @@ uploaded directly to disk from the bot — a known defect (`docs/legacy/known-is
 - Resolves the file-handling half of OD-19 for Telegram's input path.
 
 **Status:** DECIDED.
+
+## ADR-0039 — Delivery pipeline: rendered-result acceptance, media processing, delivery orchestration, and YouTube connection model
+
+**Context.** Phase 9 completes the render pipeline `RENDERED -> Delivery -> UPLOADED`
+that Phases 6–7 deliberately left unbuilt (docs/domain/jobs.md "Completion & delivery").
+Legacy's version had five real defects this phase must not reproduce: fire-and-forget
+delivery (`uploadJobFile` returned before `uploadJobToYoutube`/`uploadJobToTelegram`
+resolved), a YouTube failure silently swallowed except for a server log line, unsafe
+`exec()`-built ImageMagick/`ffmpeg` shell commands, no delivery idempotency (a retried
+Worker upload could re-trigger a second YouTube publish), and a hard-coded global upload
+cap with no per-channel concept. See `qtical-backend-node/src/render/job/job.service.ts`
+(`uploadJobFile`, `uploadJobToYoutube`, `uploadJobToTelegram`, `screenshot`,
+`convertScreenshot`) and `src/youtubeapi/youtubeapi.service.ts` (`insertVideo`,
+`setVideoThumbnail`).
+
+**Decision.**
+
+**1. Rendered-result acceptance is a new Worker endpoint, idempotent by construction.**
+`POST /api/worker/v1/jobs/:id/result` (docs/integrations/worker-api.md §6, closing the
+gap that section left open) takes the raw video bytes as the request body — not
+multipart — so `defineRouteHandler` needed no new body-parsing capability; the handler
+reads `request.arrayBuffer()` directly, exactly like `/api/files/[fileId]`'s GET response
+is raw bytes in the other direction. `features/delivery/use-cases/accept-job-result.ts`
+is the only place idempotency/concurrency for this endpoint is decided: a Job not in
+`RENDERING` that already has a `videoFileId` is recognized as a duplicate Worker request
+and returned as-is (no reprocessing, no second delivery run); a genuine race between two
+concurrent result submissions is resolved by the same atomic conditional `UPDATE ...
+WHERE state = 'RENDERING'` pattern every other `Job.state` writer uses
+(`transitionJobRow`) — the loser rolls back the artifacts it already generated and
+re-reads the Job to return the winner's result idempotently, never erroring a legitimate
+duplicate.
+
+**2. Media processing uses `ffmpeg` only — ImageMagick was deliberately not migrated.**
+Legacy used `fluent-ffmpeg` for the screenshot (`ffmpeg().screenshots(...)`, fixed
+`00:00:04.000` offset, kept) and a separate `exec('convert ... -resize x150 ...')` call
+for the thumbnail. Studio's `ffmpeg`'s own `scale` video filter covers the resize need
+exactly, so `server/adapters/media/ffmpeg-adapter.ts` does both steps with one native
+dependency instead of two — every invocation is `execFile` with a fixed argument array,
+never a template-built string, never `shell: true` (docs/security/security.md §6,
+verified against a real 2-second test video during manual verification, including the
+"seek offset past a short render's actual duration" edge case, where `ffmpeg` exits `0`
+but writes nothing — `generate-render-artifacts.ts` checks the output file's actual size,
+not just the exit code, before deciding the primary attempt succeeded). All filesystem
+work happens in a private `mkdtemp` directory removed in `finally`; three `JOB_ARTIFACT`
+Files (video, screenshot, thumbnail) are created sequentially with a rollback-on-failure
+discipline mirroring `uploadFile`'s own storage-then-DB cleanup.
+
+**3. Delivery orchestration is a synchronous, awaited call — never fire-and-forget.**
+`features/delivery/use-cases/deliver-job-result.ts` runs inside the same Worker request
+that accepted the result (docs/integrations/youtube.md "Delivery reliability" — the
+direct fix for legacy's `this.uploadJobToYoutube(job); this.uploadJobToTelegram(job);`
+unawaited calls). Telegram is a **best-effort notification** (legacy behavior kept
+exactly: failure is logged, never blocks the Job, never becomes a `DeliveryAttempt` row).
+YouTube is a **required delivery** when `Job.deliverToYouTube` is true: its outcome is
+recorded in a new `DeliveryAttempt` row (one per attempt, `PENDING` committed _before_
+the external call — the actual durability guarantee: a process crash mid-upload leaves an
+accurate, retryable record, not a lost one) and drives the Job through
+`RENDERED -> DELIVERING -> UPLOADED`/`ERROR` using the Phase 6 state machine's own,
+already-existing edges — no second Job lifecycle was invented.
+
+**4. A dedicated `ERROR -> DELIVERING` escape hatch, not a general graph edge.**
+"Retry delivery only" (resolves OD-13 for YouTube) must move an `ERROR` Job back into
+`DELIVERING` without re-rendering it — but `ERROR` must stay reported as _terminal_ by
+`isTerminalState` for its other caller (`update-job-progress.ts`/`update-job-duration.ts`
+rejecting a Worker report against a dead Job). Adding `ERROR -> DELIVERING` to
+`job-state-machine.ts`'s general `TRANSITIONS` map would silently break that. Instead,
+`features/delivery/use-cases/retry-job-delivery.ts` calls `transitionJobRow` directly —
+the exact, already-documented escape hatch CLAUDE.md §11/ADR-0029 describe for "a new
+state-changing operation whose legality `transitionJob`'s general pre-check doesn't fit."
+The atomic conditional `UPDATE ... WHERE state = 'ERROR'` is still the only real
+enforcement, identical in kind to every other `Job.state` writer.
+
+**5. YouTube connection is a verified refresh-token entry, not a self-service OAuth
+consent flow.** `docs/integrations/youtube.md`'s original `YouTubeTarget` design assumed
+a full "Connect with Google" web flow; this phase deliberately narrows that to entering a
+refresh token obtained out-of-band (Google's OAuth Playground or an equivalent one-time
+flow against Studio's own registered OAuth client) — the same "credential obtained
+elsewhere, entered once" trust model `WORKER_API_KEY` already uses. Studio verifies the
+token immediately by calling the real YouTube API (`channels.list`) before storing
+anything, so a bad/expired token is rejected at connection time, not discovered on the
+next delivery attempt. The refresh token (and a short-lived cached access token) are
+encrypted at rest with AES-256-GCM (`server/adapters/youtube/token-cipher.ts`,
+`YOUTUBE_TOKEN_ENCRYPTION_KEY`) — never plaintext, never logged, never returned to a
+client. `YouTubeTarget` is **department-scoped** (resolves OD-36 per its own
+recommendation), with `youtube:manage` at the same `MANAGER+` floor as
+`template:manage`. A full OAuth consent-screen UI remains a documented, deliberately
+deferred future enhancement (§ "Out of scope" below) — it is a self-service UX
+improvement, not a requirement for the delivery pipeline to function correctly and
+safely.
+
+**6. YouTube upload keeps legacy's hard-coded privacy exactly.** `privacyStatus: private`,
+`madeForKids: false` — never configurable per Job/Template this phase (OD-37 stays open).
+Tag substitution matches legacy's `{{layer}}` replacement and unresolved-placeholder-drop
+behavior exactly, but deliberately drops legacy's dead `excludeTags` set
+(`docs/integrations/youtube.md` "Tags", already documented before this phase).
+
+**7. Artifact cleanup is a safe, idempotent primitive — not wired to a scheduler.**
+`features/delivery/use-cases/cleanup-job-artifacts.ts` hard-deletes only the rendered
+video File (never screenshot/thumbnail) once a Job reaches `UPLOADED` and — when YouTube
+delivery was required — only after a `SUCCEEDED` `DeliveryAttempt` exists for it. It is
+reference-aware by construction (a `JOB_ARTIFACT` video is created once and referenced
+only by its own Job's `videoFileId` — never a Template default or another Job's input, so
+no second-dependency check is needed the way Gallery Assets need
+`assertNoActiveJobDependencies`), and failure-tolerant (a missing row or a storage error
+never throws — logged, and the Job's own state is untouched either way). **Not
+auto-triggered this phase** — OD-18's grace-period/scheduling question stays open (no
+durable-work mechanism exists yet, OD-40); this is the tested primitive a future scheduled
+sweep calls.
+
+**Consequences.**
+
+- Resolves the "Rendered/Uploaded state timeline" half of docs/domain/jobs.md's
+  "Completion & delivery — still not implemented" section; both are now real.
+- New tables: `DeliveryAttempt`, `YouTubeTarget`; new columns:
+  `Job.videoFileId`/`screenshotFileId`/`thumbnailFileId`, `Template.youtubeTargetId`. No
+  new background-job/queue infrastructure — OD-40 remains open for exactly the pieces this
+  phase didn't need one for (see below).
+- `JOB_ARTIFACT` (declared in the schema since Phase 4, ADR-0024) now has its first real
+  writer.
+- Every delivery-triggering write is authorized through the existing `job:manage`/
+  `youtube:manage` capabilities — no Telegram/Worker-style parallel authorization surface
+  was introduced.
+
+**Out of scope, deliberately** (do not build without a new decision):
+
+- A self-service "Connect with Google" OAuth consent-screen flow (point 5 above).
+- Any background-work/queue mechanism (BullMQ, pg-boss, a cron sweep) — OD-40 is
+  unaffected by this phase; delivery's durability guarantee is "the intent is recorded and
+  retryable," not "automatically retried after a crash."
+- Automatic/scheduled artifact cleanup, a configurable grace period (OD-18).
+- Per-YouTube-target upload quota (the global cap from ADR-0030 is unchanged; OD-01's
+  per-target half stays open even though `YouTubeTarget` now exists, since no concrete
+  quota-per-channel requirement was given).
+- A `retriedByUserId`-style audit trail beyond `DeliveryAttempt.triggeredByUserId`
+  (`null` = automatic, a user id = manual retry) — sufficient for this phase's needs.
+
+**Status:** DECIDED.

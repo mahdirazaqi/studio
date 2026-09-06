@@ -146,6 +146,41 @@ export const env = createEnv({
      * phone number in any committed value.
      */
     SEED_ADMIN_PHONE: z.string().min(1).optional(),
+
+    /**
+     * `ffmpeg` binary path (docs/integrations/youtube.md "Media processing",
+     * Phase 9, ADR-0039). Always invoked via `execFile`/`spawn` with an
+     * argument array (`shell: false`) — never string-interpolated
+     * (docs/security/security.md §6). Deploy-time configuration, not
+     * user/request-controlled input, so trusting this path is safe. Defaults
+     * to the binary already on `PATH`.
+     */
+    FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
+
+    /**
+     * Google OAuth client credentials for exchanging a `YouTubeTarget`'s
+     * stored refresh token for a short-lived access token
+     * (`features/youtube/infrastructure/youtube-client.ts`). Optional — like
+     * Telegram, YouTube delivery is an optional deployment feature; Studio
+     * runs fully without it (connecting a Target fails with a clear
+     * `dependency` error instead of crashing the process at startup).
+     */
+    YOUTUBE_CLIENT_ID: z.string().min(1).optional(),
+    YOUTUBE_CLIENT_SECRET: z.string().min(1).optional(),
+
+    /**
+     * Symmetric key (32 raw bytes, base64-encoded) used to encrypt every
+     * `YouTubeTarget` refresh/access token at rest with AES-256-GCM
+     * (`@/server/adapters/youtube/token-cipher.ts`, ADR-0039) — the tokens are
+     * the actual credential of record and must never be stored in plaintext
+     * (docs/security/security.md). Optional for the same reason as the client
+     * credentials above; required in practice before a Target can be
+     * connected, checked at that boundary rather than at process startup.
+     * Generate with `openssl rand -base64 32`. Rotating this value makes every
+     * previously-connected Target's stored tokens unreadable — reconnect them
+     * after rotating, there is no re-encryption migration.
+     */
+    YOUTUBE_TOKEN_ENCRYPTION_KEY: z.string().min(1).optional(),
   },
 
   client: {
@@ -176,6 +211,10 @@ export const env = createEnv({
     TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
     TELEGRAM_WIZARD_TTL_MINUTES: process.env.TELEGRAM_WIZARD_TTL_MINUTES,
     SEED_ADMIN_PHONE: process.env.SEED_ADMIN_PHONE,
+    FFMPEG_PATH: process.env.FFMPEG_PATH,
+    YOUTUBE_CLIENT_ID: process.env.YOUTUBE_CLIENT_ID,
+    YOUTUBE_CLIENT_SECRET: process.env.YOUTUBE_CLIENT_SECRET,
+    YOUTUBE_TOKEN_ENCRYPTION_KEY: process.env.YOUTUBE_TOKEN_ENCRYPTION_KEY,
   },
 
   /** Treat empty strings as undefined so blank .env lines don't pass validation. */

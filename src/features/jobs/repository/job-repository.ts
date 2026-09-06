@@ -8,9 +8,12 @@ import { conflictError } from "@/server/errors/app-error";
 import { departmentScopeFilter, type Actor } from "@/server/authz";
 import type { Paginated } from "@/types";
 import type {
+  DeliveryProvider,
+  DeliveryStatus,
   JobAssetKind,
   JobSnapshot,
   JobState,
+  SafeDeliveryAttempt,
   SafeJob,
   SafeJobAsset,
   SafeJobDetail,
@@ -83,6 +86,23 @@ const SAFE_JOB_DETAIL_SELECT = {
   renderedAt: true,
   deliveredAt: true,
   uploadedAt: true,
+  videoFileId: true,
+  screenshotFileId: true,
+  thumbnailFileId: true,
+  deliveryAttempts: {
+    select: {
+      id: true,
+      provider: true,
+      status: true,
+      attemptNumber: true,
+      providerRef: true,
+      failureReason: true,
+      triggeredByUserId: true,
+      startedAt: true,
+      completedAt: true,
+    },
+    orderBy: [{ provider: "asc" }, { attemptNumber: "desc" }],
+  },
   assets: {
     select: {
       id: true,
@@ -138,6 +158,22 @@ function toSafeJobDetail(row: SafeJobDetailRow): SafeJobDetail {
     renderedAt: row.renderedAt,
     deliveredAt: row.deliveredAt,
     uploadedAt: row.uploadedAt,
+    videoFileId: row.videoFileId,
+    screenshotFileId: row.screenshotFileId,
+    thumbnailFileId: row.thumbnailFileId,
+    deliveryAttempts: row.deliveryAttempts.map(
+      (attempt): SafeDeliveryAttempt => ({
+        id: attempt.id,
+        provider: attempt.provider as DeliveryProvider,
+        status: attempt.status as DeliveryStatus,
+        attemptNumber: attempt.attemptNumber,
+        providerRef: attempt.providerRef,
+        failureReason: attempt.failureReason,
+        triggeredByUserId: attempt.triggeredByUserId,
+        startedAt: attempt.startedAt,
+        completedAt: attempt.completedAt,
+      }),
+    ),
   };
 }
 
@@ -383,6 +419,16 @@ export interface TransitionExtraData {
   canceledByUserId?: string;
   canceledAt?: Date;
   cancelReason?: string;
+  /** Set only by the `RENDERING -> RENDERED` transition (Phase 9,
+   * `features/delivery/use-cases/accept-job-result.ts`) — atomically, in the
+   * same conditional `UPDATE` as the state change itself, so a losing race
+   * never leaves the Job pointing at one caller's artifacts while another's
+   * transition "won." `null` is a legal value (cleanup nulling a since-deleted
+   * `videoFileId`), so every key must be assigned explicitly by the caller,
+   * never merged in conditionally. */
+  videoFileId?: string | null;
+  screenshotFileId?: string | null;
+  thumbnailFileId?: string | null;
 }
 
 /**
@@ -511,6 +557,21 @@ export async function createRetryJob(
     });
   });
   return toSafeJobDetail(row);
+}
+
+/**
+ * Idempotent: clears `videoFileId` only if it still points at `fileId` — a
+ * concurrent cleanup call (or one racing a since-changed Job) is a no-op, not
+ * an error (`features/delivery/use-cases/cleanup-job-artifacts.ts`).
+ */
+export async function clearJobVideoFileId(
+  jobId: string,
+  fileId: string,
+): Promise<void> {
+  await db.job.updateMany({
+    where: { id: jobId, videoFileId: fileId },
+    data: { videoFileId: null },
+  });
 }
 
 /**

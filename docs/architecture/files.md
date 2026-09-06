@@ -148,8 +148,14 @@ see ADR-0025 and [../data/historical-integrity.md](../data/historical-integrity.
   `assertNoActiveJobDependencies` (real, Phase 6, ADR-0028 — counts active-state
   `JobAsset` references, not a parallel check elsewhere) and
   `assertNoActiveTemplateDependencies` (real, Phase 5 — see "Deletion" above).
-  `File.category = JOB_ARTIFACT` still exists in the schema unused — nothing produces
-  one yet; that's the result-upload endpoint's job (Phase 7+).
+  `File.category = JOB_ARTIFACT` now has a real writer (Phase 9,
+  `features/delivery/use-cases/generate-render-artifacts.ts`). It has its own dedicated
+  deletion path instead — `features/delivery/use-cases/cleanup-job-artifacts.ts`, which
+  checks Job-state/delivery-outcome invariants the ordinary `file:manage` capability has
+  no way to express. `assertCanDeleteFile` explicitly refuses `category: "JOB_ARTIFACT"`
+  for every role, including ADMIN (a real check, not a UI omission — CLAUDE.md "a hidden
+  button is not authorization" cuts both ways) — the ordinary Gallery delete action can
+  never remove one, by construction.
 - **A deleted File must never surface as a broken link or a crash** in a historical
   view — the UI reads the snapshot and shows "media no longer stored" (with the
   snapshot's name/type/size still intact) when the live File is gone, exactly like
@@ -165,8 +171,10 @@ see ADR-0025 and [../data/historical-integrity.md](../data/historical-integrity.
   those are probed.
 - **No hard/blocking dedup, no "reuse this file?" UI** — OD-20 stays open; only the
   groundwork (`contentHash` stored and indexed, an advisory toast) exists.
-- **No scheduled cleanup job.** Nothing produces a `JOB_ARTIFACT` yet, so there's nothing
-  to sweep; the retention policy itself is still OD-18/OD-19, unresolved.
+- **No scheduled cleanup job** (unchanged through Phase 9). `cleanupJobArtifacts` is a
+  real, tested, safe primitive now, but nothing calls it automatically — OD-18's
+  grace-period/trigger question stays open (OD-40's durable-work mechanism doesn't exist
+  yet to hang a sweep on).
 - **No Dialog/AlertDialog primitive was added** for the delete confirmation — a native
   `window.confirm()` is used instead, a deliberate simplification given this phase's
   focus is the File domain/backend, not polished modal UX. Revisit if/when a design

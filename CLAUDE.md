@@ -346,11 +346,11 @@ WHERE state IN (fromStates)`** — never a read-then-write, never a direct
 - **`job:manage` (view/create/cancel/retry) is USER+, whole-department** — resolves OD-03
   for Jobs as collaborative, not "own resources only." Do not narrow this to
   creator-only without the same level of explicit confirmation Phase 5's OD-04 required.
-- **Not implemented, deliberately**: the Worker REST API, Telegram, YouTube delivery,
-  rendering, result upload, `JOB_ARTIFACT` creation, a requeue sweep for stuck
-  `CLAIMED`/`RENDERING` jobs, bulk cancel. `RENDERED`/`DELIVERING`/`UPLOADED` are real,
-  reachable states with no adapter driving a Job into them yet — that's the point of
-  building the state machine ahead of the features that will use it.
+- **Completion & delivery are implemented, Phase 9** — see §15. `RENDERED`/`DELIVERING`/
+  `UPLOADED` are now driven by a real pipeline, not just reachable states with no
+  adapter.
+- **Not implemented, deliberately**: rendering itself (the external Worker's own job), a
+  requeue sweep for stuck `CLAIMED`/`RENDERING` jobs (OD-31), bulk cancel.
 
 ## 12. Handling ambiguity
 
@@ -402,10 +402,13 @@ ADR-0004/ADR-0032/ADR-0033/ADR-0034. **Implemented, Phase 7** — versioned unde
 - **The empty-queue response is `204 No Content`**, never `404` or a `200` with an empty
   body — `claimNextJob()` returning `null` already triggers this via
   `defineRouteHandler`'s built-in mapping.
-- **Not implemented, deliberately**: result/output upload, `JOB_ARTIFACT` creation,
-  Worker-initiated cancel/retry, per-Worker rate limiting. Do not add any of these
-  without re-reading `docs/integrations/worker-api.md` §6 first — each has a documented
-  reason it was deferred, not merely forgotten.
+- **Result/output upload is implemented, Phase 9** — see §15. `POST
+/api/worker/v1/jobs/:id/result` takes the raw video bytes as the request body, not
+  multipart — do not add multipart parsing to `defineRouteHandler` for this; the handler
+  reads `request.arrayBuffer()` directly.
+- **Not implemented, deliberately**: Worker-initiated cancel/retry, per-Worker rate
+  limiting, a Worker input-file-upload endpoint (`POST /api/worker/v1/files`). Do not add
+  any of these without re-reading `docs/integrations/worker-api.md` §6 first.
 
 ## 14. Telegram rules (summary)
 
@@ -457,13 +460,64 @@ Single Track/Album/List/Retry/Cancel/Cancel-All flows.
   `getTelegramBot()`, `globalThis`-cached like `@/server/db`); handlers are attached to it
   exactly once (`features/telegram/bot/register.ts`). Never construct a second `Telegraf`
   instance or re-run `bot.use(telegramComposer)`.
-- **Not implemented, deliberately**: outbound Job-lifecycle notifications
-  (Rendered/Uploaded/Error DMs — no trigger point or durable delivery mechanism exists
-  yet, OD-40), `deliverToTelegram` as a Job field, aspect-ratio validation (matches the
-  dashboard — OD-14 stays open), any Template-authoring surface via Telegram, a
-  self-service phone-editing UI.
+- **Not implemented, deliberately**: `deliverToTelegram` as a Job field (Phase 9 resolved
+  this as "no flag — automatic, best-effort" instead, see §15), aspect-ratio validation
+  (matches the dashboard — OD-14 stays open), any Template-authoring surface via
+  Telegram, a self-service phone-editing UI.
 
-## 15. Security rules (summary)
+## 15. Delivery & YouTube rules (summary)
+
+Full detail: [`docs/integrations/youtube.md`](docs/integrations/youtube.md),
+[`docs/domain/jobs.md`](docs/domain/jobs.md) "Completion & delivery",
+[`docs/architecture/decisions.md`](docs/architecture/decisions.md) ADR-0039.
+**Implemented, Phase 9** — `POST /api/worker/v1/jobs/:id/result`, `ffmpeg`-based artifact
+generation, the Delivery Orchestrator, `DeliveryAttempt`, `YouTubeTarget`.
+
+- **The Worker's result-upload request is the one and only trigger for the entire
+  post-render pipeline.** `accept-job-result.ts` generates artifacts and calls
+  `deliver-job-result.ts` **synchronously, awaited** — never fire-and-forget. Do not add
+  a queue/background-job mechanism for this; the `DeliveryAttempt` `PENDING`-before-the-
+  call write pattern already gives the required "durable, recoverable after a crash"
+  guarantee without one (ADR-0039).
+- **`ffmpeg` only — never add ImageMagick/`convert`.** `server/adapters/media/
+ffmpeg-adapter.ts` is the only module that shells out for media processing, always via
+  `execFile` with a fixed argument array, never `shell: true`, never a template-built
+  command string. Never add a second media-processing binary without a new ADR revisiting
+  ADR-0039's reasoning.
+- **Telegram delivery is a best-effort notification, never a `DeliveryAttempt`, never able
+  to fail or block a Job.** YouTube delivery is a required delivery when
+  `Job.deliverToYouTube` is true, and is the only provider with durable
+  `DeliveryAttempt` rows / delivery-only retry. Do not build a Telegram-side retry — there
+  is nothing durable to retry.
+- **`ERROR -> DELIVERING` (delivery-only retry) is deliberately not in
+  `job-state-machine.ts`'s general transition graph.** `retry-job-delivery.ts` calls
+  `transitionJobRow` directly instead — the documented escape hatch for a state-changing
+  operation `transitionJob`'s general pre-check doesn't fit. Never add this edge to the
+  general graph; doing so silently breaks `isTerminalState`'s other caller
+  (Worker progress/duration rejection on a dead Job).
+- **Job Retry vs Delivery Retry are different operations — never confuse them.** A
+  Delivery Retry never re-renders or recreates a Job; it reuses the already-rendered
+  `videoFileId`/`screenshotFileId` verbatim.
+- **YouTube connection is a verified refresh-token entry, not a self-service OAuth
+  consent-screen flow.** A full "Connect with Google" UI is a documented future
+  enhancement (ADR-0039) — do not build it without revisiting that decision. Every
+  `YouTubeTarget` token is encrypted at rest (`server/adapters/youtube/token-cipher.ts`,
+  `YOUTUBE_TOKEN_ENCRYPTION_KEY`) — never logged, never returned to a client.
+- **A `JOB_ARTIFACT` File is never deletable through the ordinary Gallery delete
+  action, for any role, including ADMIN.** `assertCanDeleteFile` refuses it explicitly.
+  Its only deletion path is `features/delivery/use-cases/cleanup-job-artifacts.ts`, which
+  is safe, idempotent, and checks Job-state/delivery-outcome invariants the ordinary
+  `file:manage` capability cannot express. Do not add a second deletion path for it.
+- **YouTube privacy stays hard-coded (`private`, `madeForKids: false`).** Do not add a
+  per-Template/per-Job override without a new decision (OD-37 stays open).
+- **Not implemented, deliberately**: a self-service OAuth consent-screen UI, per-target
+  upload quota (the global cap is unchanged), automatic/scheduled artifact cleanup (the
+  primitive exists, nothing calls it — OD-18), any background-job/queue infrastructure
+  (BullMQ, pg-boss, a cron sweep — OD-40 stays open for the pieces this phase didn't need
+  one for), a dashboard in-app notification center (Telegram DM is the only completion
+  notification that exists).
+
+## 16. Security rules (summary)
 
 Full document: [`docs/security/security.md`](docs/security/security.md). Highlights:
 
@@ -477,14 +531,14 @@ Full document: [`docs/security/security.md`](docs/security/security.md). Highlig
 - Validate every input at the boundary (Zod or equivalent) — Server Actions included.
 - Secrets only via environment / secret manager; never in the repo.
 
-## 16. Frontend conventions (summary)
+## 17. Frontend conventions (summary)
 
 Panel-only app, **no landing page**. Next.js App Router + React + TypeScript + Tailwind +
 shadcn/ui. **LTR**, **English** UI and messages. Responsive with an excellent mobile
 experience. **Light / Dark / System** themes. Full detail:
 [`docs/frontend/conventions.md`](docs/frontend/conventions.md).
 
-## 17. Phase status
+## 18. Phase status
 
 - **Phase 0 (documentation & architecture foundation) — complete.**
 - **Phase 1 (Next.js foundation & application skeleton) — complete.** Dashboard shell,
@@ -551,14 +605,38 @@ jobs/:id/state, jobs/:id/progress, jobs/:id/duration}` — thin `defineRouteHand
   `retryJob`, `cancelJob`, `listDepartmentJobs`, `getTemplateForJobForm`, `uploadFile`),
   adding no parallel Job/Template/File logic (ADR-0038). Telegram-collected files are
   ordinary Gallery assets — no new temporary-upload lifecycle. `npm run check` and
-  `npm run build` both pass. **Not implemented, deliberately**: outbound Job-lifecycle
-  notifications (no trigger point or durable delivery mechanism exists yet — OD-40),
-  `deliverToTelegram`, aspect-ratio validation (matches the dashboard), any Telegram
-  Template-authoring surface, a self-service phone-editing UI. **Still no user/department
-  management UI, no result upload, no YouTube.**
+  `npm run build` both pass. **Not implemented, deliberately**: aspect-ratio validation
+  (matches the dashboard), any Telegram Template-authoring surface, a self-service
+  phone-editing UI. **Still no user/department management UI, no result upload, no
+  YouTube.**
+- **Phase 9 (Media processing & delivery) — complete.** `POST
+/api/worker/v1/jobs/:id/result` accepts the Worker's rendered result as raw bytes
+  (`acceptJobResult`, idempotent against duplicate/racing requests); `ffmpeg`-only media
+  processing (`server/adapters/media/ffmpeg-adapter.ts`, ADR-0039 — ImageMagick
+  deliberately not migrated) generates a screenshot + thumbnail and creates the first real
+  `JOB_ARTIFACT` Files (`Job.videoFileId`/`screenshotFileId`/`thumbnailFileId`); a
+  synchronous, awaited Delivery Orchestrator (`features/delivery/use-cases/
+deliver-job-result.ts`) drives `RENDERED -> DELIVERING -> UPLOADED`/`ERROR` through the
+  unmodified Phase 6 state machine, recording durable `DeliveryAttempt` rows (`PENDING`
+  before every external call) and sending best-effort Telegram notifications (resolving
+  the notification half of OD-40); `YouTubeTarget` (department-scoped, ADR-0039 resolves
+  OD-36) connects via a verified refresh-token entry rather than a full OAuth
+  consent-screen flow, with tokens encrypted at rest (AES-256-GCM); Template↔Target
+  wiring with server-side verification (`verify-youtube-target.ts`) and Job-creation-time
+  enforcement; tag substitution (`{{layer}}`, matching legacy, `excludeTags` not
+  reproduced); a delivery-only retry (`retryJobDelivery`, resolves OD-13) via a
+  deliberately narrow `ERROR -> DELIVERING` escape hatch (`transitionJobRow` called
+  directly, not added to the general state graph); an idempotent, reference-aware
+  `cleanupJobArtifacts` primitive (not yet auto-triggered — OD-18 stays open); a `/youtube`
+  management page and Job-detail delivery/retry UI. `npm run check` and `npm run build`
+  both pass; a real end-to-end verification (real Postgres, real `ffmpeg`, a genuinely
+  generated test video) additionally exercised idempotency, the concurrency race, and
+  cleanup. **Not implemented, deliberately**: a self-service OAuth consent-screen UI,
+  per-target upload quota, automatic/scheduled artifact cleanup, any background-job/queue
+  infrastructure, a dashboard in-app notification center, configurable YouTube privacy.
+  **Still no user/department management UI.**
 
-Do **not** start the next phase (user/department management, then result upload +
-delivery) unless explicitly asked. See
+Do **not** start the next phase (user/department management) unless explicitly asked. See
 [`docs/development/workflow.md`](docs/development/workflow.md) for phase boundaries and
 [`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
 remains undecided.

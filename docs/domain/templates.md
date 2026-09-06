@@ -84,25 +84,20 @@ columns**, never combined into one field (Phase 5 brief §7). `templateLifecycle
 
 [`prisma/schema.prisma`](../../prisma/schema.prisma))
 
-| Field                                                 | Notes                                                                                                                                                                    |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`                                                  | Referenced by a future Job's snapshot forever — never reused, never removed.                                                                                             |
-| `departmentId`                                        | Required. Scopes ownership. Immutable after creation (no reassignment path — matches OD-08's "not supported" default).                                                   |
-| `createdByUserId`                                     | Always set (Users are never deleted — ADR-0007 — so this FK is `onDelete: Restrict`, not nullable).                                                                      |
-| `name`                                                | Unique per Department among non-deleted rows — **ADR-0027, resolves OD-09.**                                                                                             |
-| `status`                                              | `ACTIVE` \| `DISABLED`. Independent of `deletedAt` — see "Lifecycle" above.                                                                                              |
-| `composition`, `source`, `scriptRef`, `outputPattern` | Legacy `composition`/`src`/`script`/`output` — opaque strings passed through to a future Job/the Render Worker. Studio never interprets them.                            |
-| `description`                                         | Optional. Used as the YouTube description on delivery (not implemented yet).                                                                                             |
-| `tags`                                                | String array. YouTube tag templates with `{{layer}}` placeholders — **Templates only store this**; substitution is the future delivery module's job (Phase 5 brief §16). |
-| `assets`                                              | Ordered `TemplateAsset[]` — see below. **Zero assets is valid** — ADR-0027, resolves OD-10 (a fully static render has no Job-supplied inputs).                           |
-| `createdAt`, `updatedAt`                              |                                                                                                                                                                          |
-| `deletedAt`, `deletedByUserId`                        | Soft-delete marker (ADR-0006). Both `null` until deleted; set together, never individually.                                                                              |
-
-**Not present, deliberately:** `youtubeTargetId` (legacy `_channel`). There is no
-`YouTubeTarget` Prisma model yet (OD-36 is still open, and YouTube delivery is out of
-scope for this phase) — adding a column that references a table that doesn't exist would
-be exactly the speculative schema CLAUDE.md asks to avoid. It is added, as a proper
-nullable FK, when `YouTubeTarget` lands.
+| Field                                                 | Notes                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                  | Referenced by a future Job's snapshot forever — never reused, never removed.                                                                                                                                                                                                                                                      |
+| `departmentId`                                        | Required. Scopes ownership. Immutable after creation (no reassignment path — matches OD-08's "not supported" default).                                                                                                                                                                                                            |
+| `createdByUserId`                                     | Always set (Users are never deleted — ADR-0007 — so this FK is `onDelete: Restrict`, not nullable).                                                                                                                                                                                                                               |
+| `name`                                                | Unique per Department among non-deleted rows — **ADR-0027, resolves OD-09.**                                                                                                                                                                                                                                                      |
+| `status`                                              | `ACTIVE` \| `DISABLED`. Independent of `deletedAt` — see "Lifecycle" above.                                                                                                                                                                                                                                                       |
+| `composition`, `source`, `scriptRef`, `outputPattern` | Legacy `composition`/`src`/`script`/`output` — opaque strings passed through to a future Job/the Render Worker. Studio never interprets them.                                                                                                                                                                                     |
+| `description`                                         | Optional. Used as the YouTube description on delivery — **implemented, Phase 9.**                                                                                                                                                                                                                                                 |
+| `tags`                                                | String array. YouTube tag templates with `{{layer}}` placeholders — **Templates only store this**; substitution happens at delivery time (`features/delivery/domain/tag-substitution.ts`, Phase 9).                                                                                                                               |
+| `youtubeTargetId`                                     | **Implemented, Phase 9** (ADR-0039, resolves OD-36). Optional connected `YouTubeTarget` — verified server-side to belong to this Template's own Department and be `CONNECTED` on every write (`verify-youtube-target.ts`). `onDelete: SetNull`. See [../integrations/youtube.md](../integrations/youtube.md) "Template ↔ Target". |
+| `assets`                                              | Ordered `TemplateAsset[]` — see below. **Zero assets is valid** — ADR-0027, resolves OD-10 (a fully static render has no Job-supplied inputs).                                                                                                                                                                                    |
+| `createdAt`, `updatedAt`                              |                                                                                                                                                                                                                                                                                                                                   |
+| `deletedAt`, `deletedByUserId`                        | Soft-delete marker (ADR-0006). Both `null` until deleted; set together, never individually.                                                                                                                                                                                                                                       |
 
 ### Template Asset (slot definition)
 
@@ -233,5 +228,6 @@ new, separate decision — not a byproduct of this feature.
 > enough" when a future feature actually compares an uploaded image against a Template
 > slot's `imageRatio`. Unaffected by this phase, since no such comparison exists yet.
 
-> **`OPEN DECISION` — OD-36, YouTube target scoping.** Blocks adding `youtubeTargetId` to
-> Template — see "Fields" above.
+> **OD-36, YouTube target scoping — ✅ RESOLVED, Phase 9.** `youtubeTargetId` is now a
+> real field on Template — see "Fields" above and
+> [../integrations/youtube.md](../integrations/youtube.md).

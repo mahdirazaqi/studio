@@ -1,6 +1,8 @@
 # YouTube Integration
 
-Studio can publish a finished render to YouTube as part of Job delivery.
+**Implemented, Phase 9** (ADR-0039). Studio publishes a finished render to YouTube as
+part of Job delivery, triggered by the Worker's result-upload request
+(docs/integrations/worker-api.md §2).
 
 ## 1. Legacy behavior (reference only) `LEGACY`
 
@@ -24,86 +26,168 @@ tags)` — **privacy forced to `private`, `madeForKids: false`, hard-coded**.
 - A **global** daily cap of **3** `upload:true` jobs across the entire system gates
   creation and retry (a stand-in for the YouTube Data API quota).
 
-## 2. Studio design
+## 2. Studio design (implemented, Phase 9, ADR-0039)
+
+### Rendered result flow
+
+```text
+Worker: POST /api/worker/v1/jobs/:id/result   (raw video bytes)
+        │
+        ▼
+accept-job-result.ts
+  ├─ Job must be RENDERING (else: duplicate-result idempotency, see §5)
+  ├─ generate-render-artifacts.ts (MediaProcessingService)
+  │    ├─ ffmpeg: extract a screenshot frame (00:00:04.000, retried at 0s for a
+  │    │  short render)
+  │    ├─ ffmpeg: resize the screenshot to a small thumbnail (scale filter —
+  │    │  no ImageMagick, see §3)
+  │    └─ create 3 JOB_ARTIFACT Files: video, screenshot, thumbnail
+  ├─ atomic RENDERING -> RENDERED transition, setting all 3 File ids together
+  └─ deliver-job-result.ts (Delivery Orchestrator, awaited synchronously)
+       ├─ Telegram: best-effort "rendered" notification
+       ├─ no YouTube needed  -> RENDERED -> UPLOADED, "uploaded" notification
+       └─ YouTube needed     -> RENDERED -> DELIVERING
+            ├─ DeliveryAttempt(YOUTUBE, PENDING) committed first
+            ├─ upload video + set thumbnail (server/adapters/youtube/youtube-client.ts)
+            ├─ success -> DeliveryAttempt SUCCEEDED, DELIVERING -> UPLOADED, notify
+            └─ failure -> DeliveryAttempt FAILED,   DELIVERING -> ERROR,    notify
+```
 
 ### YouTube Target
 
-The legacy `Channel` concept becomes a **`YouTubeTarget`** in Studio:
+The legacy `Channel` concept is `YouTubeTarget` (`prisma/schema.prisma`):
 
-| Field              | Notes                                                             |
-| ------------------ | ----------------------------------------------------------------- |
-| `id`               |                                                                   |
-| `name`             | Display name of the connected channel.                            |
-| `youtubeChannelId` | The actual YouTube channel id.                                    |
-| OAuth credential   | Access + refresh token, auto-refreshed; stored encrypted at rest. |
-| `status`           | `CONNECTED` \| `DISCONNECTED` \| `ERROR`.                         |
-| `departmentId`?    | **OPEN DECISION** — see below.                                    |
+| Field                                          | Notes                                                                                                                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`, `name`, `youtubeChannelId`               | `youtubeChannelId` is resolved server-side from the real YouTube API at connection time — never client-supplied.                                                                                 |
+| `encryptedRefreshToken`/`encryptedAccessToken` | AES-256-GCM, `server/adapters/youtube/token-cipher.ts` — never plaintext at rest, never logged, never returned to a client.                                                                      |
+| `accessTokenExpiresAt`                         | Drives on-demand refresh with a safety margin (`features/youtube/use-cases/get-valid-access-token.ts`).                                                                                          |
+| `status`                                       | `CONNECTED` \| `DISCONNECTED` \| `ERROR` — a refresh failure (revoked token) marks it `ERROR` with a safe `lastErrorReason`, taking it out of future Job creation eligibility until reconnected. |
+| `departmentId`                                 | **Required — department-scoped** (resolves OD-36 per its own recommendation). ADMIN may connect/manage any department's Target.                                                                  |
 
-> **`OPEN DECISION` — is a YouTubeTarget department-scoped or global?** _Consequence of
-> department-scoped:_ a department manages its own channels; clean isolation; matches the
-> rest of the model. _Consequence of global (ADMIN-managed):_ fewer OAuth connections to
-> maintain, but any department could publish to any channel. Recommended:
-> **department-scoped**, ADMIN may also manage all.
+**Connection is a verified refresh-token entry, not a "Connect with Google" OAuth
+consent-screen flow** (ADR-0039 point 5) — a deliberate scope reduction, not an
+oversight:
+
+1. A MANAGER+ operator obtains a refresh token for the target channel out-of-band
+   (Google's OAuth Playground, or an equivalent one-time consent flow against Studio's
+   own registered `YOUTUBE_CLIENT_ID`/`YOUTUBE_CLIENT_SECRET`).
+2. They paste it into Studio's `/youtube` page (`features/youtube/components/
+youtube-targets-manager.tsx`) along with a display name.
+3. `connectYoutubeTarget` (`features/youtube/use-cases/connect-youtube-target.ts`)
+   immediately exchanges it for an access token and calls the real `channels.list` API —
+   a bad/expired/revoked token is rejected right there, never silently stored.
+4. The refresh token is encrypted and stored; the resolved `youtubeChannelId`/channel
+   title come from the API response, never the client's input.
+
+A full self-service OAuth consent-screen UI (`GET /api/youtube/oauth/callback` + a
+"Connect with Google" button) is a documented, deliberately deferred future enhancement —
+it improves connection UX but is not required for the delivery pipeline itself to work
+correctly and safely.
 
 ### Template ↔ Target
 
-- A Template may set `youtubeTargetId`. If set, Jobs from that Template **may** be
-  delivered to that target (the operator still chooses per Job via `deliverToYouTube`).
-- The target must exist and (if department-scoped) belong to the Template's Department at
-  save time.
-- The `youtubeTargetId` and enough target identity are **captured in the Job snapshot**
-  so a historical Job explains where it was published even if the target is later
-  disconnected.
+- A Template may set `youtubeTargetId` (verified server-side, on every create/update, to
+  belong to the Template's own Department and be `CONNECTED` —
+  `features/templates/use-cases/verify-youtube-target.ts`, mirrors
+  `verify-file-references.ts`'s pattern for `defaultFileId`).
+- **Job creation enforces this**: `deliverToYouTube: true` with a Template that has no
+  `youtubeTargetId`, or whose Target is no longer `CONNECTED`, is rejected with a clear
+  `business_rule` error (`features/jobs/use-cases/create-job.ts`) — matching legacy's
+  "upload only if the Template has a channel" rule, enforced once, at creation.
+- The Target's identity (`id`, `name`, `youtubeChannelId`) is captured in the Job's
+  immutable `snapshot.youtubeTarget` at creation — a later Target disconnect/rename/
+  Template edit never changes what an already-created Job believes it should deliver to
+  (docs/data/historical-integrity.md).
 
-### Delivery (ADR-0016 — durable)
+### Delivery (ADR-0039 — durable, not fire-and-forget)
 
-- After the render result is attached and screenshot/thumbnail generated:
-  - if `deliverToYouTube`: the YouTube adapter uploads the video + sets the thumbnail,
-    using `description` and resolved `tags` **from the snapshot**.
-  - the outcome (`SUCCESS` / `FAILURE` + reason + YouTube video id) is recorded on the
-    Job as a `DeliveryOutcome`.
-- **Not fire-and-forget.** Runs via the durable background mechanism (OPEN DECISION).
-- On failure: Job → `ERROR` with `errorReason` **surfaced to the operator** (in-app +
-  Telegram), not just logged.
-- Retry of a failed delivery is via the standard **retry = new Job** path, or a
-  targeted "retry delivery only" action (OPEN DECISION — is delivery-only retry worth a
-  separate use case, given the render output still exists?).
+- Runs **synchronously, awaited**, inside the Worker's own result-upload request — the
+  direct fix for legacy's unawaited `this.uploadJobToYoutube(job)` call.
+- Every attempt is recorded as a `DeliveryAttempt` row, **written as `PENDING` before the
+  external API call runs** — the actual durability guarantee: a process crash mid-upload
+  leaves an accurate, retryable record rather than a silently lost one. See
+  §5 "Idempotency & concurrency."
+- On failure: Job → `ERROR` with `errorReason` **surfaced to the operator** (dashboard +
+  a generic "failed" Telegram DM, never the raw provider error), not just logged — the
+  direct fix for legacy's "reason is only logged server-side."
+- **Delivery-only retry** (resolves OD-13 for YouTube): `retryJobDelivery`
+  (`features/delivery/use-cases/retry-job-delivery.ts`) re-runs only the YouTube upload
+  from an `ERROR` Job that still has its rendered video — it never re-renders or
+  recreates the Job (docs/domain/jobs.md "Job Retry vs Delivery Retry"). Refuses if the
+  delivery already succeeded, or if the render itself failed (no video to redeliver —
+  use `retryJob` instead). Available from the Job detail page (`/jobs/:id`) whenever a
+  Job is `ERROR`, `deliverToYouTube` is true, and a rendered video exists.
 
 ### Video privacy / metadata
 
-> **`OPEN DECISION` — privacy status & metadata configurability.** Legacy hard-coded
-> `private` + `madeForKids: false`. Should Studio expose privacy (`private` / `unlisted`
-> / `public`), publish-at scheduling, category, `madeForKids`, per Template or per Job?
-> _Consequence of keeping hard-coded `private`:_ safe default, matches legacy, less UI.
-> _Consequence of configurable:_ real publishing workflow, but more validation + more
-> ways to get it wrong. Recommended: **default `private`, allow `unlisted`/`public` as a
-> Template-level setting**, defer scheduling.
+**Kept hard-coded, exactly like legacy** (OD-37 stays open, unresolved by design this
+phase): `privacyStatus: 'private'`, `madeForKids: false`
+(`server/adapters/youtube/youtube-client.ts`'s `uploadVideo`). No per-Template/per-Job
+override exists.
 
 ### Tags
 
 - Same substitution model as legacy: `Template.tags` with `{{layer}}` tokens replaced by
-  the Job's `DATA` asset values, computed **at snapshot time**.
-- Tags with unresolved placeholders are dropped (legacy behavior kept — a misconfigured
-  template produces fewer tags, not an error).
-- The redundant legacy `excludeTags` set is not reproduced (it was dead logic).
+  the Job's `DATA` asset values (`features/delivery/domain/tag-substitution.ts`), computed
+  at delivery time from the Job's own immutable `snapshot`/`JobAsset` rows.
+- Tags with unresolved placeholders are dropped (legacy behavior kept).
+- The redundant legacy `excludeTags` set is not reproduced (dead logic — unchanged from
+  the Phase 0 design).
+
+### Media processing
+
+`ffmpeg` only — **ImageMagick was deliberately not migrated** (ADR-0039 point 2): legacy
+used `fluent-ffmpeg` for the screenshot and a separate `exec('convert ... -resize
+x150 ...')` for the thumbnail; Studio's `ffmpeg` `scale` video filter covers the resize
+need exactly, so one native dependency does both steps
+(`server/adapters/media/ffmpeg-adapter.ts`). Every invocation is `execFile` with a fixed
+argument array — **never** a template-built shell string, **never** `shell: true`
+(docs/security/security.md §6). All work happens in a private `mkdtemp` temp directory,
+always removed. Manually verified against a real, generated test video, including the
+"ffmpeg exits `0` but writes nothing" edge case when the seek offset exceeds a very short
+render's actual duration (the fallback checks the output file's actual size, not just the
+exit code).
+
+### Idempotency & concurrency
+
+- **Duplicate Worker result submission**: a Job no longer in `RENDERING` that already has
+  a `videoFileId` is recognized as already-processed and returned as-is — no
+  reprocessing, no second delivery run (docs/integrations/worker-api.md §2).
+- **Concurrent result submissions racing** (two genuinely simultaneous Worker requests
+  for the same Job): both generate artifacts, but only one wins the atomic conditional
+  `RENDERING -> RENDERED` update (`transitionJobRow`); the loser rolls back its own
+  artifacts and returns the winner's result.
+- **Concurrent delivery retries**: `(jobId, provider, attemptNumber)` is a unique
+  database constraint — a second, simultaneous retry click fails with a clean `conflict`
+  rather than creating two `DeliveryAttempt` rows for the same attempt.
+- **Already-successful delivery**: `retryJobDelivery` refuses if any prior `DeliveryAttempt`
+  for that provider is `SUCCEEDED` — a YouTube upload is never repeated once it landed.
+- The YouTube Data API itself provides no exactly-once upload guarantee beyond this —
+  Studio's own guarantee is "never _initiates_ a second upload once one has recorded
+  success," not "the network call itself cannot partially succeed in a way Studio can't
+  observe." No stronger guarantee was pursued this phase.
 
 ### Quota / cap
 
-- See the **upload cap OPEN DECISION** in [../domain/jobs.md](../domain/jobs.md). The
-  YouTube Data API quota is realistically **per API project** (often aligned per
-  channel), so a **per-target** cap is the likely correct model rather than legacy's
-  single global counter.
-- The cap is checked **before** creating a Job/retry (never after a destructive step —
-  legacy retry bug).
+- Unchanged from Phase 6 (ADR-0030): a **global**, UTC-day, count-based cap
+  (`JOB_UPLOAD_DAILY_CAP`). **Still open:** a per-`YouTubeTarget` cap — no concrete
+  quota-per-channel requirement was given this phase, so the model now exists but the cap
+  does not scope to it (OD-01).
 
 ## 3. External boundary
 
-- YouTube is an **external service**; Studio owns only the `YouTubeTarget` record and the
-  `DeliveryOutcome`. The uploaded video and its analytics live on YouTube.
-- All calls go through `server/adapters/youtube` with explicit timeouts and error
-  mapping; the adapter is the only place `googleapis`/OAuth logic lives.
+- YouTube is an **external service**; Studio owns only the `YouTubeTarget` record and
+  `DeliveryAttempt` rows. The uploaded video and its analytics live on YouTube.
+- All calls go through `server/adapters/youtube/youtube-client.ts` (the only module that
+  imports `googleapis`) with explicit error mapping to `dependencyError`; a
+  `features/youtube/infrastructure`-equivalent split was not needed since the client is
+  already a thin, Studio-domain-free wrapper.
 
 ## 4. Out of scope for Studio
 
 - YouTube analytics, copyright, competitor tracking, channel management dashboards — all
   legacy-wide features unrelated to the render pipeline. Studio does **not** absorb them.
+- A self-service "Connect with Google" OAuth consent-screen UI (§2 above).
+- Per-YouTube-target upload quota, configurable privacy/scheduling, automatic artifact
+  cleanup scheduling — all documented `OPEN DECISION`s, not silently decided.

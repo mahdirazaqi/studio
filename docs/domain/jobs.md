@@ -5,12 +5,14 @@ implemented, Phase 7** (see [../integrations/worker-api.md](../integrations/work
 ADR-0032/0033/0034); **Telegram is implemented, Phase 8** (see
 [../integrations/telegram.md](../integrations/telegram.md), ADR-0035–0038) — it creates
 Jobs through the unmodified `createJob`/`cancelJob`/`retryJob` use cases below, adding no
-Job-domain logic of its own. [../architecture/decisions.md](../architecture/decisions.md)
-ADR-0028/0029/0030/0031 records the decisions behind the shape below, and
+Job-domain logic of its own. **Completion & delivery (rendered-result acceptance, media
+processing, YouTube/Telegram delivery) implemented, Phase 9** (see
+[../integrations/youtube.md](../integrations/youtube.md), ADR-0039) — see "Completion &
+delivery" below; the pipeline this page describes is now real end-to-end.
+[../architecture/decisions.md](../architecture/decisions.md) ADR-0028/0029/0030/0031/0039
+records the decisions behind the shape below, and
 [`prisma/schema.prisma`](../../prisma/schema.prisma) is the final schema. **Still not
-implemented:** YouTube delivery, rendering itself, and the result-upload endpoint — this
-page's "Completion & delivery" section describes the application services that exist for
-those to eventually call, not a working end-to-end pipeline.
+implemented:** rendering itself (the external Render Worker's own job).
 
 ## Purpose
 
@@ -126,35 +128,31 @@ QUEUED` edge exists in the graph for it, but no sweep exists yet — OD-31 (Work
 
 ### Fields (implemented; final schema in [`prisma/schema.prisma`](../../prisma/schema.prisma))
 
-| Field                                                               | Notes                                                                                                                                                                                    |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                                                | Permanent.                                                                                                                                                                               |
-| `departmentId`                                                      | Required. **Derived from the chosen Template's department** — never a separate, client-supplied field (Phase 6 brief §4).                                                                |
-| `createdByUserId`                                                   | Permanent reference. On a retry, this stays the **original creator** (legacy behavior, kept) — see `retriedByUserId`.                                                                    |
-| `templateId`                                                        | FK to the Template (kept resolvable forever — Template is soft-deleted only). Convenience/active-dependency only — never the source of truth for a historical Job's meaning.             |
-| `snapshot`                                                          | **Immutable JSONB.** Template render fields + ordered asset-slot definitions at creation. See "Job assets" below for the _resolved values_, which are **not** in this column (ADR-0028). |
-| `title`                                                             | Derived from `DATA` asset values at creation, joined `"                                                                                                                                  | "` (legacy rule kept). Stored, never recomputed. |
-| `state`                                                             | From the state machine. Written only via `transitionJobRow`'s atomic conditional update.                                                                                                 |
-| `progress`                                                          | 0–100, nullable until the Worker's first report. Rejected once the Job is terminal.                                                                                                      |
-| `durationSeconds`                                                   | Nullable until reported. Rejected once the Job is terminal.                                                                                                                              |
-| `deliverToYouTube`                                                  | Whether to publish to YouTube on completion (legacy `upload`). Part of the Job's immutable configuration — counted by the daily upload quota (ADR-0030) when `true`.                     |
-| `retryOfJobId`, `attemptNumber`                                     | Non-destructive retry lineage (ADR-0031). `attemptNumber` is 1 for an original, `original.attemptNumber + 1` for a retry.                                                                |
-| `retriedByUserId`, `retryReason`                                    | Who triggered a retry-created Job, and why (optional).                                                                                                                                   |
-| `canceledByUserId`, `canceledAt`, `cancelReason`                    | Set once, by `cancelJob`. Never resets `progress`/`durationSeconds` (resolves OD-26).                                                                                                    |
-| `errorReason`                                                       | Human-readable failure reason. Surfaced in the UI; never a stack trace.                                                                                                                  |
-| `claimedAt`, `startedAt`, `renderedAt`, `deliveredAt`, `uploadedAt` | Timeline — each set once, the first time `transitionJob` reaches the corresponding state. Never reset.                                                                                   |
-| `createdAt`, `updatedAt`                                            |                                                                                                                                                                                          |
+| Field                                                               | Notes                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                                | Permanent.                                                                                                                                                                                                                                                                                                                        |
+| `departmentId`                                                      | Required. **Derived from the chosen Template's department** — never a separate, client-supplied field (Phase 6 brief §4).                                                                                                                                                                                                         |
+| `createdByUserId`                                                   | Permanent reference. On a retry, this stays the **original creator** (legacy behavior, kept) — see `retriedByUserId`.                                                                                                                                                                                                             |
+| `templateId`                                                        | FK to the Template (kept resolvable forever — Template is soft-deleted only). Convenience/active-dependency only — never the source of truth for a historical Job's meaning.                                                                                                                                                      |
+| `snapshot`                                                          | **Immutable JSONB.** Template render fields + ordered asset-slot definitions at creation. See "Job assets" below for the _resolved values_, which are **not** in this column (ADR-0028).                                                                                                                                          |
+| `title`                                                             | Derived from `DATA` asset values at creation, joined `"                                                                                                                                                                                                                                                                           | "` (legacy rule kept). Stored, never recomputed. |
+| `state`                                                             | From the state machine. Written only via `transitionJobRow`'s atomic conditional update.                                                                                                                                                                                                                                          |
+| `progress`                                                          | 0–100, nullable until the Worker's first report. Rejected once the Job is terminal.                                                                                                                                                                                                                                               |
+| `durationSeconds`                                                   | Nullable until reported. Rejected once the Job is terminal.                                                                                                                                                                                                                                                                       |
+| `deliverToYouTube`                                                  | Whether to publish to YouTube on completion (legacy `upload`). Part of the Job's immutable configuration — counted by the daily upload quota (ADR-0030) when `true`.                                                                                                                                                              |
+| `retryOfJobId`, `attemptNumber`                                     | Non-destructive retry lineage (ADR-0031). `attemptNumber` is 1 for an original, `original.attemptNumber + 1` for a retry.                                                                                                                                                                                                         |
+| `retriedByUserId`, `retryReason`                                    | Who triggered a retry-created Job, and why (optional).                                                                                                                                                                                                                                                                            |
+| `canceledByUserId`, `canceledAt`, `cancelReason`                    | Set once, by `cancelJob`. Never resets `progress`/`durationSeconds` (resolves OD-26).                                                                                                                                                                                                                                             |
+| `errorReason`                                                       | Human-readable failure reason. Surfaced in the UI; never a stack trace.                                                                                                                                                                                                                                                           |
+| `claimedAt`, `startedAt`, `renderedAt`, `deliveredAt`, `uploadedAt` | Timeline — each set once, the first time `transitionJob` reaches the corresponding state. Never reset.                                                                                                                                                                                                                            |
+| `videoFileId`, `screenshotFileId`, `thumbnailFileId`                | **Implemented, Phase 9.** The rendered result and its derived images (`JOB_ARTIFACT` Files), set atomically together with the `RENDERING -> RENDERED` transition. `null` until a Worker successfully posts a result. `onDelete: SetNull` — `cleanupJobArtifacts` may hard-delete the video File once delivery no longer needs it. |
+| `deliveryAttempts`                                                  | **Implemented, Phase 9.** One `DeliveryAttempt` row per delivery attempt per provider (`TELEGRAM`/`YOUTUBE`) — see [../integrations/youtube.md](../integrations/youtube.md) "Idempotency & concurrency".                                                                                                                          |
+| `createdAt`, `updatedAt`                                            |                                                                                                                                                                                                                                                                                                                                   |
 
-**Not present, deliberately:** `deliverToTelegram` — Telegram linking now exists (Phase
-8), but the flag would still be unusable: Telegram delivery is an _outbound notification_
-concern, and nothing yet drives a Job into `RENDERED`/`UPLOADED` to notify from, nor does
-a durable delivery mechanism exist to hand a notification attempt to (OD-40 stays open —
-see [../integrations/telegram.md](../integrations/telegram.md) "Outbound Job-lifecycle
-notifications");
-`videoFileId`/`screenshotFileId`/`thumbnailFileId`/`deliveryOutcomes` (nothing produces a
-`JOB_ARTIFACT` or a delivery outcome yet, even after Phase 7 — that needs a result-upload
-endpoint and a delivery module, both still deferred; not speculative schema added ahead
-of a writer for it).
+**Not present, deliberately:** `deliverToTelegram` — resolved, Phase 9 (OD-15): Telegram
+notification is automatic and best-effort for any linked creator, with no per-Job flag,
+matching legacy's own unconditional `sendTelegramMessage` calls exactly — see
+[../integrations/youtube.md](../integrations/youtube.md) "Delivery".
 
 ### Job assets
 
@@ -269,23 +267,44 @@ Implemented in `features/jobs/use-cases/retry-job.ts` (ADR-0031):
 - Retry lineage is fully traceable via `retryOfJobId` + `attemptNumber` — a simple,
   bounded chain, not a general graph.
 
-### Completion & delivery — still not implemented
+### Job Retry vs Delivery Retry — implemented, Phase 9 (resolves OD-13, ADR-0039)
+
+Two different operations that must never be confused:
+
+- **Job Retry** (`retryJob`, above) re-runs the Job/render lifecycle: a brand-new Job row,
+  `state: QUEUED`, picked up by a Worker from scratch.
+- **Delivery Retry** (`retryJobDelivery`,
+  `features/delivery/use-cases/retry-job-delivery.ts`) retries delivery of an
+  **already-rendered** result — it never re-renders and never creates a new Job. Only
+  legal from `ERROR`, only when the Job still has a rendered video
+  (`videoFileId`) and was configured for YouTube delivery, and only when no
+  `DeliveryAttempt` for that provider has already `SUCCEEDED`. It calls `transitionJobRow`
+  directly for the one-off `ERROR -> DELIVERING` edge — deliberately **not** added to
+  `job-state-machine.ts`'s general transition graph, because `ERROR` must stay reported as
+  terminal for `updateJobProgress`/`updateJobDuration`'s own use of `isTerminalState`; see
+  ADR-0039 point 4 for the full reasoning. A Job whose _render_ failed (no video exists)
+  cannot use Delivery Retry — retry the Job itself instead.
+
+### Completion & delivery — implemented, Phase 9 (ADR-0039)
 
 The `RENDERED`/`DELIVERING`/`UPLOADED` states and their timeline timestamps
-(`renderedAt`/`deliveredAt`/`uploadedAt`) are real and reachable via `transitionJob`
-— including over the Worker REST API as of Phase 7 (`PATCH
-/api/worker/v1/jobs/:id/state`) — but nothing yet:
+(`renderedAt`/`deliveredAt`/`uploadedAt`) are now driven by a real, tested pipeline:
 
-- Accepts a rendered result upload (Studio's equivalent of legacy's
-  `POST /jobs/:id/upload` — deferred, see
-  [../integrations/worker-api.md](../integrations/worker-api.md) §6).
-- Generates a screenshot/thumbnail or creates `JOB_ARTIFACT` File rows.
-- Actually delivers to YouTube or Telegram, or records a delivery outcome.
+- `POST /api/worker/v1/jobs/:id/result` accepts the rendered result (Studio's equivalent
+  of legacy's `POST /jobs/:id/upload`) — `features/delivery/use-cases/
+accept-job-result.ts`.
+- `features/delivery/use-cases/generate-render-artifacts.ts` (`MediaProcessingService`)
+  generates a screenshot + thumbnail via `ffmpeg` and creates all three `JOB_ARTIFACT`
+  File rows, set atomically together with the `RENDERING -> RENDERED` transition.
+- `features/delivery/use-cases/deliver-job-result.ts` (the Delivery Orchestrator) drives
+  `RENDERED -> DELIVERING -> UPLOADED`/`ERROR`, records `DeliveryAttempt` rows, and sends
+  best-effort Telegram notifications.
 
-This is deliberate — both the Phase 6 and Phase 7 briefs explicitly exclude all of it.
-The state machine and `transitionJob` primitive, now reachable from a real authenticated
-Worker, are a correct, tested foundation for a future delivery phase to call into rather
-than designing it from scratch.
+Full detail, including idempotency/concurrency guarantees and the "no delivery needed"
+fast path, lives in [../integrations/youtube.md](../integrations/youtube.md) — this
+page's own state-machine diagram above did not change: Phase 9 is entirely a new set of
+callers into the existing `transitionJob`/`transitionJobRow` primitives, not a second Job
+lifecycle.
 
 ### Upload cap
 

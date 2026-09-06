@@ -71,5 +71,8 @@ export interface SafeTemplateDetail extends SafeTemplate {
   outputPattern: string;
   description: string | null;
   tags: string[];
+  /** Connected YouTube channel Jobs from this Template may deliver to (Phase 9,
+   * docs/domain/templates.md "Template ↔ Target") — `null` when none is configured. */
+  youtubeTargetId: string | null;
   assets: SafeTemplateAsset[];
 }

@@ -31,6 +31,10 @@ export default defineConfig({
       WORKER_API_KEY: "test-worker-api-key-not-a-real-secret",
       TELEGRAM_BOT_TOKEN: "123456:test-telegram-bot-token-not-real",
       TELEGRAM_WEBHOOK_SECRET: "test-telegram-webhook-secret-not-a-real-secret",
+      YOUTUBE_CLIENT_ID: "test-youtube-client-id.apps.googleusercontent.com",
+      YOUTUBE_CLIENT_SECRET: "test-youtube-client-secret-not-real",
+      YOUTUBE_TOKEN_ENCRYPTION_KEY:
+        "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
     },
   },
 });

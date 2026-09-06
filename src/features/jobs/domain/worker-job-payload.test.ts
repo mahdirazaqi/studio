@@ -30,6 +30,7 @@ const baseJob: SafeJobDetail = {
     description: null,
     tags: [],
     assetSlotDefinitions: [],
+    youtubeTarget: null,
   },
   assets: [
     {
@@ -90,6 +91,10 @@ const baseJob: SafeJobDetail = {
   renderedAt: null,
   deliveredAt: null,
   uploadedAt: null,
+  videoFileId: null,
+  screenshotFileId: null,
+  thumbnailFileId: null,
+  deliveryAttempts: [],
 };
 
 const buildFileUrl = (fileId: string) =>

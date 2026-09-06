@@ -367,7 +367,49 @@ durable delivery mechanism exists either, OD-40), `deliverToTelegram` as a Job f
 aspect-ratio validation, any Template-authoring surface via Telegram, a self-service
 phone-editing UI (Users-feature scope, not built), YouTube delivery, rendering.
 
-### Phase 9+ (not started)
+### Phase 9 — Media processing & delivery _(complete)_
+
+**Goal:** complete the render pipeline `RENDERED -> Delivery -> UPLOADED`, wiring
+Phase 4's `File.category = JOB_ARTIFACT` and Phase 6/7's `RENDERED`/`DELIVERING`/
+`UPLOADED` states to a real, tested pipeline.
+
+**Delivered:**
+
+- `POST /api/worker/v1/jobs/:id/result` (raw video bytes, not multipart) —
+  `accept-job-result.ts`, idempotent against duplicate/racing Worker requests via the
+  same atomic conditional `UPDATE` pattern every other `Job.state` writer uses.
+- `ffmpeg`-only media processing (`server/adapters/media/ffmpeg-adapter.ts`) — screenshot
+  extraction (legacy's `00:00:04.000`, with a real fallback for a render shorter than
+  that) + a resize filter for the thumbnail; ImageMagick deliberately not migrated
+  (ADR-0039). Creates the first real `JOB_ARTIFACT` Files.
+- A Delivery Orchestrator (`deliver-job-result.ts`) run **synchronously, awaited**
+  inside the Worker's own request — the direct fix for legacy's fire-and-forget delivery.
+  Telegram: best-effort notification (resolves the notification half of OD-40). YouTube:
+  a required delivery when configured, recorded as a durable `DeliveryAttempt`
+  (`PENDING` before the call), driving `RENDERED -> DELIVERING -> UPLOADED`/`ERROR`
+  through the unmodified Phase 6 state machine.
+- `YouTubeTarget` (department-scoped, resolves OD-36) — connected via a verified
+  refresh-token entry (not a full OAuth consent-screen flow, a deliberate scope
+  reduction, ADR-0039), tokens encrypted at rest (AES-256-GCM). `Template.youtubeTargetId`
+  wired end-to-end with server-side verification and Job-creation-time enforcement.
+- Delivery-only retry (`retryJobDelivery`, resolves OD-13) via a narrow `ERROR ->
+DELIVERING` escape hatch (`transitionJobRow` called directly — deliberately not added
+  to the general state graph, to keep `ERROR` terminal for `isTerminalState`'s other
+  caller).
+- `cleanupJobArtifacts` — a safe, idempotent, reference-aware video-deletion primitive,
+  not yet auto-triggered (OD-18 stays open).
+- A `JOB_ARTIFACT` File is now explicitly refused by the ordinary Gallery delete action
+  for every role, closing a gap the new artifact category would otherwise have left open.
+- Manually verified end-to-end against a real database and a real, generated test video
+  (via `ffmpeg` itself): the happy path, idempotent duplicate submission, a malicious/
+  bogus job id, and artifact cleanup (including its own idempotency) all passed.
+
+**Explicitly NOT in Phase 9:** a self-service OAuth consent-screen UI, per-YouTube-target
+upload quota, automatic/scheduled artifact cleanup, any background-job/queue
+infrastructure, configurable YouTube privacy/metadata, a dashboard in-app notification
+center, user/department management.
+
+### Phase 10+ (not started)
 
 Sequencing is not finalized, but a sensible order:
 
@@ -375,17 +417,15 @@ Sequencing is not finalized, but a sensible order:
    Phase 3's `authorize-user-management.ts` policy to real repositories/Server Actions/UI.
    This would also be the natural place to add a `User.phone`-editing surface, closing
    the gap Phase 8 deliberately left open (ADR-0036).
-2. Result/output upload (`JOB_ARTIFACT` creation, screenshot/thumbnail pipeline via safe
-   `execFile`/`spawn`, ADR-0015) + durable delivery scaffold — wires Phase 4's
-   `File.category = JOB_ARTIFACT` and Phase 6/7's `RENDERED`/`DELIVERING`/`UPLOADED`
-   states to a real pipeline. This is also the prerequisite for Telegram's deferred
-   outbound Job-lifecycle notifications (see Phase 8 above).
-3. YouTube delivery adapter.
-4. Cleanup jobs, retention, hardening, observability (resolves OD-18, OD-20's remaining
-   half, OD-31's requeue sweep, OD-41's rate limiting, a `TelegramWizardState` sweep to
-   complement Phase 8's lazy expiration).
+2. A self-service "Connect with Google" OAuth consent-screen flow for `YouTubeTarget`,
+   if the manual refresh-token entry Phase 9 shipped ever needs a friendlier UX.
+3. Background-work/queue infrastructure (OD-40's general question) — needed for
+   scheduled artifact cleanup (OD-18), a `TelegramWizardState` TTL sweep, and a
+   stuck-job (`CLAIMED`/`RENDERING`) requeue sweep (OD-31).
+4. Rate limiting (OD-41), a dashboard in-app notification center, per-YouTube-target
+   upload quota.
 
-Each Phase 9+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
+Each Phase 10+ slice: read the relevant `docs/`, resolve the blocking OPEN DECISIONs with
 the product owner, implement behind the layering rules, test (unit + the integration
 tests listed in `conventions.md` §9), update the docs.
 

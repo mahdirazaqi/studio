@@ -43,9 +43,13 @@ src/
 │   │   ├── layout.tsx            getCurrentUser() guard + redirect; SidebarProvider + AppSidebar + AppHeader
 │   │   ├── page.tsx              "/" overview — filtered to navigationForRole(user.role)
 │   │   ├── loading.tsx  error.tsx
-│   │   ├── jobs/                 → IMPLEMENTED (Phase 6) — list, `new/`, `[jobId]/`
-│   │   ├── templates/            → IMPLEMENTED (Phase 5) — list, `new/`, `[templateId]/`
+│   │   ├── jobs/                 → IMPLEMENTED (Phase 6/9) — list, `new/`, `[jobId]/`
+│   │   │                         (Phase 9: delivery status + retry-delivery UI)
+│   │   ├── templates/            → IMPLEMENTED (Phase 5/9) — list, `new/`, `[templateId]/`
+│   │   │                         (Phase 9: YouTube channel picker)
 │   │   ├── files/                → IMPLEMENTED (Phase 4) — real gallery page
+│   │   ├── youtube/               → IMPLEMENTED (Phase 9) — connect/list/disconnect
+│   │   │                         YouTubeTarget management page (MANAGER+)
 │   │   ├── users/                → role-gated (MANAGER+) PlaceholderPage or ForbiddenPage
 │   │   └── departments/          → role-gated (ADMIN) PlaceholderPage or ForbiddenPage
 │   └── api/
@@ -53,9 +57,10 @@ src/
 │       ├── files/[fileId]/route.ts   binary content delivery (Phase 4) — plain handler,
 │       │                             not defineRouteHandler; session- **or**
 │       │                             Worker-authenticated (Phase 7, see boundaries.md)
-│       ├── worker/v1/jobs/       IMPLEMENTED (Phase 7) — next/, [jobId]/,
-│       │                         [jobId]/{state,progress,duration}/ — every route a thin
-│       │                         defineRouteHandler over a Phase 6 use case;
+│       ├── worker/v1/jobs/       IMPLEMENTED (Phase 7/9) — next/, [jobId]/,
+│       │                         [jobId]/{state,progress,duration,result}/ — every route
+│       │                         a thin defineRouteHandler over a Phase 6/9 use case;
+│       │                         result/ (Phase 9) takes the raw video body, not JSON;
 │       │                         _lib/build-file-url.ts (route-local helper, excluded
 │       │                         from routing by its `_` prefix)
 │       └── telegram/webhook/route.ts IMPLEMENTED (Phase 8) — the Telegram webhook, a thin
@@ -117,6 +122,28 @@ src/
 │                                 exactly once; keyboards.ts, messages.ts — pure
 │                                 rendering; incoming.ts — downloads Telegram media into a
 │                                 transport-neutral shape)
+│   ├── youtube/                   IMPLEMENTED (Phase 9) — domain/ (youtube-target.ts),
+│   │                             repository/ (youtube-target-repository.ts — the only
+│   │                             module that selects token ciphertext), use-cases/
+│   │                             (connect-youtube-target, list-youtube-targets,
+│   │                             disconnect-youtube-target, get-valid-access-token,
+│   │                             resolve-target-department), schemas/, actions/,
+│   │                             components/ (youtube-targets-manager.tsx)
+│   └── delivery/                  IMPLEMENTED (Phase 9) — domain/ (tag-substitution.ts),
+│                                 repository/ (delivery-repository.ts — DeliveryAttempt
+│                                 writes only; reads come from jobs/repository's own
+│                                 SafeJobDetail.deliveryAttempts), use-cases/
+│                                 (accept-job-result, generate-render-artifacts,
+│                                 deliver-job-result, retry-job-delivery,
+│                                 cleanup-job-artifacts), infrastructure/telegram
+│                                 (telegram-delivery-adapter.ts — best-effort DM),
+│                                 infrastructure/youtube (youtube-delivery-adapter.ts —
+│                                 wraps features/youtube + server/adapters/youtube),
+│                                 schemas/, actions/ (retry-job-delivery.action.ts) — a
+│                                 second deliberate cross-feature-import exception
+│                                 alongside Telegram's (§3 below): delivery is inherently
+│                                 an orchestrator over Jobs/Files/Telegram/YouTube, not a
+│                                 competing implementation
 │
 │   (each remaining placeholder feature: README.md describing scope + boundaries; no impl yet)
 │
@@ -156,6 +183,12 @@ src/
 │   ├── adapters/telegram/       client.ts — getTelegramBot(), the singleton Telegraf
 │   │                             instance (globalThis-cached, ADR-0035, Phase 8); returns
 │   │                             null when TELEGRAM_BOT_TOKEN is unset (optional feature)
+│   ├── adapters/media/          ffmpeg-adapter.ts — the only module that shells out for
+│   │                             media processing (execFile, fixed argument array,
+│   │                             ADR-0039, Phase 9)
+│   ├── adapters/youtube/        youtube-client.ts — the only module that imports
+│   │                             googleapis (ADR-0039, Phase 9); token-cipher.ts —
+│   │                             AES-256-GCM encrypt/decrypt for YouTubeTarget tokens
 │   └── media/                   probe.ts — sniffContentType / probeImageDimensions / hashContent (Phase 4)
 │
 ├── types/                       cross-cutting client-safe types (Maybe, Paginated, Result)
@@ -208,6 +241,19 @@ File rules against their repositories directly) is exactly the duplicated-domain
 outcome CLAUDE.md §66 forbids. Do not use this as precedent for any other feature to import
 another's `use-cases` — Telegram's role as a second UI surface over the existing
 application layer is what justifies it, not a general relaxation of the rule above.
+
+**`delivery`'s cross-feature imports are the same pattern's second, narrower instance
+(Phase 9, ADR-0039):** `features/delivery/use-cases/*` imports
+`features/jobs/use-cases/transition-job` (the state-machine primitive, never a raw
+`db.job.update`), and reads/writes File bytes via `features/files/use-cases/
+read-file-buffer-for-delivery.ts` and `create-job-artifact.ts`, and a User's linked
+Telegram id via `features/telegram/repository/telegram-repository.ts`. This is correct
+for the identical reason Telegram's is: `delivery` **is** the orchestrator that ties
+Jobs/Files/Telegram/YouTube together after a render completes — it has no Job/File/
+Telegram domain logic of its own to duplicate. `features/youtube` is a normal feature
+(no cross-`use-cases` imports of its own) — `delivery` calls into
+`features/youtube/use-cases/get-valid-access-token.ts` the same way it calls into
+Telegram's repository, one directed edge, never the reverse.
 
 ## 4. Cross-cutting conventions
 

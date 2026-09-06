@@ -67,23 +67,23 @@ Every File has a `category`:
   crash.**
 - **Job Artifact auto-cleanup:**
 
-  > **Phase 6 status.** `category` exists in the schema (`GALLERY_ASSET` |
-  > `JOB_ARTIFACT`) and every current code path still only ever creates `GALLERY_ASSET` —
-  > Job **input** assets reference existing Gallery Files, but nothing yet produces a
-  > `JOB_ARTIFACT` (that needs a result-upload endpoint, Phase 7+). The deletion-safety
-  > hook is no longer a no-op, though: `assertNoActiveJobDependencies` is now a real
-  > check against active-state `JobAsset` references (ADR-0025's contract, made concrete
-  > by ADR-0028).
+  > **Phase 9 status.** `JOB_ARTIFACT` now has a real writer:
+  > `features/delivery/use-cases/generate-render-artifacts.ts` creates the rendered
+  > video, a screenshot, and a thumbnail as `JOB_ARTIFACT` Files on every accepted Worker
+  > result (docs/integrations/youtube.md "Rendered result flow"). The deletion-safety
+  > hook (`assertNoActiveJobDependencies`) is unaffected — a `JOB_ARTIFACT` video is
+  > referenced only by its own Job's `videoFileId`, never a `JobAsset` input, so it isn't
+  > subject to that check at all; its own dedicated cleanup primitive is
+  > `features/delivery/use-cases/cleanup-job-artifacts.ts` (ADR-0039) — safe, idempotent,
+  > and reference-aware (only deletes the video, only from `UPLOADED`, only after a
+  > required YouTube delivery actually succeeded).
 
-  > **`OPEN DECISION` — artifact retention.** When exactly are `JOB_ARTIFACT` files
-  > deleted? Options: immediately on `UPLOADED`; after a retention window (e.g. 30 days);
-  > keep the thumbnail forever but purge the full video after delivery; keep everything
-  > until storage pressure. Also: does successful YouTube delivery make the local video
-  > redundant? _Consequence of aggressive cleanup:_ low storage cost, but re-delivery /
-  > debugging a past render is impossible. _Consequence of long retention:_ storage
-  > grows. Recommended starting point: **purge the full rendered video after successful
-  > required delivery + a short grace window; keep screenshot + thumbnail longer;** exact
-  > windows configurable.
+  > **`OPEN DECISION` — artifact retention (OD-18) — primitive built, trigger still
+  > open.** The safe cleanup function above exists but is **not auto-triggered** — no
+  > grace period, no scheduler (OD-40's durable-work mechanism doesn't exist yet). When
+  > exactly it should run (immediately on `UPLOADED` / after a retention window / on
+  > storage pressure) remains undecided; screenshot + thumbnail are never deleted by this
+  > function regardless.
 
 ### Gallery behavior
 
@@ -116,28 +116,31 @@ file already exists.
 
 ### Fields — implemented (Phase 4; final schema: [`prisma/schema.prisma`](../../prisma/schema.prisma))
 
-| Field              | Notes                                                                                  |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| `id`               |                                                                                        |
-| `departmentId`     | **New in Studio.** Required. Scopes visibility.                                        |
-| `category`         | `GALLERY_ASSET` \| `JOB_ARTIFACT`. Only `GALLERY_ASSET` is ever created so far.        |
-| `uploadedByUserId` | **Actually populated** (legacy never set it). Null for system-generated artifacts.     |
-| `originalName`     | Client-supplied name, for display only.                                                |
-| `storedName`       | **System-generated** (a UUID + extension). Never derived from user input.              |
-| `storageKey`       | Location in the storage adapter. Never sent to the client — see architecture/files.md. |
-| `mimeType`         | Sniffed from the real bytes (`file-type`), not the client header/extension.            |
-| `kind`             | `IMAGE` \| `AUDIO` \| `VIDEO` — derived and validated from the sniffed type.           |
-| `sizeBytes`        | Enforced against a per-kind max (ADR-0026).                                            |
-| `contentHash`      | SHA-256. Advisory dedup lookup only (see above) — not yet a reuse/merge mechanism.     |
-| `width`, `height`  | Probed for `IMAGE` only (`image-size`). `null` for `AUDIO`/`VIDEO`.                    |
-| `createdAt`        |                                                                                        |
+| Field              | Notes                                                                                                            |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `id`               |                                                                                                                  |
+| `departmentId`     | **New in Studio.** Required. Scopes visibility.                                                                  |
+| `category`         | `GALLERY_ASSET` \| `JOB_ARTIFACT`. `JOB_ARTIFACT` implemented, Phase 9 (video/screenshot/thumbnail — see above). |
+| `uploadedByUserId` | **Actually populated** (legacy never set it). `null` for system-generated artifacts (every `JOB_ARTIFACT`).      |
+| `originalName`     | Client-supplied name, for display only.                                                                          |
+| `storedName`       | **System-generated** (a UUID + extension). Never derived from user input.                                        |
+| `storageKey`       | Location in the storage adapter. Never sent to the client — see architecture/files.md.                           |
+| `mimeType`         | Sniffed from the real bytes (`file-type`), not the client header/extension.                                      |
+| `kind`             | `IMAGE` \| `AUDIO` \| `VIDEO` — derived and validated from the sniffed type.                                     |
+| `sizeBytes`        | Enforced against a per-kind max (ADR-0026).                                                                      |
+| `contentHash`      | SHA-256. Advisory dedup lookup only (see above) — not yet a reuse/merge mechanism.                               |
+| `width`, `height`  | Probed for `IMAGE` only (`image-size`). `null` for `AUDIO`/`VIDEO`.                                              |
+| `createdAt`        |                                                                                                                  |
 
-**Not yet implemented:** `durationSeconds` (needs `ffprobe`, out of Phase 4's scope — see
-"Upload validation" below) and `ownerJobId` (no `JOB_ARTIFACT`-producing feature exists
-yet — see [jobs.md](jobs.md) "Completion & delivery"; added when a result-upload endpoint
-lands, per ADR-0025's contract in [../architecture/files.md](../architecture/files.md)).
-Job **input** references (the opposite direction — a `JobAsset` pointing at a Gallery
-File) are implemented, Phase 6 — see "Referencing from Jobs/Templates" below.
+**Not yet implemented:** `durationSeconds` (needs `ffprobe`, still out of scope — Job
+duration itself comes from the Worker's own report, `Job.durationSeconds`, not from
+probing the artifact File). **No `ownerJobId` column was added** — a `JOB_ARTIFACT`'s
+owning Job is found via `Job.videoFileId`/`screenshotFileId`/`thumbnailFileId` (the FK
+lives on `Job`, pointing at `File`, not the other way around) since each artifact belongs
+to exactly one Job and Studio already needed those columns on `Job` for the delivery
+pipeline itself (docs/integrations/youtube.md). Job **input** references (the opposite
+direction — a `JobAsset` pointing at a Gallery File) are implemented, Phase 6 — see
+"Referencing from Jobs/Templates" below.
 
 ### Upload validation
 
@@ -172,8 +175,9 @@ File) are implemented, Phase 6 — see "Referencing from Jobs/Templates" below.
   dependency checks (`assertNoActiveJobDependencies`, real since Phase 6 — blocks
   deletion while a Job in `QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING` still references
   the File) and for the "media still stored?" indicator. `ownerJobId` (the reverse
-  direction, for a `JOB_ARTIFACT` a Job produced) is not implemented yet — see "Fields"
-  above.
+  direction, for a `JOB_ARTIFACT` a Job produced) was not added as a column on `File` —
+  the equivalent FKs live on `Job` instead (`videoFileId`/`screenshotFileId`/
+  `thumbnailFileId`, implemented Phase 9) — see "Fields" above.
 - **Implemented, Phase 5:** a Template asset slot (`kind: IMAGE | AUDIO | VIDEO`) may
   store an optional **default** File reference (`TemplateAsset.defaultFileId`) —
   resolves the "template-level asset defaults" question (OD-11) as **yes**. Unlike a

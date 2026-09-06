@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   ListVideo,
   Users,
+  Youtube,
   type LucideIcon,
 } from "lucide-react";
 
@@ -80,6 +81,13 @@ export const navigation: NavGroup[] = [
         icon: Building2,
         minRole: "ADMIN",
         placeholder: true,
+      },
+      // Implemented, Phase 9 — connect/manage YouTube delivery channels.
+      {
+        label: "YouTube",
+        href: "/youtube",
+        icon: Youtube,
+        minRole: "MANAGER",
       },
     ],
   },

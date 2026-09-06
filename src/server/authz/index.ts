@@ -150,6 +150,11 @@ const CAPABILITY_POLICIES: Partial<Record<Capability, CapabilityPolicy>> = {
   // OD-04 (can USER author Templates) is open; MANAGER+ is the conservative
   // default until decided.
   "template:manage": { minRole: "MANAGER" },
+
+  // Connecting/disconnecting a YouTube channel is department-level
+  // infrastructure configuration, not a per-Job operation — MANAGER+, same
+  // floor as `template:manage` (Phase 9, docs/integrations/youtube.md).
+  "youtube:manage": { minRole: "MANAGER" },
 };
 
 export interface AuthorizeOptions {

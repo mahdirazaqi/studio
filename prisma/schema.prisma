@@ -2,13 +2,13 @@
 //
 // Phase 2: Department, User, Session. Phase 4: File. Phase 5: Template,
 // TemplateAsset. Phase 6: Job, JobAsset. Phase 8: User.phone/telegramUserId,
-// TelegramWizardState. See docs/data/database.md and
-// docs/architecture/decisions.md (ADR-0002, ADR-0005, ADR-0006, ADR-0007,
-// ADR-0008, ADR-0010, ADR-0011, ADR-0013, ADR-0014, ADR-0020, ADR-0024,
-// ADR-0025, ADR-0027, ADR-0028, ADR-0029, ADR-0030, ADR-0031, ADR-0035,
-// ADR-0036, ADR-0037, ADR-0038) for the decisions behind this shape. Do not
-// add speculative models here — later phases (YouTube delivery) add their own
-// schema when those features land.
+// TelegramWizardState. Phase 9: Job.videoFileId/screenshotFileId/
+// thumbnailFileId, DeliveryAttempt, YouTubeTarget, Template.youtubeTargetId.
+// See docs/data/database.md and docs/architecture/decisions.md (ADR-0002,
+// ADR-0005, ADR-0006, ADR-0007, ADR-0008, ADR-0010, ADR-0011, ADR-0013,
+// ADR-0014, ADR-0020, ADR-0024, ADR-0025, ADR-0027, ADR-0028, ADR-0029,
+// ADR-0030, ADR-0031, ADR-0035, ADR-0036, ADR-0037, ADR-0038, ADR-0039) for
+// the decisions behind this shape. Do not add speculative models here.
 
 generator client {
   provider = "prisma-client-js"
@@ -45,10 +45,11 @@ model Department {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users     User[]
-  files     File[]
-  templates Template[]
-  jobs      Job[]
+  users          User[]
+  files          File[]
+  templates      Template[]
+  jobs           Job[]
+  youtubeTargets YouTubeTarget[]
 
   @@map("departments")
 }
@@ -101,6 +102,8 @@ model User {
   createdJobs  Job[] @relation("JobCreatedBy")
   canceledJobs Job[] @relation("JobCanceledBy")
   retriedJobs  Job[] @relation("JobRetriedBy")
+
+  createdYoutubeTargets YouTubeTarget[] @relation("YoutubeTargetCreatedBy")
 
   /// Ephemeral Telegram conversation state (ADR-0014/ADR-0035) — not a
   /// historical record, unlike everything else this User relates to; see
@@ -215,6 +218,16 @@ model File {
   /// `assertNoActiveJobDependencies` check (Phase 6) has something to query.
   jobAssetReferences JobAsset[]
 
+  /// A rendered-result artifact (`category: JOB_ARTIFACT`) attached to the Job
+  /// it is the output of, and the screenshot/thumbnail derived from it
+  /// (Phase 9, ADR-0039). `onDelete: SetNull` on each Job FK — deleting an
+  /// artifact File (`cleanupJobArtifacts`) never breaks the historical Job
+  /// row; the Job's timeline/state/`DeliveryAttempt` rows already carry
+  /// everything the record needs (docs/data/historical-integrity.md).
+  videoForJobs      Job[] @relation("JobVideoFile")
+  screenshotForJobs Job[] @relation("JobScreenshotFile")
+  thumbnailForJobs  Job[] @relation("JobThumbnailFile")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -311,9 +324,24 @@ model Template {
   /// Used as the YouTube description on delivery (not implemented yet).
   description String?
   /// YouTube tag templates, with `{{layer}}` placeholders substituted by the
-  /// future delivery module — Templates only store the configuration
-  /// (Phase 5 brief §16), never perform substitution themselves.
+  /// delivery module (Phase 9, `features/delivery/domain/tag-substitution.ts`)
+  /// — Templates only store the configuration, never perform substitution
+  /// themselves.
   tags        String[] @default([])
+
+  /// Optional connected YouTube channel a Job from this Template may deliver
+  /// to (legacy `_channel`, Phase 9, ADR-0039/OD-36 resolved: department-
+  /// scoped). Verified server-side to belong to this Template's own
+  /// Department on every write (`features/templates/use-cases/
+  /// verify-youtube-target.ts`) — never trusted from the client. `onDelete:
+  /// SetNull` — disconnecting/removing a Target must not block editing or
+  /// viewing this Template; it only means a Job created afterward with
+  /// `deliverToYouTube: true` has nothing to deliver to (rejected at creation,
+  /// not silently ignored). A Job already created captures the Target's
+  /// identity in its own immutable `snapshot`, so this column changing later
+  /// never rewrites history.
+  youtubeTargetId String?
+  youtubeTarget   YouTubeTarget? @relation(fields: [youtubeTargetId], references: [id], onDelete: SetNull)
 
   assets TemplateAsset[]
   jobs   Job[]
@@ -518,7 +546,29 @@ model Job {
   deliveredAt DateTime?
   uploadedAt  DateTime?
 
-  assets JobAsset[]
+  /// The rendered result and its derived images (Phase 9, ADR-0039) —
+  /// `null` until a Worker successfully posts a result
+  /// (`POST /api/worker/v1/jobs/:id/result`). All three are `JOB_ARTIFACT`
+  /// Files, set atomically together with the `RENDERING -> RENDERED`
+  /// transition (`features/delivery/use-cases/accept-job-result.ts`).
+  /// `onDelete: SetNull` — `cleanupJobArtifacts` may hard-delete the video
+  /// File once delivery no longer needs it (docs/data/lifecycle-rules.md
+  /// "Job Artifact retention", OD-18 — trigger/grace period still open);
+  /// screenshot/thumbnail are small and kept. Never re-read from a live File
+  /// row for anything historical — same ADR-0025 contract as `JobAsset`.
+  videoFileId String?
+  videoFile   File?   @relation("JobVideoFile", fields: [videoFileId], references: [id], onDelete: SetNull)
+
+  screenshotFileId String?
+  screenshotFile   File?   @relation("JobScreenshotFile", fields: [screenshotFileId], references: [id], onDelete: SetNull)
+
+  thumbnailFileId String?
+  thumbnailFile   File?   @relation("JobThumbnailFile", fields: [thumbnailFileId], references: [id], onDelete: SetNull)
+
+  assets           JobAsset[]
+  /// One row per delivery attempt per provider (Phase 9, ADR-0039) — see
+  /// `DeliveryAttempt`'s own doc comment.
+  deliveryAttempts DeliveryAttempt[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -657,4 +707,127 @@ model TelegramWizardState {
   updatedAt DateTime @updatedAt
 
   @@map("telegram_wizard_states")
+}
+
+/// A connected YouTube channel a Department's Templates may deliver rendered
+/// Jobs to (legacy `Channel`, Phase 9, ADR-0039 — resolves OD-36 as
+/// department-scoped, matching the rest of Studio's tenancy model; ADMIN may
+/// still manage/select any Department's Target).
+///
+/// **Connection model is deliberately simplified from a full OAuth
+/// consent-screen flow** (ADR-0039): an operator obtains a refresh token for
+/// the target channel out-of-band (Google OAuth Playground or an equivalent
+/// one-time flow) and registers it here — the same "credential obtained
+/// elsewhere, entered once" trust model `WORKER_API_KEY` already uses. Studio
+/// exchanges it for access tokens itself from then on
+/// (`features/youtube/infrastructure/youtube-client.ts`). A self-service
+/// "Connect with Google" consent screen is a real product feature, not a
+/// delivery-pipeline requirement — left as a documented future enhancement,
+/// not built this phase (see docs/integrations/youtube.md).
+enum YouTubeTargetStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+model YouTubeTarget {
+  id String @id @default(cuid())
+
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  /// Display name only (e.g. "Main Channel") — never used to build a request.
+  name             String
+  youtubeChannelId String
+
+  /// AES-256-GCM ciphertext (`iv:authTag:ciphertext`, base64 — see
+  /// `@/server/adapters/youtube/token-cipher.ts`), keyed by
+  /// `YOUTUBE_TOKEN_ENCRYPTION_KEY`. Never plaintext at rest, never logged,
+  /// never returned to any client — the one field this whole model exists to
+  /// protect (docs/security/security.md).
+  encryptedRefreshToken String
+
+  /// Short-lived access token cache, refreshed on demand
+  /// (`getValidAccessToken`) — also encrypted; both are `null` until first
+  /// used. Caching this only saves a round trip to Google; the refresh token
+  /// above is the actual credential of record.
+  encryptedAccessToken String?
+  accessTokenExpiresAt DateTime?
+
+  status         YouTubeTargetStatus @default(CONNECTED)
+  /// Human-readable, safe-to-display reason the last refresh/upload failed
+  /// (e.g. "refresh token was revoked") — never a raw Google API error body.
+  lastErrorReason String?
+
+  createdByUserId String
+  createdBy       User   @relation("YoutubeTargetCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  templates Template[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One row per real YouTube channel per Department — reconnecting the same
+  // channel updates the existing row rather than creating a duplicate.
+  @@unique([departmentId, youtubeChannelId])
+  @@index([departmentId])
+  @@map("youtube_targets")
+}
+
+/// One provider's outcome for one Job (Phase 9, ADR-0039, resolves the
+/// delivery-outcome half of OD-22). Durable delivery *intent*: a `PENDING`
+/// row is committed **before** the external API call runs, so a process
+/// crash mid-delivery leaves an accurate, retryable record rather than
+/// silently losing the attempt (docs/integrations/youtube.md "Delivery
+/// reliability"). Never updated in place across attempts — a retry inserts a
+/// new row with the next `attemptNumber`, so the full delivery history for a
+/// Job/provider pair is always reconstructable, mirroring how `Job` itself
+/// never overwrites its own history.
+enum DeliveryProvider {
+  TELEGRAM
+  YOUTUBE
+}
+
+enum DeliveryStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model DeliveryAttempt {
+  id String @id @default(cuid())
+
+  jobId String
+  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  provider DeliveryProvider
+  status   DeliveryStatus   @default(PENDING)
+
+  /// 1 for the first attempt at this provider for this Job; incremented by
+  /// `retryJobDelivery`. The `(jobId, provider, attemptNumber)` unique
+  /// constraint is what makes a concurrent duplicate retry click fail with a
+  /// clean conflict instead of creating two rows for the same attempt
+  /// (docs/integrations/youtube.md "Delivery idempotency").
+  attemptNumber Int @default(1)
+
+  /// The provider's own identifier for a succeeded delivery (a YouTube video
+  /// id, a Telegram message id) — the durable evidence a retry checks before
+  /// ever calling the provider again (never re-upload an
+  /// already-`SUCCEEDED` delivery).
+  providerRef String?
+
+  /// Short, safe, human-readable failure summary — never a raw provider error
+  /// body/stack trace (docs/security/security.md).
+  failureReason String?
+
+  /// `null` for the automatic attempt Studio makes right after `RENDERED`;
+  /// set to the actor who triggered a manual "retry delivery" action.
+  triggeredByUserId String?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@unique([jobId, provider, attemptNumber])
+  @@index([jobId, provider])
+  @@map("delivery_attempts")
 }

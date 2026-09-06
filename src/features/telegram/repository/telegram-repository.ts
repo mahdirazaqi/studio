@@ -51,6 +51,25 @@ export async function findUserByTelegramId(
 }
 
 /**
+ * The reverse lookup of `findUserByTelegramId` — given a Studio User id,
+ * their linked Telegram numeric id, or `null` if unlinked or (deliberately)
+ * regardless of `status`: a `DISABLED` user's own historical Jobs still
+ * exist and a delivery notification is best-effort/non-authorizing (see
+ * `features/delivery/infrastructure/telegram/telegram-delivery-adapter.ts`),
+ * so there is no reason to hide the id from *this* query the way
+ * `findUserByTelegramId` must for an *inbound*, action-authorizing lookup.
+ */
+export async function findTelegramUserIdForUser(
+  userId: string,
+): Promise<string | null> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { telegramUserId: true },
+  });
+  return user?.telegramUserId ?? null;
+}
+
+/**
  * Match an incoming "share contact" phone against `User.phone`
  * (docs/domain/users.md "Telegram linkage"). `phone` is unique at the
  * database level, so this can find at most one row — the "ambiguous match"

@@ -17,9 +17,10 @@ Legacy: hard-coded **global** cap of **3 per UTC day**, all users.
 
 **Resolved, Phase 6:** kept **global**, UTC-day, count-based, exactly as legacy —
 `JOB_UPLOAD_DAILY_CAP` (default 3, configurable via env), reject at creation with a clear
-`conflict` error. **Still open:** whether a future per-YouTube-target scope should replace
-the global cap once a `YouTubeTarget` model exists — no such model exists yet to scope
-against, so this half of the original question is deferred, not answered either way.
+`conflict` error. **Still open, Phase 9 update:** a `YouTubeTarget` model now exists
+(ADR-0039), but no per-target cap was built alongside it — no concrete quota-per-channel
+requirement was given, so the global cap remains unchanged and this half of the question
+is still deferred, not answered either way.
 
 ### OD-02 — Retry eligibility window — ✅ RESOLVED (ADR-0029)
 
@@ -158,24 +159,34 @@ made N jobs) and avoids speculative schema for a "view an album as a unit" UI no
 asked for yet. Album's N Jobs are traceable as a batch only by having been created via the
 same confirmation (same template, close timestamps), not by a schema relationship.
 
-### OD-13 — Delivery-only retry
+### OD-13 — Delivery-only retry — ✅ RESOLVED for YouTube, Phase 9 (ADR-0039)
 
 _Where:_ [../integrations/youtube.md](../integrations/youtube.md).
-If YouTube/Telegram delivery fails but the render output exists, is there a "retry
-delivery only" action, or is the only path retry = new Job (re-render)?
 
-- _Delivery-only retry:_ avoids a wasteful re-render.
-- _Only re-render retry:_ one code path; but re-renders unnecessarily.
+**Resolved, Phase 9: delivery-only retry, not re-render.** `retryJobDelivery`
+(`features/delivery/use-cases/retry-job-delivery.ts`) reuses the already-rendered
+`videoFileId`/`screenshotFileId` and re-runs only the YouTube upload — the Job is never
+re-created and never re-rendered. Only reachable from `ERROR` with a video still present
+and no already-`SUCCEEDED` `DeliveryAttempt` for that provider. Telegram has no
+equivalent retry action since its own delivery is a best-effort notification, not a
+`DeliveryAttempt` (ADR-0039) — there is nothing durable to retry.
 
 ### OD-14 — Aspect-ratio tolerance value
 
 _Where:_ [../domain/templates.md](../domain/templates.md).
 Exact epsilon for "close enough" (e.g. ±1%, ±2%).
 
-### OD-15 — `deliverToTelegram` default
+### OD-15 — `deliverToTelegram` default — ✅ RESOLVED, Phase 9 (ADR-0039)
 
 _Where:_ [../domain/jobs.md](../domain/jobs.md).
-Default on (DM the creator the file if they're linked) or opt-in?
+
+**Resolved, Phase 9: no flag at all — automatic, best-effort, matches legacy exactly.**
+`Job` still has no `deliverToTelegram` column: a linked creator is notified on
+`RENDERED`/`UPLOADED`/`ERROR` unconditionally (`deliver-job-result.ts`), with no per-Job
+opt-out, exactly like legacy's unconditional `sendTelegramMessage` calls. A failure to
+notify never blocks or fails the Job — it is a notification, not a delivery. Adding an
+opt-out is a real, undecided product question (not addressed by this resolution) — revisit
+if a requirement calls for one.
 
 ---
 
@@ -200,7 +211,7 @@ _Where:_ [../data/historical-integrity.md](../data/historical-integrity.md).
 - _Metadata only:_ cheap; old Jobs show "media no longer stored", can't re-render.
   **Recommendation:** metadata only by default; optional per-Job "archive/pin bytes".
 
-### OD-18 — Job Artifact retention specifics
+### OD-18 — Job Artifact retention specifics — cleanup primitive ✅ built, Phase 9; trigger/grace period still open
 
 _Where:_ [../data/lifecycle-rules.md](../data/lifecycle-rules.md), [../domain/files.md](../domain/files.md).
 When exactly is the rendered video purged (immediately on `UPLOADED` / after N days /
@@ -208,6 +219,13 @@ after successful delivery + grace)? Keep screenshot+thumbnail longer? Grace peri
 `ERROR`/`CANCELED` jobs' artifacts?
 **Recommendation:** purge video after successful required delivery + 7-day grace; keep
 screenshot + thumbnail 90 days; all configurable.
+
+**Phase 9 status:** the safe, idempotent, reference-aware primitive now exists
+(`features/delivery/use-cases/cleanup-job-artifacts.ts`, ADR-0039) — it deletes only the
+video (never screenshot/thumbnail), only from `UPLOADED`, only after a required YouTube
+delivery actually succeeded. **Not auto-triggered** — no grace period, no scheduler. This
+OD stays open for exactly that: when/how something calls this function (OD-40's durable-
+work mechanism is the natural trigger once it exists).
 
 ### OD-19 — One-off Telegram/upload inputs: artifact or promotable? — Telegram's input side ✅ RESOLVED (ADR-0038)
 
@@ -353,11 +371,16 @@ _Where:_ [../data/lifecycle-rules.md](../data/lifecycle-rules.md), [../integrati
 Expiration is checked lazily on next read, not by a scheduled sweep (OD-40's durable-work
 mechanism doesn't exist yet).
 
-### OD-36 — YouTubeTarget scoping
+### OD-36 — YouTubeTarget scoping — ✅ RESOLVED, Phase 9 (ADR-0039)
 
 _Where:_ [../integrations/youtube.md](../integrations/youtube.md).
-Department-scoped vs global (ADMIN-managed).
-**Recommendation:** department-scoped, ADMIN may also manage all.
+
+**Resolved, Phase 9: department-scoped**, exactly per this OD's own recommendation.
+`YouTubeTarget.departmentId` is required; `youtube:manage` is `MANAGER+` within their own
+department, ADMIN may connect/manage a Target for any department. **Also resolved
+alongside this:** the connection mechanism itself is a verified refresh-token entry, not
+a self-service OAuth consent-screen flow — see ADR-0039 point 5 for why, and for the
+documented future-enhancement status of a real "Connect with Google" UI.
 
 ### OD-37 — YouTube video privacy / metadata configurability
 
@@ -366,11 +389,22 @@ Keep hard-coded `private`, or expose privacy/scheduling/category per Template or
 **Recommendation:** default `private`, allow `unlisted`/`public` at Template level; defer
 scheduling.
 
-### OD-38 — Media processing location
+**Phase 9 status: still open, unresolved as recommended.** `uploadVideo`
+(`server/adapters/youtube/youtube-client.ts`) hard-codes `privacyStatus: 'private'` and
+`madeForKids: false`, matching legacy exactly — no per-Template/per-Job override was
+built. Revisit if a real publishing-workflow requirement appears.
+
+### OD-38 — Media processing location — ✅ RESOLVED, Phase 9 (ADR-0039)
 
 _Where:_ [../architecture/tech-stack.md](../architecture/tech-stack.md).
-Screenshot/thumbnail generation (and any input normalization) in-process, in a queue
-worker, or delegated to the Render Worker.
+
+**Resolved, Phase 9: in-process, synchronously, inside the Worker's own
+`POST .../result` request** (`features/delivery/use-cases/generate-render-artifacts.ts`,
+`server/adapters/media/ffmpeg-adapter.ts`) — not a queue worker, not delegated to the
+Render Worker. Matches the "no background-work mechanism exists yet" constraint (OD-40)
+and keeps the Worker's own request the single synchronous pipeline from "result received"
+through "delivery attempted." Revisit if render-result volume ever makes this request's
+latency (media processing + a full YouTube upload) a real operational problem.
 
 ### OD-39 — Is input normalization (legacy ffmpeg/convert) needed at all?
 
@@ -378,17 +412,29 @@ _Where:_ [../domain/files.md](../domain/files.md).
 Legacy transcoded on upload; the `convert` step looked like a no-op and its intent is
 unknown. Confirm whether Studio needs any on-upload processing.
 
-### OD-40 — Background-work / durable-job mechanism
+### OD-40 — Background-work / durable-job mechanism — Telegram Job-lifecycle notifications ✅ resolved, Phase 9; the general mechanism still open
 
 _Where:_ ADR-0016, [../architecture/data-flow.md](../architecture/data-flow.md), [../data/lifecycle-rules.md](../data/lifecycle-rules.md).
 Transactional outbox + poller / a real queue (BullMQ, pg-boss, …) / scheduled tasks.
 Needed for: durable delivery, artifact cleanup, wizard TTL sweep, stuck-job recovery, and
 (Phase 8) Telegram Job-lifecycle notifications (DM the creator on `RENDERED`/`UPLOADED`/
-`ERROR`) — not implemented this phase for exactly this reason: nothing yet drives a Job
-into those states in the first place (no real Worker/render pipeline is running), so there
-is no live trigger point to notify from, and no durable delivery mechanism to hand a
-notification attempt to if there were. See [../integrations/telegram.md](../integrations/telegram.md)
-"Notifications".
+`ERROR`) — not implemented in Phase 8 for exactly this reason: nothing yet drove a Job
+into those states in the first place (no real Worker/render pipeline was running), so
+there was no live trigger point to notify from.
+
+**Resolved for Telegram notifications, Phase 9 (ADR-0039):** the trigger point now exists
+— `deliver-job-result.ts` calls `sendJobNotification` on `RENDERED`/`UPLOADED`/`ERROR`,
+synchronously, best-effort, no queue involved (a failed DM is logged, never retried, never
+blocks the Job — matches legacy exactly). This resolves the "no trigger point" half of
+this OD for Telegram specifically; it does **not** resolve the general
+background-work-mechanism question. **Durable delivery** (YouTube) also did not need a
+queue: `DeliveryAttempt`'s `PENDING`-before-the-call write pattern gives the required
+"intent is durable, recoverable after a crash" guarantee synchronously, inside the
+triggering request, per ADR-0039 point 3 — a queue would add infrastructure this need
+doesn't require. **Still open, unaffected:** artifact cleanup scheduling (OD-18), Telegram
+wizard TTL sweep, stuck-job recovery (OD-31) — none of these have Phase 9's "the
+triggering event already happens inside an existing request" property, so they still need
+an actual scheduler/mechanism whenever they're built.
 
 ### OD-41 — Rate-limiting layer
 

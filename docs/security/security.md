@@ -109,13 +109,27 @@ Binding security requirements for Studio. Many are direct responses to
 - The local storage adapter's key resolution refuses to resolve outside its configured
   root, as defense in depth, even though `key` is always system-generated and never
   derived from user input (Security Requirements §8).
+- **Implemented, Phase 9:** the Worker's rendered-result upload
+  (`POST /api/worker/v1/jobs/:id/result`) goes through the identical content-sniffing/
+  size-limit rules as an ordinary Gallery upload (`features/files/use-cases/
+create-job-artifact.ts` reuses `sniffContentType`/`resolveFileKind` unmodified) — the
+  Worker's own request `Content-Type` header, if any, is never trusted. A `JOB_ARTIFACT`
+  File is never Gallery-deletable by any role, including ADMIN
+  (`assertCanDeleteFile`) — it has its own invariant-checked deletion path
+  (`features/delivery/use-cases/cleanup-job-artifacts.ts`).
 
 ## 7. Shell command injection
 
 - **Studio never calls `child_process.exec` with a constructed command string.**
-- Media tooling (ffmpeg, ImageMagick) is invoked via `execFile` / `spawn` with an
-  **argument array**, validated absolute input paths, an explicit timeout, and bounded
-  CPU/memory where possible (ADR-0015).
+- **Implemented, Phase 9** (`server/adapters/media/ffmpeg-adapter.ts`, ADR-0039): the
+  only media tooling Studio shells out to is `ffmpeg`, invoked via `promisify(execFile)`
+  with a fixed **argument array**, an explicit timeout (60s) and bounded output buffer —
+  never `shell: true`. Every path argument is an internally-generated temp-file path
+  (`mkdtemp`), never a client-supplied filename. Verified with a unit test that asserts
+  the actual call shape (array args, no shell option) and with a real, generated test
+  video during manual verification. **ImageMagick was deliberately not introduced** —
+  `ffmpeg`'s own `scale` filter covers the one resize need legacy used `convert` for (see
+  docs/integrations/youtube.md "Media processing").
 - Any future need to shell out goes through one reviewed helper that **forbids** string
   commands by type.
 - Legacy built ``exec(`convert ${filepath} ...`)`` with a user-influenced `filepath`
@@ -139,7 +153,13 @@ Binding security requirements for Studio. Many are direct responses to
   needing a secret to detect.
 - `.env` files are git-ignored; only `.env.example` with **placeholder** values is
   committed.
-- OAuth tokens for YouTube targets are **encrypted at rest**.
+- **Implemented, Phase 9 (ADR-0039):** `YouTubeTarget` refresh/access tokens are
+  **encrypted at rest** with AES-256-GCM (`server/adapters/youtube/token-cipher.ts`,
+  `YOUTUBE_TOKEN_ENCRYPTION_KEY`) — a fresh random IV per encryption, verified round-trip
+  and tamper-detection (GCM auth tag) by unit test. Never plaintext in the database,
+  never logged, never returned to any client — the repository layer
+  (`features/youtube/repository/youtube-target-repository.ts`) selects the ciphertext
+  columns only in the two functions that legitimately need them.
 - **Implemented, Phase 7 (ADR-0032):** the Worker API key (`WORKER_API_KEY`) lives only
   in environment configuration — **not** in a database table, so "hashed at rest" does
   not apply the way it would to a stored credential; the environment itself is the trust

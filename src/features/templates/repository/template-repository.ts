@@ -61,6 +61,7 @@ const SAFE_TEMPLATE_DETAIL_SELECT = {
   outputPattern: true,
   description: true,
   tags: true,
+  youtubeTargetId: true,
   assets: {
     select: {
       id: true,
@@ -89,6 +90,7 @@ function toSafeTemplateDetail(row: SafeTemplateDetailRow): SafeTemplateDetail {
     outputPattern: row.outputPattern,
     description: row.description,
     tags: row.tags,
+    youtubeTargetId: row.youtubeTargetId,
     assets: row.assets.map((asset): SafeTemplateAsset => ({
       id: asset.id,
       key: asset.key,
@@ -121,6 +123,7 @@ export interface CreateTemplateData {
   outputPattern: string;
   description: string | null;
   tags: string[];
+  youtubeTargetId: string | null;
   assets: TemplateAssetData[];
 }
 
@@ -150,6 +153,7 @@ export async function createTemplateWithAssets(
         outputPattern: data.outputPattern,
         description: data.description,
         tags: data.tags,
+        youtubeTargetId: data.youtubeTargetId,
         assets: {
           create: data.assets.map((asset, index) => ({
             key: asset.key,
@@ -191,6 +195,7 @@ export interface UpdateTemplateData {
   outputPattern: string;
   description: string | null;
   tags: string[];
+  youtubeTargetId: string | null;
   assets: TemplateAssetData[];
 }
 
@@ -219,6 +224,7 @@ export async function updateTemplateWithAssets(
           outputPattern: data.outputPattern,
           description: data.description,
           tags: data.tags,
+          youtubeTargetId: data.youtubeTargetId,
           assets: {
             create: data.assets.map((asset, index) => ({
               key: asset.key,

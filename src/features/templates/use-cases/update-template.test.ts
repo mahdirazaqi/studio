@@ -47,6 +47,7 @@ const template = (
   outputPattern: "out/%s.mp4",
   description: null,
   tags: [],
+  youtubeTargetId: null,
   assets: [],
   ...overrides,
 });
@@ -62,6 +63,7 @@ const input = (
   outputPattern: "out/%s.mp4",
   description: undefined,
   tags: [],
+  youtubeTargetId: undefined,
   assets: [],
   ...overrides,
 });

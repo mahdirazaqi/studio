@@ -30,6 +30,7 @@ const snapshot = {
   description: null,
   tags: [],
   assetSlotDefinitions: [],
+  youtubeTarget: null,
 };
 
 const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
@@ -79,6 +80,10 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   renderedAt: null,
   deliveredAt: null,
   uploadedAt: null,
+  videoFileId: null,
+  screenshotFileId: null,
+  thumbnailFileId: null,
+  deliveryAttempts: [],
   ...overrides,
 });
 

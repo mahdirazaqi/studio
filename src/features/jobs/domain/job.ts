@@ -60,6 +60,26 @@ export interface SafeJob {
   updatedAt: Date;
 }
 
+export const DELIVERY_PROVIDERS = ["TELEGRAM", "YOUTUBE"] as const;
+export type DeliveryProvider = (typeof DELIVERY_PROVIDERS)[number];
+
+export const DELIVERY_STATUSES = ["PENDING", "SUCCEEDED", "FAILED"] as const;
+export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
+
+/** One row of `docs/integrations/youtube.md`/`docs/integrations/telegram.md`
+ * "Delivery" history for a Job (Phase 9). */
+export interface SafeDeliveryAttempt {
+  id: string;
+  provider: DeliveryProvider;
+  status: DeliveryStatus;
+  attemptNumber: number;
+  providerRef: string | null;
+  failureReason: string | null;
+  triggeredByUserId: string | null;
+  startedAt: Date;
+  completedAt: Date | null;
+}
+
 /** Detail-view shape — full snapshot, assets, timeline, retry/cancel metadata. */
 export interface SafeJobDetail extends SafeJob {
   snapshot: JobSnapshot;
@@ -76,6 +96,13 @@ export interface SafeJobDetail extends SafeJob {
   renderedAt: Date | null;
   deliveredAt: Date | null;
   uploadedAt: Date | null;
+  /** The rendered result and its derived images (Phase 9) — `null` until a
+   * Worker successfully posts a result. */
+  videoFileId: string | null;
+  screenshotFileId: string | null;
+  thumbnailFileId: string | null;
+  /** Newest first. Empty until the first automatic post-render delivery attempt. */
+  deliveryAttempts: SafeDeliveryAttempt[];
 }
 
 /**
@@ -91,6 +118,17 @@ export interface JobSnapshotAssetSlot {
   imageRatio: "PORTRAIT_9_16" | "LANDSCAPE_16_9" | "SQUARE" | "ANY" | null;
 }
 
+/** Identity of the YouTube Target a Job was configured to deliver to, captured
+ * at creation time (Phase 9) — never re-resolved from the live `Template`/
+ * `YouTubeTarget` rows, so a later disconnect/rename never rewrites a
+ * historical Job's own story. `null` when the Job was created without
+ * `deliverToYouTube`, or its Template had no Target configured. */
+export interface JobSnapshotYouTubeTarget {
+  id: string;
+  name: string;
+  youtubeChannelId: string;
+}
+
 export interface JobSnapshot {
   templateId: string;
   templateName: string;
@@ -101,4 +139,5 @@ export interface JobSnapshot {
   description: string | null;
   tags: string[];
   assetSlotDefinitions: JobSnapshotAssetSlot[];
+  youtubeTarget: JobSnapshotYouTubeTarget | null;
 }

@@ -93,15 +93,19 @@ If (1) or (2) fails, deletion is **blocked** with a clear reason.
 - Eligible for **automatic** physical deletion after the owning Job reaches a completed
   state (`UPLOADED`; possibly `CANCELED`/`ERROR` after a grace period).
 - The Job row keeps `videoFileId`/`screenshotFileId`/`thumbnailFileId` — these become
-  `null` (or a tombstone flag) after cleanup; the Job stays coherent.
+  `null` after cleanup; the Job stays coherent.
 
-> **Phase 6 status:** none of this exists yet. `Job` has no
-> `videoFileId`/`screenshotFileId`/`thumbnailFileId` columns, and nothing creates a
-> `JOB_ARTIFACT` File — Phase 6 explicitly excludes the result-upload endpoint and any
-> output-file processing (Phase 6 brief §53). These columns are added, and this section
-> becomes real, when that lands (Phase 7+).
+> **Phase 9 status: implemented, but not auto-triggered.** `Job.videoFileId`/
+> `screenshotFileId`/`thumbnailFileId` are real columns (ADR-0039), set atomically with
+> the `RENDERING -> RENDERED` transition
+> (`features/delivery/use-cases/accept-job-result.ts`). `cleanupJobArtifacts`
+> (`features/delivery/use-cases/cleanup-job-artifacts.ts`) is the safe, idempotent,
+> reference-aware deletion function this section describes — it deletes only the video
+> (never screenshot/thumbnail), only from `UPLOADED`, only after a required YouTube
+> delivery actually succeeded, and clears `videoFileId` to `null` on success. **Nothing
+> calls it automatically yet** — see the still-open retention question immediately below.
 
-> **`OPEN DECISION` — Job Artifact retention specifics.**
+> **`OPEN DECISION` — Job Artifact retention specifics (OD-18).**
 >
 > - Delete the full rendered video immediately after successful required delivery, or
 >   after N days?
@@ -134,10 +138,12 @@ If (1) or (2) fails, deletion is **blocked** with a clear reason.
 
 ## Cleanup jobs
 
-Studio needs scheduled maintenance tasks (mechanism = the background-work OPEN DECISION):
+Studio needs scheduled maintenance tasks (mechanism = the background-work OPEN DECISION,
+OD-40):
 
 - Expire stale `TelegramWizardState` rows.
-- Purge eligible `JOB_ARTIFACT` files per the retention policy.
+- Purge eligible `JOB_ARTIFACT` files per the retention policy — the deletion primitive
+  itself exists (`cleanupJobArtifacts`, Phase 9), only the scheduling/trigger is missing.
 - (Optionally) requeue/error out Jobs stuck in `CLAIMED`/`RENDERING` past a Worker
   timeout.
 

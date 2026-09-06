@@ -102,6 +102,15 @@ describe("assertCanDeleteFile", () => {
       ),
     ).not.toThrow();
   });
+
+  it("refuses to delete a JOB_ARTIFACT even for ADMIN (Phase 9 — its own cleanup path only)", () => {
+    expect(() =>
+      assertCanDeleteFile(
+        actor({ role: "ADMIN" }),
+        file({ category: "JOB_ARTIFACT", uploadedByUserId: null }),
+      ),
+    ).toThrow(forbidden());
+  });
 });
 
 describe("assertNoActiveJobDependencies", () => {
@@ -147,5 +156,14 @@ describe("canDeleteFile (UI predicate)", () => {
     expect(canDeleteFile(actor(), file({ departmentId: "dept-b" }))).toBe(
       false,
     );
+  });
+
+  it("never offers deletion for a JOB_ARTIFACT, even to ADMIN", () => {
+    expect(
+      canDeleteFile(
+        actor({ role: "ADMIN" }),
+        file({ category: "JOB_ARTIFACT", uploadedByUserId: null }),
+      ),
+    ).toBe(false);
   });
 });

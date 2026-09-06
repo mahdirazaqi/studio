@@ -18,22 +18,22 @@ carried over.
 
 ## 1. Entities
 
-| Entity                                  | Deletion                                    | Department-scoped                  | Notes                                                                                                                                                                                            |
-| --------------------------------------- | ------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Department` **(implemented)**          | Archive only (deletion = OPEN DECISION)     | — (is the scope)                   | Tenancy boundary. `id`, `name`, timestamps only so far.                                                                                                                                          |
-| `User` **(implemented)**                | Never (status `ACTIVE`/`DISABLED`)          | yes (`departmentId`)               | Referenced forever by Jobs/Templates/Files/audit. `phone`/`telegramUserId` **implemented, Phase 8**; disable-audit fields (`disabledAt`/`disabledByUserId`) not added yet (see domain/users.md). |
-| `Session` **(implemented)**             | Row deleted on logout/expiry                | via linked User                    | Auth session (ADR-0020) — not in the original Phase 0 model; added for login.                                                                                                                    |
-| `Template` **(implemented)**            | Soft (`status`/`deletedAt`, independent)    | yes                                | Render recipe + asset slots. Row kept forever. `youtubeTargetId` not added yet.                                                                                                                  |
-| `TemplateAsset` **(implemented)**       | With its Template (soft)                    | via Template                       | Slot definitions — child rows (resolves OD-22's Template half); replaced wholesale on edit.                                                                                                      |
-| `Job` **(implemented)**                 | **Never**                                   | yes (derived from Template)        | Permanent record. `snapshot` (JSONB) + `JobAsset` rows together are the immutable creation-time record — see ADR-0028.                                                                           |
-| `JobAsset` **(implemented)**            | With its Job (never)                        | via Job                            | Resolved per-slot values — child rows (resolves OD-22's Job half), each with its own copied File metadata.                                                                                       |
-| `File` **(implemented)**                | Hard delete when safe                       | yes                                | `GALLERY_ASSET` or `JOB_ARTIFACT` (only the former is created so far). `ownerJobId`/`durationSeconds` not added yet (see domain/files.md).                                                       |
-| `TelegramWizardState` **(implemented)** | Lazily expired by TTL (no active sweep yet) | via linked User (`userId @unique`) | Durable Telegram conversation state (ADR-0014, ADR-0037). One row per Telegram user, at most one per Studio User.                                                                                |
-| `AuditEntry`                            | Never (retention = OPEN DECISION)           | yes                                | Who did what, when.                                                                                                                                                                              |
-| `WorkerCredential`                      | Revoke (status)                             | —                                  | Service credential(s) for the Worker (mechanism = OPEN DECISION).                                                                                                                                |
-| `YouTubeTarget`                         | Revoke / disconnect                         | OPEN DECISION (dept-scoped?)       | Connected YouTube channel + OAuth tokens. Legacy `Channel`.                                                                                                                                      |
-| `DeliveryOutcome`                       | With its Job (never)                        | via Job                            | Per-target delivery result. Rows or JSON on the Job.                                                                                                                                             |
-| `UploadQuotaUsage` (maybe)              | Rolling / TTL                               | per cap scope                      | Backs the upload cap if not computed on the fly.                                                                                                                                                 |
+| Entity                                  | Deletion                                    | Department-scoped                  | Notes                                                                                                                                                                                               |
+| --------------------------------------- | ------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Department` **(implemented)**          | Archive only (deletion = OPEN DECISION)     | — (is the scope)                   | Tenancy boundary. `id`, `name`, timestamps only so far.                                                                                                                                             |
+| `User` **(implemented)**                | Never (status `ACTIVE`/`DISABLED`)          | yes (`departmentId`)               | Referenced forever by Jobs/Templates/Files/audit. `phone`/`telegramUserId` **implemented, Phase 8**; disable-audit fields (`disabledAt`/`disabledByUserId`) not added yet (see domain/users.md).    |
+| `Session` **(implemented)**             | Row deleted on logout/expiry                | via linked User                    | Auth session (ADR-0020) — not in the original Phase 0 model; added for login.                                                                                                                       |
+| `Template` **(implemented)**            | Soft (`status`/`deletedAt`, independent)    | yes                                | Render recipe + asset slots. Row kept forever. `youtubeTargetId` **implemented, Phase 9**.                                                                                                          |
+| `TemplateAsset` **(implemented)**       | With its Template (soft)                    | via Template                       | Slot definitions — child rows (resolves OD-22's Template half); replaced wholesale on edit.                                                                                                         |
+| `Job` **(implemented)**                 | **Never**                                   | yes (derived from Template)        | Permanent record. `snapshot` (JSONB) + `JobAsset` rows together are the immutable creation-time record — see ADR-0028. `videoFileId`/`screenshotFileId`/`thumbnailFileId` **implemented, Phase 9**. |
+| `JobAsset` **(implemented)**            | With its Job (never)                        | via Job                            | Resolved per-slot values — child rows (resolves OD-22's Job half), each with its own copied File metadata.                                                                                          |
+| `File` **(implemented)**                | Hard delete when safe                       | yes                                | `GALLERY_ASSET` or `JOB_ARTIFACT` — both categories now have real writers (Phase 9). `durationSeconds` still not added (see domain/files.md); no `ownerJobId` — the FK lives on `Job` instead.      |
+| `TelegramWizardState` **(implemented)** | Lazily expired by TTL (no active sweep yet) | via linked User (`userId @unique`) | Durable Telegram conversation state (ADR-0014, ADR-0037). One row per Telegram user, at most one per Studio User.                                                                                   |
+| `AuditEntry`                            | Never (retention = OPEN DECISION)           | yes                                | Who did what, when.                                                                                                                                                                                 |
+| `WorkerCredential`                      | Revoke (status)                             | —                                  | Service credential(s) for the Worker (mechanism = OPEN DECISION).                                                                                                                                   |
+| `YouTubeTarget` **(implemented)**       | Status flip (`DISCONNECTED`), never deleted | yes (`departmentId`)               | Connected YouTube channel + encrypted OAuth tokens (Phase 9, ADR-0039). Legacy `Channel`.                                                                                                           |
+| `DeliveryAttempt` **(implemented)**     | With its Job (never)                        | via Job                            | Per-provider delivery attempt/outcome — child rows (Phase 9, ADR-0039). Resolves the delivery-outcome half of OD-22.                                                                                |
+| `UploadQuotaUsage` (maybe)              | Rolling / TTL                               | per cap scope                      | Backs the upload cap if not computed on the fly. Still not a real table — the cap is computed on the fly (ADR-0030), unaffected by Phase 9.                                                         |
 
 > **`OPEN DECISION` — assets & outcomes: related rows vs JSONB.** Resolved for
 > **Template** assets (Phase 5): implemented as **child rows** (`TemplateAsset`), replaced
@@ -42,7 +42,10 @@ carried over.
 > for Job** (Phase 6, ADR-0028): the Template-level half of the snapshot is **JSONB**
 > (`Job.snapshot`); the resolved per-slot values are **child rows** (`JobAsset`) — not a
 > single all-JSONB blob, per the Phase 6 brief's explicit relational-model requirement.
-> Still open for **delivery outcomes** — no delivery mechanism exists yet.
+> **Resolved for delivery outcomes (Phase 9, ADR-0039):** child rows (`DeliveryAttempt`),
+> one per attempt per provider — never folded into `Job.snapshot`'s JSONB, and never
+> updated in place across retries (a retry inserts a new row with the next
+> `attemptNumber`).
 
 ## 2. Relationships (conceptual ER)
 
@@ -63,15 +66,18 @@ User 0/1─1 TelegramWizardState
 Template 1───* TemplateAsset           (implemented, Phase 5)
 Template 1───* Job                     (templateId; Template is soft-deleted only,
                                         so this FK always resolves)
-Template *───0/1 YouTubeTarget         (youtubeTargetId — not added yet; no
-                                        YouTubeTarget table exists, see templates.md)
+Template *───0/1 YouTubeTarget         (youtubeTargetId, implemented Phase 9 — ADR-0039)
 TemplateAsset *───0/1 File             (defaultFileId, implemented Phase 5 — ADR-0027)
 
-Job 1───* JobAsset            (implemented, Phase 6 — child rows, not JSONB)
-Job 1───* DeliveryOutcome      (not implemented — no delivery mechanism yet)
+Department 1───* YouTubeTarget         (implemented, Phase 9)
+User 1───* YouTubeTarget                (createdBy, implemented Phase 9)
+
+Job 1───* JobAsset             (implemented, Phase 6 — child rows, not JSONB)
+Job 1───* DeliveryAttempt      (implemented, Phase 9 — ADR-0039)
 Job 0/1─1 Job                 (retryOfJobId → original job; lineage chain — implemented)
-Job *───0/1 File              (videoFileId / screenshotFileId / thumbnailFileId —
-                               not implemented; no result-upload endpoint yet)
+Job *───0/1 File              (videoFileId / screenshotFileId / thumbnailFileId,
+                               implemented Phase 9 — set atomically together with the
+                               RENDERING -> RENDERED transition)
 JobAsset *───0/1 File         (fileId, implemented Phase 6 — nullable/SetNull; snapshot
                                retains identifying metadata on the JobAsset row itself)
 ```

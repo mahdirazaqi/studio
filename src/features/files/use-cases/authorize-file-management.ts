@@ -27,6 +27,19 @@ export function assertCanDeleteFile(actor: Actor, file: SafeFile): void {
   if (actor.role === "USER" && file.uploadedByUserId !== actor.userId) {
     throw forbiddenError();
   }
+  // A `JOB_ARTIFACT` is system-generated (`uploadedByUserId: null`) and has its
+  // own dedicated, invariant-checked deletion path
+  // (`features/delivery/use-cases/cleanup-job-artifacts.ts`, Phase 9,
+  // ADR-0039) — never deletable through the ordinary Gallery delete action,
+  // which has no way to check "has required delivery actually succeeded yet."
+  // Enforced here, not just left as a UI-level omission (the Gallery only
+  // ever *lists* `GALLERY_ASSET`s) — CLAUDE.md's "a hidden button is not
+  // authorization" applies to a missing one just as much.
+  if (file.category === "JOB_ARTIFACT") {
+    throw forbiddenError(
+      "Job artifacts cannot be deleted directly — they are cleaned up automatically once delivery no longer needs them.",
+    );
+  }
 }
 
 /**
@@ -36,6 +49,7 @@ export function assertCanDeleteFile(actor: Actor, file: SafeFile): void {
  * restrictions are not authorization."
  */
 export function canDeleteFile(actor: Actor, file: SafeFile): boolean {
+  if (file.category === "JOB_ARTIFACT") return false;
   if (!hasAtLeastRole(actor, "USER")) return false;
   if (actor.departmentId !== file.departmentId && actor.role !== "ADMIN") {
     return false;

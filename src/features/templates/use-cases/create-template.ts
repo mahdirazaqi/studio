@@ -3,6 +3,7 @@ import type { SafeTemplateDetail } from "@/features/templates/domain/template";
 import { createTemplateWithAssets } from "@/features/templates/repository/template-repository";
 import { resolveTargetDepartment } from "@/features/templates/use-cases/resolve-target-department";
 import { verifyAssetFileReferences } from "@/features/templates/use-cases/verify-file-references";
+import { verifyYoutubeTargetReference } from "@/features/templates/use-cases/verify-youtube-target";
 import type { TemplateInput } from "@/features/templates/schemas/template-input.schema";
 
 /**
@@ -19,6 +20,10 @@ export async function createTemplate(
   authorize(actor, "template:manage", { departmentId });
 
   await verifyAssetFileReferences(departmentId, input.assets);
+  const youtubeTargetId = await verifyYoutubeTargetReference(
+    departmentId,
+    input.youtubeTargetId,
+  );
 
   return createTemplateWithAssets({
     departmentId,
@@ -30,6 +35,7 @@ export async function createTemplate(
     outputPattern: input.outputPattern,
     description: input.description ?? null,
     tags: input.tags,
+    youtubeTargetId,
     assets: input.assets.map((asset) => ({
       key: asset.key,
       kind: asset.kind,

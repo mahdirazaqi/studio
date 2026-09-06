@@ -40,6 +40,7 @@ const template = (
   outputPattern: "op",
   description: null,
   tags: [],
+  youtubeTargetId: null,
   assets: [],
   ...overrides,
 });

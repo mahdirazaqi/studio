@@ -6,6 +6,7 @@ import {
   updateTemplateWithAssets,
 } from "@/features/templates/repository/template-repository";
 import { verifyAssetFileReferences } from "@/features/templates/use-cases/verify-file-references";
+import { verifyYoutubeTargetReference } from "@/features/templates/use-cases/verify-youtube-target";
 import type { UpdateTemplateInput } from "@/features/templates/schemas/update-template.schema";
 
 /**
@@ -35,6 +36,10 @@ export async function updateTemplate(
   }
 
   await verifyAssetFileReferences(existing.departmentId, input.assets);
+  const youtubeTargetId = await verifyYoutubeTargetReference(
+    existing.departmentId,
+    input.youtubeTargetId,
+  );
 
   return updateTemplateWithAssets({
     templateId: existing.id,
@@ -45,6 +50,7 @@ export async function updateTemplate(
     outputPattern: input.outputPattern,
     description: input.description ?? null,
     tags: input.tags,
+    youtubeTargetId,
     assets: input.assets.map((asset) => ({
       key: asset.key,
       kind: asset.kind,

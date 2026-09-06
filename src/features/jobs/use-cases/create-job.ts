@@ -1,6 +1,7 @@
 import { authorize, type Actor } from "@/server/authz";
 import { businessRuleError, notFoundError } from "@/server/errors/app-error";
 import { findTemplateInScope } from "@/features/templates/repository/template-repository";
+import { findConnectedYoutubeTargetInDepartment } from "@/features/youtube/repository/youtube-target-repository";
 import { resolveJobAssets } from "@/features/jobs/use-cases/resolve-job-assets";
 import { createJobWithAssets } from "@/features/jobs/repository/job-repository";
 import type { JobSnapshot, SafeJobDetail } from "@/features/jobs/domain/job";
@@ -35,6 +36,33 @@ export async function createJob(
     );
   }
 
+  // Legacy: "a Job is uploaded to YouTube only if upload===true AND the
+  // Template has a channel" (docs/integrations/youtube.md). Studio checks
+  // this once, here, at creation — never silently ignored, and never
+  // re-checked against the live Template later: the Target's identity is
+  // captured in the Job's own immutable `snapshot` below, so a later
+  // disconnect/reassignment can never change what an already-created Job
+  // believes it should deliver to.
+  const youtubeTarget = input.deliverToYouTube
+    ? await (async () => {
+        if (!template.youtubeTargetId) {
+          throw businessRuleError(
+            "This template has no connected YouTube channel, so a job created from it cannot deliver to YouTube.",
+          );
+        }
+        const target = await findConnectedYoutubeTargetInDepartment(
+          template.departmentId,
+          template.youtubeTargetId,
+        );
+        if (!target) {
+          throw businessRuleError(
+            "This template's YouTube channel is no longer connected, so a job created from it cannot deliver to YouTube.",
+          );
+        }
+        return target;
+      })()
+    : null;
+
   const { jobAssets, title } = await resolveJobAssets({
     departmentId: template.departmentId,
     templateAssets: template.assets,
@@ -51,6 +79,13 @@ export async function createJob(
     outputPattern: template.outputPattern,
     description: template.description,
     tags: template.tags,
+    youtubeTarget: youtubeTarget
+      ? {
+          id: youtubeTarget.id,
+          name: youtubeTarget.name,
+          youtubeChannelId: youtubeTarget.youtubeChannelId,
+        }
+      : null,
     assetSlotDefinitions: template.assets.map((asset) => ({
       key: asset.key,
       kind: asset.kind,

@@ -46,6 +46,16 @@ authorization), **not** a port.
   redesign onto Studio's typed Template model) / List / Retry / Cancel / a
   department-scoped Cancel All (fixing a real legacy system-wide-cancel authorization
   bug). No user/department management UI, no result/output upload, no YouTube yet.
+- **Phase 9** — Media processing & delivery — **complete**. `POST
+/api/worker/v1/jobs/:id/result` accepts the Worker's rendered result (raw bytes,
+  idempotent against duplicates/races); `ffmpeg`-only screenshot/thumbnail generation
+  (no ImageMagick) creates the first real `JOB_ARTIFACT` Files; a synchronous, awaited
+  Delivery Orchestrator drives `RENDERED -> DELIVERING -> UPLOADED`/`ERROR`, recording
+  durable per-provider `DeliveryAttempt` rows and sending best-effort Telegram
+  notifications; `YouTubeTarget` (department-scoped, encrypted tokens) connects via a
+  verified refresh-token entry rather than a full OAuth flow; a delivery-only retry and
+  an idempotent artifact-cleanup primitive complete the pipeline. Still no
+  user/department management UI.
 
 ## Getting started
 
@@ -83,11 +93,13 @@ prisma/         schema.prisma, migrations/, seed.ts
 src/
 ├── app/          App Router — (auth) + (dashboard) route groups, /api/health,
 │                 /api/files/[fileId] (session- or Worker-authenticated binary delivery),
-│                 /api/worker/v1/jobs/{next,[jobId],[jobId]/state,progress,duration},
+│                 /api/worker/v1/jobs/{next,[jobId],[jobId]/state,progress,duration,result},
 │                 /api/telegram/webhook (Telegram webhook, Phase 8)
 ├── features/     one folder per module — auth (Phase 2), users (Phase 2/3, partial),
-│                 files (Phase 4), templates (Phase 5), jobs (Phase 6/7), and telegram
-│                 (Phase 8) implemented; departments (partial, Phase 4/5)
+│                 files (Phase 4), templates (Phase 5), jobs (Phase 6/7), telegram
+│                 (Phase 8), youtube (Phase 9, YouTubeTarget CRUD + adapter), delivery
+│                 (Phase 9, DeliveryAttempt + orchestration) implemented; departments
+│                 (partial, Phase 4/5)
 ├── components/   ui/ (shadcn), theme/, layout/ (sidebar, header, shells, forbidden page)
 ├── lib/          client-safe utilities (cn, roles, navigation, site-config)
 ├── server/       server-only: env, logger, errors, validation, actions, api,
@@ -95,7 +107,9 @@ src/
 │                 worker-auth (Worker Bearer-key check, Phase 7),
 │                 telegram-webhook-auth (Telegram secret-token check, Phase 8), db,
 │                 adapters/storage (StorageAdapter, local disk),
-│                 adapters/telegram (Telegraf singleton, Phase 8), media (probe)
+│                 adapters/telegram (Telegraf singleton, Phase 8),
+│                 adapters/media (ffmpeg, Phase 9),
+│                 adapters/youtube (googleapis client + token cipher, Phase 9), media (probe)
 └── types/        cross-cutting client-safe types
 ```
 

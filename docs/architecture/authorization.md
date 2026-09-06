@@ -85,6 +85,14 @@ to design this registry from scratch. All three have now landed:
   `assertCanDeleteFile`'s own finer "own upload vs. any in department" rule for
   deletion — the one capability among the three where OD-03's "own resource" reading was
   actually chosen, deliberately different from Jobs' whole-department resolution.
+- **YouTube (Phase 9)**: a new `youtube:manage` capability, registered at the same
+  `MANAGER` floor as `template:manage` — connecting/disconnecting/listing
+  `YouTubeTarget`s is department-level infrastructure configuration, not a per-Job
+  operation. Picking an existing, already-`CONNECTED` Target for a Template is gated by
+  `template:manage` instead (authoring a Template is the operation that matters there,
+  not managing Targets) — see
+  `features/templates/use-cases/list-youtube-targets-for-template-form.ts`. Delivery-only
+  retry (`retryJobDelivery`) reuses the existing `job:manage` capability, unchanged.
 
 ## Department scope: three tools, three situations
 

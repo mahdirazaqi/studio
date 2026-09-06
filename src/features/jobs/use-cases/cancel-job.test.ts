@@ -47,6 +47,7 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
     description: null,
     tags: [],
     assetSlotDefinitions: [],
+    youtubeTarget: null,
   },
   assets: [],
   retriedByUserId: null,
@@ -61,6 +62,10 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   renderedAt: null,
   deliveredAt: null,
   uploadedAt: null,
+  videoFileId: null,
+  screenshotFileId: null,
+  thumbnailFileId: null,
+  deliveryAttempts: [],
   ...overrides,
 });
 

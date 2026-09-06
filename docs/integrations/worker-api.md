@@ -1,8 +1,9 @@
 # Render Worker REST API
 
-**Implemented, Phase 7** (all rows below except the result-upload endpoint — see §6).
-ADR-0004 (surface & auth requirement), ADR-0032 (authentication mechanism), ADR-0033
-(API surface & versioning), ADR-0034 (trust model & idempotency).
+**Implemented, Phase 7** (claim/get/state/progress/duration). **Result delivery
+implemented, Phase 9** (§2, ADR-0039). ADR-0004 (surface & auth requirement), ADR-0032
+(authentication mechanism), ADR-0033 (API surface & versioning), ADR-0034 (trust model &
+idempotency).
 
 The **Render Worker** is an external service (not in this repo) that performs the actual
 video rendering. It is the **only** first-class REST client of Studio. Studio must keep it
@@ -61,11 +62,26 @@ authenticate: authenticateWorker, params/body, handler })` — authenticate, val
 | `PATCH` | `/api/worker/v1/jobs/:id/state`    | `PATCH /jobs/:id/state`    | `transitionJobForWorker(id, body)` → `transitionJob` (Phase 6).     |
 | `PATCH` | `/api/worker/v1/jobs/:id/progress` | `PATCH /jobs/:id/progress` | `updateJobProgress({ jobId, progress })` (Phase 6).                 |
 | `PATCH` | `/api/worker/v1/jobs/:id/duration` | `PATCH /jobs/:id/duration` | `updateJobDuration({ jobId, durationSeconds })` (Phase 6).          |
+| `POST`  | `/api/worker/v1/jobs/:id/result`   | `POST /jobs/:id/upload`    | `acceptJobResult(id, videoBuffer)` (Phase 9, ADR-0039).             |
 | `GET`   | `/api/files/:fileId`               | n/a (new)                  | Worker-authenticated branch of the existing Phase 4 route — see §5. |
 
-`POST /api/worker/v1/files` (a Worker uploading an input file) and `POST
-/api/worker/v1/jobs/:id/result` (delivering the finished render) are **not
-implemented** — see §6.
+**`POST /api/worker/v1/jobs/:id/result` — implemented, Phase 9.** Delivers the finished
+render (docs/integrations/youtube.md "Rendered result flow"). **Not multipart** — the
+request body is the raw video bytes, any `Content-Type` (the real type is sniffed from
+the bytes, never trusted from the header); this mirrors `/api/files/[fileId]`'s own
+raw-bytes response in the other direction and needed no new body-parsing capability in
+`defineRouteHandler`. The handler is still thin: it reads `request.arrayBuffer()` and
+calls `acceptJobResult` — media processing, artifact creation, and delivery orchestration
+all live in `features/delivery/use-cases/*`, not in the route.
+
+- Legal only from a Job in `RENDERING`. A duplicate Worker request (the Job already has a
+  `videoFileId`) is recognized and returned as-is — no reprocessing, no second delivery
+  run (docs/integrations/youtube.md "Idempotency & concurrency").
+- Success response: `{ id, state, videoFileId }` — `state` reflects the Job's state
+  _after_ delivery has already run synchronously (`RENDERED`/`DELIVERING` are never
+  visible in this response; a Worker sees `UPLOADED` or `ERROR` directly).
+- `POST /api/worker/v1/files` (a Worker uploading an input file) remains **not
+  implemented** — see §6.
 
 ### State mapping at the boundary — implemented
 
@@ -217,13 +233,10 @@ instead of a session cookie. The URL is built from the inbound request's own ori
 (`new URL(request.url).origin`), not a separate `APP_URL` config value, so it works
 correctly regardless of how the Worker reaches Studio.
 
-## 6. Deferred — not implemented this phase
+## 6. Deferred — not implemented
 
-- **`POST /api/worker/v1/jobs/:id/result`** (legacy `POST /jobs/:id/upload`) — delivering
-  the finished render. Needs `JOB_ARTIFACT` File creation and a screenshot/thumbnail
-  pipeline (`execFile`/`spawn` only, ADR-0015), neither of which exists yet (Phase 6
-  explicitly deferred both). A placeholder endpoint that stores nothing real was
-  explicitly rejected (Phase 7 brief §20) as worse than not building it.
+- **`POST /api/worker/v1/jobs/:id/result`** — implemented, Phase 9. See §2 above and
+  docs/integrations/youtube.md for the full delivery pipeline it triggers.
 - **`POST /api/worker/v1/files`** — a Worker uploading an input file directly. No
   concrete requirement calls for this yet (input files come from the Gallery, resolved
   at Job creation) — deferred until the result-upload endpoint above needs it, if ever.

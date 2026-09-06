@@ -18,6 +18,7 @@ import {
   type GalleryFileOption,
 } from "@/features/templates/components/template-asset-editor";
 import type { SafeTemplateDetail } from "@/features/templates/domain/template";
+import type { SafeYouTubeTarget } from "@/features/youtube/domain/youtube-target";
 
 export interface DepartmentChoice {
   id: string;
@@ -51,6 +52,7 @@ export function TemplateForm({
   template,
   departmentChoices,
   galleryFiles,
+  youtubeTargets,
   readOnly = false,
 }: {
   mode: "create" | "edit";
@@ -61,6 +63,9 @@ export function TemplateForm({
   /** Already scoped by the page: the actor's own department for USER/MANAGER,
    * or a capped cross-department list for ADMIN. */
   galleryFiles: GalleryFileOption[];
+  /** `CONNECTED` YouTube Targets available to pick from — same scoping as
+   * `galleryFiles` (Phase 9, docs/domain/templates.md "Template ↔ Target"). */
+  youtubeTargets: SafeYouTubeTarget[];
   /** USER can view a Template (`template:view`) but not author it
    * (docs/domain/authorization.md) — renders every field disabled and drops
    * the Save action rather than letting a submit round-trip to a 403. */
@@ -82,6 +87,9 @@ export function TemplateForm({
   );
   const [description, setDescription] = useState(template?.description ?? "");
   const [tagsText, setTagsText] = useState((template?.tags ?? []).join(", "));
+  const [youtubeTargetId, setYoutubeTargetId] = useState(
+    template?.youtubeTargetId ?? "",
+  );
   const [departmentId, setDepartmentId] = useState(
     departmentChoices?.[0]?.id ?? "",
   );
@@ -98,6 +106,12 @@ export function TemplateForm({
       : departmentChoices
         ? departmentId
         : undefined;
+
+  const youtubeTargetOptions = effectiveDepartmentId
+    ? youtubeTargets.filter(
+        (target) => target.departmentId === effectiveDepartmentId,
+      )
+    : youtubeTargets;
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -118,6 +132,7 @@ export function TemplateForm({
       outputPattern,
       description: description.trim() === "" ? undefined : description,
       tags,
+      youtubeTargetId: youtubeTargetId === "" ? undefined : youtubeTargetId,
       assets: assets.map((asset) => ({
         key: asset.key,
         kind: asset.kind,
@@ -299,6 +314,31 @@ export function TemplateForm({
                 onChange={(e) => setTagsText(e.target.value)}
               />
               {fieldErrors.tags?.map((m) => (
+                <p key={m} className="text-destructive text-sm">
+                  {m}
+                </p>
+              ))}
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor={`${formId}-youtube-target`}>
+                YouTube channel (optional)
+              </Label>
+              <select
+                id={`${formId}-youtube-target`}
+                value={youtubeTargetId}
+                disabled={fieldsDisabled}
+                className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs"
+                onChange={(e) => setYoutubeTargetId(e.target.value)}
+              >
+                <option value="">None — jobs cannot deliver to YouTube</option>
+                {youtubeTargetOptions.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.name}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.youtubeTargetId?.map((m) => (
                 <p key={m} className="text-destructive text-sm">
                   {m}
                 </p>

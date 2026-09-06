@@ -62,7 +62,16 @@ export default async function JobDetailPage({
         title={job.title || "(untitled)"}
         description={`Template: ${job.snapshot.templateName}`}
         actions={
-          <JobActions jobId={job.id} jobTitle={job.title} state={job.state} />
+          <JobActions
+            jobId={job.id}
+            jobTitle={job.title}
+            state={job.state}
+            canRetryDelivery={
+              job.state === "ERROR" &&
+              job.deliverToYouTube &&
+              job.videoFileId !== null
+            }
+          />
         }
       />
 
@@ -155,6 +164,63 @@ export default async function JobDetailPage({
             </div>
           </CardContent>
         </Card>
+
+        {job.videoFileId || job.deliveryAttempts.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Delivery</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {job.videoFileId ? (
+                <p>
+                  <span className="text-muted-foreground">
+                    Rendered video:{" "}
+                  </span>
+                  <a
+                    href={`/api/files/${job.videoFileId}`}
+                    className="hover:underline"
+                  >
+                    Download
+                  </a>
+                  {job.thumbnailFileId ? (
+                    <>
+                      {" · "}
+                      <a
+                        href={`/api/files/${job.thumbnailFileId}`}
+                        className="hover:underline"
+                      >
+                        Thumbnail
+                      </a>
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
+              {job.snapshot.youtubeTarget ? (
+                <p>
+                  <span className="text-muted-foreground">
+                    YouTube channel:{" "}
+                  </span>
+                  {job.snapshot.youtubeTarget.name}
+                </p>
+              ) : null}
+              {job.deliveryAttempts.map((attempt) => (
+                <div
+                  key={attempt.id}
+                  className="flex flex-col gap-0.5 border-b pb-2 last:border-b-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <span className="text-muted-foreground">
+                    {attempt.provider} · attempt {attempt.attemptNumber}
+                  </span>
+                  <span>
+                    {attempt.status}
+                    {attempt.providerRef ? ` — ${attempt.providerRef}` : ""}
+                    {attempt.failureReason ? ` — ${attempt.failureReason}` : ""}
+                  </span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardHeader>
