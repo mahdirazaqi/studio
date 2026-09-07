@@ -247,6 +247,27 @@ correctly regardless of how the Worker reaches Studio.
 - **Worker-timeout requeue sweep** (a Job stuck in `CLAIMED`/`RENDERING`) — OD-31 stays
   open; the `CLAIMED → QUEUED` transition exists in the state graph for it.
 
+## 6a. Worker compatibility matrix (five required operations)
+
+| Legacy route               | Legacy method | Studio route                       | Studio method | Request                                                                  | Response                                                          | Auth                          | Notes                                                                                                                                                                                            |
+| -------------------------- | ------------- | ---------------------------------- | ------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /jobs/fetch`          | `GET`         | `/api/worker/v1/jobs/next`         | `POST`        | none                                                                     | `200` claim payload (see §2) or `204 No Content` if none eligible | `Authorization: Bearer <key>` | Method intentionally changed: a side-effecting `GET` is forbidden (Security Requirements §11); atomic claim (`SELECT ... FOR UPDATE SKIP LOCKED`), never a find-then-update race.                |
+| `POST /jobs/:id/upload`    | `POST`        | `/api/worker/v1/jobs/:id/result`   | `POST`        | Raw video bytes (any `Content-Type`; sniffed server-side), not multipart | `200 { id, state, videoFileId }`                                  | `Authorization: Bearer <key>` | Renamed `upload` → `result` (delivering the render output, not uploading an input file); synchronous, not fire-and-forget; idempotent on a duplicate submission.                                 |
+| `PATCH /jobs/:id/state`    | `PATCH`       | `/api/worker/v1/jobs/:id/state`    | `PATCH`       | `{ state }` — legacy integer 0–9 **or** a Studio state name              | `200 { id, state }`                                               | `Authorization: Bearer <key>` | Legacy accepted **any** integer with no validation; Studio validates against the state machine (`422`/`409` for an illegal/raced transition). `errorReason` required when the target is `ERROR`. |
+| `PATCH /jobs/:id/progress` | `PATCH`       | `/api/worker/v1/jobs/:id/progress` | `PATCH`       | `{ progress: 0..100 }`                                                   | `200 { id, progress }`                                            | `Authorization: Bearer <key>` | Legacy `{progress}` was unvalidated; Studio validates the range and rejects once the Job is terminal.                                                                                            |
+| `PATCH /jobs/:id/duration` | `PATCH`       | `/api/worker/v1/jobs/:id/duration` | `PATCH`       | `{ durationSeconds: >=0 }`                                               | `200 { id, durationSeconds }`                                     | `Authorization: Bearer <key>` | Legacy key was `duration`; Studio renamed to `durationSeconds` (resolves OD-33) and validates non-negative.                                                                                      |
+| n/a (Worker had none)      | —             | `GET /api/worker/v1/jobs/:id`      | `GET`         | none                                                                     | `200` same payload shape as claim                                 | `Authorization: Bearer <key>` | New — lets a Worker that crashed mid-render re-fetch the Job it was working on, by id, instead of losing its place.                                                                              |
+
+All five required routes plus the new GET-by-id were re-verified with real HTTP requests
+against a running dev server (not just unit tests) during the most recent Worker-API
+review: unauthenticated/wrong-credential requests correctly `401`; the atomic claim
+correctly picked the oldest `QUEUED` Job; state/progress/duration validation and
+transition-legality errors matched exactly (`422` for both bad input and an illegal
+transition, `404` for a nonexistent Job id); the result endpoint accepted a real,
+`ffmpeg`-generated test video, transitioned the Job straight through to `UPLOADED`, and
+returned the identical response (same `videoFileId`, no reprocessing) on a duplicate
+submission; an oversized `Content-Length` was rejected before the body was read.
+
 ## 7. Compatibility notes / risks
 
 - **404 → 204 for empty queue**: resolved as `204` (ADR-0033) — if the actual Worker
