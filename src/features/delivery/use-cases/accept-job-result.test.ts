@@ -26,6 +26,8 @@ vi.mock("@/features/delivery/use-cases/deliver-job-result", () => ({
 
 const { acceptJobResult } = await import("./accept-job-result");
 
+const ALLOWED = ["dept-a"];
+
 const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   id: "job-1",
   departmentId: "dept-a",
@@ -89,14 +91,14 @@ describe("acceptJobResult", () => {
   it("throws not_found for an unknown job", async () => {
     findJobById.mockResolvedValue(null);
     await expect(
-      acceptJobResult("job-1", Buffer.from("x")),
+      acceptJobResult("job-1", Buffer.from("x"), ALLOWED),
     ).rejects.toMatchObject({ kind: "not_found" });
   });
 
   it("rejects a job that isn't RENDERING and has no prior result", async () => {
     findJobById.mockResolvedValue(job({ state: "QUEUED" }));
     await expect(
-      acceptJobResult("job-1", Buffer.from("x")),
+      acceptJobResult("job-1", Buffer.from("x"), ALLOWED),
     ).rejects.toMatchObject({ kind: "business_rule" });
     expect(generateRenderArtifacts).not.toHaveBeenCalled();
   });
@@ -104,7 +106,7 @@ describe("acceptJobResult", () => {
   it("is idempotent for a duplicate Worker request — returns the existing result without reprocessing", async () => {
     const alreadyDone = job({ state: "UPLOADED", videoFileId: "file-video" });
     findJobById.mockResolvedValue(alreadyDone);
-    const result = await acceptJobResult("job-1", Buffer.from("x"));
+    const result = await acceptJobResult("job-1", Buffer.from("x"), ALLOWED);
     expect(result).toBe(alreadyDone);
     expect(generateRenderArtifacts).not.toHaveBeenCalled();
     expect(transitionJobRow).not.toHaveBeenCalled();
@@ -114,7 +116,7 @@ describe("acceptJobResult", () => {
   it("rejects an empty result body", async () => {
     findJobById.mockResolvedValue(job({ state: "RENDERING" }));
     await expect(
-      acceptJobResult("job-1", Buffer.alloc(0)),
+      acceptJobResult("job-1", Buffer.alloc(0), ALLOWED),
     ).rejects.toMatchObject({ kind: "validation" });
     expect(generateRenderArtifacts).not.toHaveBeenCalled();
   });
@@ -122,9 +124,11 @@ describe("acceptJobResult", () => {
   it("rejects a result body larger than the video size limit", async () => {
     findJobById.mockResolvedValue(job({ state: "RENDERING" }));
     const huge = Buffer.alloc(600 * 1024 * 1024); // over the 500MB VIDEO rule
-    await expect(acceptJobResult("job-1", huge)).rejects.toMatchObject({
-      kind: "validation",
-    });
+    await expect(acceptJobResult("job-1", huge, ALLOWED)).rejects.toMatchObject(
+      {
+        kind: "validation",
+      },
+    );
     expect(generateRenderArtifacts).not.toHaveBeenCalled();
   });
 
@@ -141,7 +145,11 @@ describe("acceptJobResult", () => {
     transitionJobRow.mockResolvedValue(rendered);
     deliverJobResult.mockResolvedValue({ ...rendered, state: "UPLOADED" });
 
-    const result = await acceptJobResult("job-1", Buffer.from("video bytes"));
+    const result = await acceptJobResult(
+      "job-1",
+      Buffer.from("video bytes"),
+      ALLOWED,
+    );
 
     expect(generateRenderArtifacts).toHaveBeenCalledWith(
       "dept-a",
@@ -170,7 +178,11 @@ describe("acceptJobResult", () => {
     generateRenderArtifacts.mockResolvedValue(artifacts);
     transitionJobRow.mockResolvedValue(null); // lost the race
 
-    const result = await acceptJobResult("job-1", Buffer.from("video bytes"));
+    const result = await acceptJobResult(
+      "job-1",
+      Buffer.from("video bytes"),
+      ALLOWED,
+    );
 
     expect(rollbackRenderArtifacts).toHaveBeenCalledWith(artifacts);
     expect(result.videoFileId).toBe("file-video-winner");
@@ -185,8 +197,18 @@ describe("acceptJobResult", () => {
     transitionJobRow.mockResolvedValue(null);
 
     await expect(
-      acceptJobResult("job-1", Buffer.from("video bytes")),
+      acceptJobResult("job-1", Buffer.from("video bytes"), ALLOWED),
     ).rejects.toMatchObject({ kind: "conflict" });
     expect(rollbackRenderArtifacts).toHaveBeenCalledWith(artifacts);
+  });
+
+  it("throws not_found (never forbidden) for a job outside the Worker's allowed departments", async () => {
+    findJobById.mockResolvedValue(
+      job({ state: "RENDERING", departmentId: "dept-z" }),
+    );
+    await expect(
+      acceptJobResult("job-1", Buffer.from("video bytes"), ALLOWED),
+    ).rejects.toMatchObject({ kind: "not_found" });
+    expect(generateRenderArtifacts).not.toHaveBeenCalled();
   });
 });

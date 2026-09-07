@@ -183,8 +183,9 @@ src/
 │   ├── authz/                   authorize() / requireRole / assertSameDepartment /
 │   │                             assertDepartmentScopeOrNotFound / departmentScopeFilter
 │   │                             — BOUNDARY, real capability registry (ADR-0022, Phase 3)
-│   ├── worker-auth/              authenticateWorker() — BOUNDARY, timing-safe
-│   │                             WORKER_API_KEY check (ADR-0032, Phase 7)
+│   ├── worker-auth/              authenticateWorker() — BOUNDARY, hashed WorkerApiKey
+│   │                             lookup, Department-scoped (ADR-0040, Phase 11;
+│   │                             supersedes the ADR-0032 static-key check)
 │   ├── telegram-webhook-auth/    authenticateTelegramWebhook() — BOUNDARY, timing-safe
 │   │                             TELEGRAM_WEBHOOK_SECRET check (ADR-0035, Phase 8)
 │   ├── db/                      index.ts — the single PrismaClient instance

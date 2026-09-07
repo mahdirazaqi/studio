@@ -188,6 +188,12 @@ export async function createTemplateWithAssets(
 
 export interface UpdateTemplateData {
   templateId: string;
+  /** ADMIN-only transfer (docs/domain/templates.md "Department transfer",
+   * ADR-0040) — the use case only ever sets this to a value different from
+   * the Template's current department when the actor is ADMIN and the
+   * target department was validated to exist; every other caller passes the
+   * existing, unchanged department id straight through. */
+  departmentId: string;
   name: string;
   composition: string;
   source: string;
@@ -217,6 +223,7 @@ export async function updateTemplateWithAssets(
       return tx.template.update({
         where: { id: data.templateId },
         data: {
+          departmentId: data.departmentId,
           name: data.name,
           composition: data.composition,
           source: data.source,

@@ -28,7 +28,6 @@ export default defineConfig({
       DATABASE_URL: "postgresql://test:test@localhost:5432/test",
       SESSION_COOKIE_NAME: "studio_session",
       SESSION_DURATION_DAYS: "30",
-      WORKER_API_KEY: "test-worker-api-key-not-a-real-secret",
       TELEGRAM_BOT_TOKEN: "123456:test-telegram-bot-token-not-real",
       TELEGRAM_WEBHOOK_SECRET: "test-telegram-webhook-secret-not-a-real-secret",
       YOUTUBE_CLIENT_ID: "test-youtube-client-id.apps.googleusercontent.com",

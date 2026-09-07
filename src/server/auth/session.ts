@@ -43,6 +43,7 @@ export interface SessionUser {
   fullName: string;
   role: Role;
   departmentId: string;
+  departmentName: string;
 }
 
 function hashToken(token: string): string {
@@ -95,6 +96,7 @@ export async function resolveSession(
     fullName: session.user.fullName,
     role: session.user.role,
     departmentId: session.user.departmentId,
+    departmentName: session.user.department.name,
   };
 }
 

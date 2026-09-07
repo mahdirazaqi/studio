@@ -58,13 +58,17 @@ export function TemplateForm({
   mode: "create" | "edit";
   /** Required for `mode: "edit"`. */
   template?: SafeTemplateDetail;
-  /** ADMIN only, `mode: "create"` only — USER/MANAGER always use their own department. */
+  /** ADMIN only, in **either** mode: choosing a department at creation, or
+   * transferring an existing Template to a different department
+   * (docs/domain/templates.md "Department transfer", ADR-0040). `undefined`
+   * for a non-ADMIN actor — no selector renders and the Template's
+   * department is immutable to them, exactly as the server enforces. */
   departmentChoices?: DepartmentChoice[];
   /** Already scoped by the page: the actor's own department for USER/MANAGER,
-   * or a capped cross-department list for ADMIN. */
+   * or every department for ADMIN. */
   galleryFiles: GalleryFileOption[];
   /** `CONNECTED` YouTube Targets available to pick from — same scoping as
-   * `galleryFiles` (Phase 9, docs/domain/templates.md "Template ↔ Target"). */
+   * `galleryFiles` (docs/domain/templates.md "Template ↔ Target"). */
   youtubeTargets: SafeYouTubeTarget[];
   /** USER can view a Template (`template:view`) but not author it
    * (docs/domain/authorization.md) — renders every field disabled and drops
@@ -91,25 +95,23 @@ export function TemplateForm({
     template?.youtubeTargetId ?? "",
   );
   const [departmentId, setDepartmentId] = useState(
-    departmentChoices?.[0]?.id ?? "",
+    template?.departmentId ?? departmentChoices?.[0]?.id ?? "",
   );
   const [assets, setAssets] = useState<AssetRowState[]>(
     template ? toAssetRows(template.assets, formId) : [],
   );
 
-  // ADMIN picking a department in create mode narrows the file picker to
-  // that department; every other case (edit, or a non-ADMIN actor) has one
-  // fixed, known department to filter by.
-  const effectiveDepartmentId =
-    mode === "edit"
-      ? template?.departmentId
-      : departmentChoices
-        ? departmentId
-        : undefined;
+  // ADMIN picking/changing a department (create, or a transfer in edit mode)
+  // narrows the file/channel pickers to that department; every other case
+  // (a non-ADMIN actor, who never sees the selector) uses the Template's own
+  // fixed department.
+  const effectiveDepartmentId = departmentChoices
+    ? departmentId
+    : template?.departmentId;
 
   const youtubeTargetOptions = effectiveDepartmentId
-    ? youtubeTargets.filter(
-        (target) => target.departmentId === effectiveDepartmentId,
+    ? youtubeTargets.filter((target) =>
+        target.departmentIds.includes(effectiveDepartmentId),
       )
     : youtubeTargets;
 
@@ -124,7 +126,7 @@ export function TemplateForm({
       .filter((tag) => tag.length > 0);
 
     const body = {
-      ...(mode === "create" && departmentChoices ? { departmentId } : {}),
+      ...(departmentChoices ? { departmentId } : {}),
       name,
       composition,
       source,
@@ -197,7 +199,7 @@ export function TemplateForm({
               ))}
             </div>
 
-            {mode === "create" && departmentChoices ? (
+            {departmentChoices ? (
               <div className="space-y-1.5">
                 <Label htmlFor={`${formId}-department`}>Department</Label>
                 <select
@@ -213,6 +215,18 @@ export function TemplateForm({
                     </option>
                   ))}
                 </select>
+                {mode === "edit" && departmentId !== template?.departmentId ? (
+                  <p className="text-muted-foreground text-xs">
+                    Transferring this template — its asset/channel selections
+                    below must remain valid for the new department, or saving
+                    will be rejected.
+                  </p>
+                ) : null}
+                {fieldErrors.departmentId?.map((m) => (
+                  <p key={m} className="text-destructive text-sm">
+                    {m}
+                  </p>
+                ))}
               </div>
             ) : null}
 

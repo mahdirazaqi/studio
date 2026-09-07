@@ -14,7 +14,10 @@ import { findDuplicateAssetKey } from "@/features/templates/domain/template-asse
  */
 export const templateInputSchema = z
   .object({
-    /** Only honored for ADMIN — see `resolveTargetDepartment` in the use case. */
+    /** Only honored for ADMIN, in either direction: choosing a department at
+     * creation (`resolveTargetDepartment`) or transferring an existing
+     * Template to a different one at edit time (`update-template.ts`,
+     * ADR-0040) — a non-ADMIN's value is always ignored server-side. */
     departmentId: commonSchemas.id.optional(),
     name: commonSchemas.shortText,
     composition: commonSchemas.shortText,

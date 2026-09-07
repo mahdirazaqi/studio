@@ -25,6 +25,7 @@ describe("toActor", () => {
         id: "u1",
         role: "MANAGER",
         departmentId: "dept-a",
+        departmentName: "Department A",
         displayName: "Someone",
         email: "someone@example.com",
       }),

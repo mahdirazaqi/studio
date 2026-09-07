@@ -7,7 +7,7 @@ import type { CreateJobInput } from "@/features/jobs/schemas/create-job.schema";
 const findTemplateInScope = vi.fn();
 const createJobWithAssets = vi.fn();
 const resolveJobAssets = vi.fn();
-const findConnectedYoutubeTargetInDepartment = vi.fn();
+const findConnectedYoutubeTargetForDepartment = vi.fn();
 
 vi.mock("@/features/templates/repository/template-repository", () => ({
   findTemplateInScope: (...args: unknown[]) => findTemplateInScope(...args),
@@ -22,8 +22,8 @@ vi.mock("@/features/jobs/use-cases/resolve-job-assets", () => ({
 }));
 
 vi.mock("@/features/youtube/repository/youtube-target-repository", () => ({
-  findConnectedYoutubeTargetInDepartment: (...args: unknown[]) =>
-    findConnectedYoutubeTargetInDepartment(...args),
+  findConnectedYoutubeTargetForDepartment: (...args: unknown[]) =>
+    findConnectedYoutubeTargetForDepartment(...args),
 }));
 
 const { createJob } = await import("./create-job");
@@ -175,14 +175,14 @@ describe("createJob", () => {
         createJob(actor(), input({ deliverToYouTube: true })),
       ).rejects.toMatchObject({ kind: "business_rule" });
       expect(createJobWithAssets).not.toHaveBeenCalled();
-      expect(findConnectedYoutubeTargetInDepartment).not.toHaveBeenCalled();
+      expect(findConnectedYoutubeTargetForDepartment).not.toHaveBeenCalled();
     });
 
     it("rejects deliverToYouTube when the configured channel is no longer connected", async () => {
       findTemplateInScope.mockResolvedValue(
         template({ youtubeTargetId: "target-1" }),
       );
-      findConnectedYoutubeTargetInDepartment.mockResolvedValue(null);
+      findConnectedYoutubeTargetForDepartment.mockResolvedValue(null);
       await expect(
         createJob(actor(), input({ deliverToYouTube: true })),
       ).rejects.toMatchObject({ kind: "business_rule" });
@@ -194,7 +194,7 @@ describe("createJob", () => {
         template({ youtubeTargetId: null }),
       );
       await createJob(actor(), input({ deliverToYouTube: false }));
-      expect(findConnectedYoutubeTargetInDepartment).not.toHaveBeenCalled();
+      expect(findConnectedYoutubeTargetForDepartment).not.toHaveBeenCalled();
       expect(createJobWithAssets).toHaveBeenCalled();
     });
 
@@ -202,7 +202,7 @@ describe("createJob", () => {
       findTemplateInScope.mockResolvedValue(
         template({ departmentId: "dept-b", youtubeTargetId: "target-1" }),
       );
-      findConnectedYoutubeTargetInDepartment.mockResolvedValue({
+      findConnectedYoutubeTargetForDepartment.mockResolvedValue({
         id: "target-1",
         name: "Main Channel",
         youtubeChannelId: "UC123",
@@ -213,7 +213,7 @@ describe("createJob", () => {
         input({ deliverToYouTube: true }),
       );
 
-      expect(findConnectedYoutubeTargetInDepartment).toHaveBeenCalledWith(
+      expect(findConnectedYoutubeTargetForDepartment).toHaveBeenCalledWith(
         "dept-b",
         "target-1",
       );

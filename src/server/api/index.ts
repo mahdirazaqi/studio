@@ -28,18 +28,25 @@ import { logger } from "@/server/logger";
 
 const REQUEST_ID_HEADER = "x-request-id";
 
-export interface ApiContext<TBody, TQuery, TParams> {
+export interface ApiContext<TBody, TQuery, TParams, TAuth = void> {
   request: Request;
   body: TBody;
   query: TQuery;
   params: TParams;
   requestId: string;
   log: ReturnType<typeof logger.child>;
+  /** Whatever `authenticate` resolved to — `undefined` for a handler whose
+   * `authenticate` returns nothing. Lets an authentication boundary hand the
+   * caller's resolved identity/scope straight to the handler without a
+   * second lookup (e.g. `@/server/worker-auth`'s `WorkerAuthContext` —
+   * Department scope resolved once, at auth time, never re-derived from
+   * anything client-supplied). */
+  auth: TAuth;
 }
 
 type RouteParams = Record<string, string | string[] | undefined>;
 
-interface DefineRouteHandlerConfig<TBody, TQuery, TParams, TResult> {
+interface DefineRouteHandlerConfig<TBody, TQuery, TParams, TResult, TAuth> {
   /** Short name for logs, e.g. `worker.jobs.claim`. */
   name: string;
   /** Zod schema for the JSON request body. */
@@ -50,12 +57,13 @@ interface DefineRouteHandlerConfig<TBody, TQuery, TParams, TResult> {
   params?: z.ZodType<TParams>;
   /**
    * Authenticate the caller. Throw an `AppError` (`unauthenticated` /
-   * `forbidden`) to reject. Return value is ignored. Required — there is no
-   * such thing as an unauthenticated external endpoint in Studio.
+   * `forbidden`) to reject. Whatever it returns is passed to `handler` as
+   * `ctx.auth`. Required — there is no such thing as an unauthenticated
+   * external endpoint in Studio.
    */
-  authenticate: (request: Request) => Promise<void> | void;
+  authenticate: (request: Request) => Promise<TAuth> | TAuth;
   handler: (
-    ctx: ApiContext<TBody, TQuery, TParams>,
+    ctx: ApiContext<TBody, TQuery, TParams, TAuth>,
   ) => Promise<TResult> | TResult;
   /** HTTP status for a successful response. Defaults to 200. */
   successStatus?: number;
@@ -80,7 +88,8 @@ export function defineRouteHandler<
   TBody = undefined,
   TQuery = undefined,
   TParams = undefined,
->(config: DefineRouteHandlerConfig<TBody, TQuery, TParams, TResult>) {
+  TAuth = void,
+>(config: DefineRouteHandlerConfig<TBody, TQuery, TParams, TResult, TAuth>) {
   return async (
     request: Request,
     routeCtx: { params: Promise<RouteParams> },
@@ -94,7 +103,7 @@ export function defineRouteHandler<
     });
 
     try {
-      await config.authenticate(request);
+      const auth = await config.authenticate(request);
 
       const rawParams = routeCtx?.params ? await routeCtx.params : {};
       const params = (
@@ -122,6 +131,7 @@ export function defineRouteHandler<
         params,
         requestId,
         log,
+        auth,
       });
 
       const status = config.successStatus ?? 200;

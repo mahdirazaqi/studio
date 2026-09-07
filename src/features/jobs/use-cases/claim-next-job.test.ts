@@ -15,11 +15,19 @@ beforeEach(() => {
 describe("claimNextJob", () => {
   it("returns the claimed job when one is available", async () => {
     claimNextJobRow.mockResolvedValue({ id: "job-1", state: "CLAIMED" });
-    await expect(claimNextJob()).resolves.toMatchObject({ id: "job-1" });
+    await expect(claimNextJob(["dept-a"])).resolves.toMatchObject({
+      id: "job-1",
+    });
   });
 
   it("returns null when the queue is empty", async () => {
     claimNextJobRow.mockResolvedValue(null);
-    await expect(claimNextJob()).resolves.toBeNull();
+    await expect(claimNextJob(["dept-a"])).resolves.toBeNull();
+  });
+
+  it("passes the allowed Department scope straight through to the atomic claim query", async () => {
+    claimNextJobRow.mockResolvedValue(null);
+    await claimNextJob(["dept-a", "dept-b"]);
+    expect(claimNextJobRow).toHaveBeenCalledWith(["dept-a", "dept-b"]);
   });
 });

@@ -55,9 +55,10 @@ Telegram → POST /api/telegram/webhook → authenticate (secret token)
 - No polling worker process — webhook fits Studio's single-Next.js-deployable model with
   no extra process to run or coordinate.
 - **Optional feature.** `TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET` are both optional
-  environment variables (unlike the Worker API's required `WORKER_API_KEY`). Unset →
-  the webhook route responds `dependency` (503) and every outbound send is a logged no-op
-  — Studio runs fully without Telegram configured.
+  environment variables (unlike Worker authentication, which is always mandatory — a
+  `WorkerApiKey` must exist and be `ACTIVE`, ADR-0040). Unset → the webhook route
+  responds `dependency` (503) and every outbound send is a logged no-op — Studio runs
+  fully without Telegram configured.
 - **Library:** `telegraf` (matches legacy's choice, via `nestjs-telegraf`). A single
   instance per process (`@/server/adapters/telegram/client.ts`'s `getTelegramBot()`),
   cached on `globalThis` to survive Next.js dev-mode reloads without constructing (or
@@ -258,8 +259,9 @@ decision already covers this).
   back on every request as the `X-Telegram-Bot-Api-Secret-Token` header
   (`TELEGRAM_WEBHOOK_SECRET`). `@/server/telegram-webhook-auth`'s
   `authenticateTelegramWebhook` is the **sole** place this is read or compared — a
-  timing-safe SHA-256-digest comparison, the identical technique
-  `@/server/worker-auth` uses for `WORKER_API_KEY` (ADR-0032).
+  timing-safe SHA-256-digest comparison, the same fixed-length-digest-comparison
+  technique `@/server/worker-auth` uses for its own credential (now a hashed
+  `WorkerApiKey` lookup, ADR-0040).
 - Not relying on the webhook URL's obscurity — the secret header is the actual control.
 - Missing/wrong secret → `401 unauthenticated`. Telegram not configured at all
   (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET` unset) → `503 dependency`, a distinct

@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { connectYoutubeTargetAction } from "@/features/youtube/actions/connect-youtube-target.action";
 import { disconnectYoutubeTargetAction } from "@/features/youtube/actions/disconnect-youtube-target.action";
+import { updateYoutubeTargetDepartmentsAction } from "@/features/youtube/actions/update-youtube-target-departments.action";
 import type { SafeYouTubeTarget } from "@/features/youtube/domain/youtube-target";
 
 export interface DepartmentChoice {
@@ -19,8 +20,56 @@ export interface DepartmentChoice {
   name: string;
 }
 
+function DepartmentCheckboxes({
+  formIdPrefix,
+  departments,
+  selected,
+  disabled,
+  onChange,
+}: {
+  formIdPrefix: string;
+  departments: DepartmentChoice[];
+  selected: Set<string>;
+  disabled: boolean;
+  onChange: (next: Set<string>) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-3">
+      {departments.map((department) => (
+        <label
+          key={department.id}
+          htmlFor={`${formIdPrefix}-${department.id}`}
+          className="flex items-center gap-1.5 text-sm"
+        >
+          <input
+            id={`${formIdPrefix}-${department.id}`}
+            type="checkbox"
+            checked={selected.has(department.id)}
+            disabled={disabled}
+            className="size-4"
+            onChange={(e) => {
+              const next = new Set(selected);
+              if (e.target.checked) next.add(department.id);
+              else next.delete(department.id);
+              onChange(next);
+            }}
+          />
+          {department.name}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 /**
- * Connect/list/disconnect YouTube Targets (docs/integrations/youtube.md).
+ * Connect/list/disconnect YouTube Targets — **ADMIN-only**
+ * (docs/integrations/youtube.md, ADR-0040): connecting a channel and
+ * choosing which Departments may use it is system-wide infrastructure
+ * configuration, not a per-department operation. Non-admins never reach
+ * this page (`/youtube` gates on `hasAtLeastRole(actor.role, "ADMIN")`) —
+ * they only ever *select* an already-connected channel from a Template
+ * form, filtered to their own Department.
+ *
  * Connecting takes a refresh token obtained out-of-band, not a "Sign in with
  * Google" button — see `connect-youtube-target.ts`'s doc comment for why a
  * full OAuth consent screen is a deliberate future enhancement, not built
@@ -31,27 +80,30 @@ export function YoutubeTargetsManager({
   departmentChoices,
 }: {
   targets: SafeYouTubeTarget[];
-  /** ADMIN only — USER/MANAGER always connect to their own department. */
-  departmentChoices?: DepartmentChoice[];
+  departmentChoices: DepartmentChoice[];
 }) {
   const router = useRouter();
   const formId = useId();
   const [isPending, startTransition] = useTransition();
   const [name, setName] = useState("");
   const [refreshToken, setRefreshToken] = useState("");
-  const [departmentId, setDepartmentId] = useState(
-    departmentChoices?.[0]?.id ?? "",
+  const [connectDepartmentIds, setConnectDepartmentIds] = useState<Set<string>>(
+    new Set(),
   );
   const [formError, setFormError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDepartmentIds, setEditDepartmentIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   function handleConnect(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
     startTransition(async () => {
       const result = await connectYoutubeTargetAction({
-        ...(departmentChoices ? { departmentId } : {}),
         name,
         refreshToken,
+        departmentIds: [...connectDepartmentIds],
       });
       if (!result.ok) {
         setFormError(result.error.message);
@@ -60,6 +112,7 @@ export function YoutubeTargetsManager({
       toast.success(`Connected "${result.data.name}".`);
       setName("");
       setRefreshToken("");
+      setConnectDepartmentIds(new Set());
       router.refresh();
     });
   }
@@ -73,6 +126,27 @@ export function YoutubeTargetsManager({
         return;
       }
       toast.success(`Disconnected "${targetName}".`);
+      router.refresh();
+    });
+  }
+
+  function startEdit(target: SafeYouTubeTarget) {
+    setEditingId(target.id);
+    setEditDepartmentIds(new Set(target.departmentIds));
+  }
+
+  function handleSaveDepartments(targetId: string) {
+    startTransition(async () => {
+      const result = await updateYoutubeTargetDepartmentsAction({
+        targetId,
+        departmentIds: [...editDepartmentIds],
+      });
+      if (!result.ok) {
+        toast.error(result.error.message);
+        return;
+      }
+      toast.success("Department scope updated.");
+      setEditingId(null);
       router.refresh();
     });
   }
@@ -94,24 +168,6 @@ export function YoutubeTargetsManager({
               </p>
             ) : null}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {departmentChoices ? (
-                <div className="space-y-1.5">
-                  <Label htmlFor={`${formId}-department`}>Department</Label>
-                  <select
-                    id={`${formId}-department`}
-                    value={departmentId}
-                    disabled={isPending}
-                    className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs"
-                    onChange={(e) => setDepartmentId(e.target.value)}
-                  >
-                    {departmentChoices.map((department) => (
-                      <option key={department.id} value={department.id}>
-                        {department.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
               <div className="space-y-1.5">
                 <Label htmlFor={`${formId}-name`}>Display name</Label>
                 <Input
@@ -139,8 +195,21 @@ export function YoutubeTargetsManager({
                   stores it encrypted. It is never displayed again.
                 </p>
               </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label>Departments</Label>
+                <DepartmentCheckboxes
+                  formIdPrefix={`${formId}-connect`}
+                  departments={departmentChoices}
+                  selected={connectDepartmentIds}
+                  disabled={isPending}
+                  onChange={setConnectDepartmentIds}
+                />
+              </div>
             </div>
-            <Button type="submit" disabled={isPending}>
+            <Button
+              type="submit"
+              disabled={isPending || connectDepartmentIds.size === 0}
+            >
               <Plus /> {isPending ? "Connecting…" : "Connect channel"}
             </Button>
           </form>
@@ -160,9 +229,9 @@ export function YoutubeTargetsManager({
             targets.map((target) => (
               <div
                 key={target.id}
-                className="flex flex-col gap-2 border-b pb-3 last:border-b-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-2 border-b pb-3 last:border-b-0 last:pb-0"
               >
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
                   <Youtube className="text-muted-foreground size-4" />
                   <span className="font-medium">{target.name}</span>
                   <Badge
@@ -177,18 +246,59 @@ export function YoutubeTargetsManager({
                       {target.lastErrorReason}
                     </span>
                   ) : null}
-                </div>
-                {target.status !== "DISCONNECTED" ? (
+                  {target.status !== "DISCONNECTED" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => handleDisconnect(target.id, target.name)}
+                    >
+                      Disconnect
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
                     disabled={isPending}
-                    onClick={() => handleDisconnect(target.id, target.name)}
+                    onClick={() =>
+                      editingId === target.id
+                        ? setEditingId(null)
+                        : startEdit(target)
+                    }
                   >
-                    Disconnect
+                    {editingId === target.id ? "Cancel" : "Edit departments"}
                   </Button>
-                ) : null}
+                </div>
+
+                {editingId === target.id ? (
+                  <div className="bg-muted/40 space-y-2 rounded-md p-3">
+                    <DepartmentCheckboxes
+                      formIdPrefix={`${formId}-edit-${target.id}`}
+                      departments={departmentChoices}
+                      selected={editDepartmentIds}
+                      disabled={isPending}
+                      onChange={setEditDepartmentIds}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={isPending || editDepartmentIds.size === 0}
+                      onClick={() => handleSaveDepartments(target.id)}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {target.departmentIds.map((id) => (
+                      <Badge key={id} variant="outline">
+                        {departmentChoices.find((d) => d.id === id)?.name ?? id}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
             ))
           )}

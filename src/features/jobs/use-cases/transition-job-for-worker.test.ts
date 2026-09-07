@@ -1,55 +1,66 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const transitionJob = vi.fn();
+const findJobState = vi.fn();
 
 vi.mock("@/features/jobs/use-cases/transition-job", () => ({
   transitionJob: (...args: unknown[]) => transitionJob(...args),
 }));
+vi.mock("@/features/jobs/repository/job-repository", () => ({
+  findJobState: (...args: unknown[]) => findJobState(...args),
+}));
 
 const { transitionJobForWorker } = await import("./transition-job-for-worker");
 
+const ALLOWED = ["dept-a"];
+
 beforeEach(() => {
   vi.clearAllMocks();
+  findJobState.mockResolvedValue({
+    state: "RENDERING",
+    departmentId: "dept-a",
+  });
   transitionJob.mockResolvedValue({ id: "job-1", state: "RENDERING" });
 });
 
 describe("transitionJobForWorker", () => {
   it("maps a legacy integer state and forwards to transitionJob", async () => {
-    await transitionJobForWorker("job-1", { state: 4 }); // InProgress -> RENDERING
+    await transitionJobForWorker("job-1", { state: 4 }, ALLOWED); // InProgress -> RENDERING
     expect(transitionJob).toHaveBeenCalledWith("job-1", "RENDERING", {});
   });
 
   it("maps a canonical Studio name and forwards to transitionJob", async () => {
-    await transitionJobForWorker("job-1", { state: "RENDERED" });
+    await transitionJobForWorker("job-1", { state: "RENDERED" }, ALLOWED);
     expect(transitionJob).toHaveBeenCalledWith("job-1", "RENDERED", {});
   });
 
   it("rejects an unrecognized state value without calling transitionJob", async () => {
     await expect(
-      transitionJobForWorker("job-1", { state: "NOT_A_STATE" }),
+      transitionJobForWorker("job-1", { state: "NOT_A_STATE" }, ALLOWED),
     ).rejects.toMatchObject({ kind: "validation" });
     expect(transitionJob).not.toHaveBeenCalled();
   });
 
   it("rejects an out-of-range legacy integer", async () => {
     await expect(
-      transitionJobForWorker("job-1", { state: 42 }),
+      transitionJobForWorker("job-1", { state: 42 }, ALLOWED),
     ).rejects.toMatchObject({ kind: "validation" });
     expect(transitionJob).not.toHaveBeenCalled();
   });
 
   it("requires errorReason when the target state is ERROR", async () => {
     await expect(
-      transitionJobForWorker("job-1", { state: "ERROR" }),
+      transitionJobForWorker("job-1", { state: "ERROR" }, ALLOWED),
     ).rejects.toMatchObject({ kind: "validation" });
     expect(transitionJob).not.toHaveBeenCalled();
   });
 
   it("forwards errorReason when transitioning to ERROR", async () => {
-    await transitionJobForWorker("job-1", {
-      state: 8,
-      errorReason: "ffmpeg crashed",
-    });
+    await transitionJobForWorker(
+      "job-1",
+      { state: 8, errorReason: "ffmpeg crashed" },
+      ALLOWED,
+    );
     expect(transitionJob).toHaveBeenCalledWith("job-1", "ERROR", {
       errorReason: "ffmpeg crashed",
     });
@@ -57,7 +68,26 @@ describe("transitionJobForWorker", () => {
 
   it("does not require errorReason for non-ERROR targets", async () => {
     await expect(
-      transitionJobForWorker("job-1", { state: "RENDERING" }),
+      transitionJobForWorker("job-1", { state: "RENDERING" }, ALLOWED),
     ).resolves.toBeDefined();
+  });
+
+  it("throws not_found when the job doesn't exist", async () => {
+    findJobState.mockResolvedValue(null);
+    await expect(
+      transitionJobForWorker("job-1", { state: "RENDERING" }, ALLOWED),
+    ).rejects.toMatchObject({ kind: "not_found" });
+    expect(transitionJob).not.toHaveBeenCalled();
+  });
+
+  it("throws not_found (never forbidden) for a job outside the Worker's allowed departments", async () => {
+    findJobState.mockResolvedValue({
+      state: "RENDERING",
+      departmentId: "dept-z",
+    });
+    await expect(
+      transitionJobForWorker("job-1", { state: "RENDERING" }, ALLOWED),
+    ).rejects.toMatchObject({ kind: "not_found" });
+    expect(transitionJob).not.toHaveBeenCalled();
   });
 });

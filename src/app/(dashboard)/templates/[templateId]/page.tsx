@@ -13,6 +13,7 @@ import { listGalleryFiles } from "@/features/files/use-cases/list-files";
 import { listAllGalleryFilesForAdmin } from "@/features/files/use-cases/list-all-gallery-files-for-admin";
 import { listYoutubeTargetsForTemplateForm } from "@/features/templates/use-cases/list-youtube-targets-for-template-form";
 import { listAllYoutubeTargetsForTemplateFormAdmin } from "@/features/templates/use-cases/list-all-youtube-targets-for-template-form-admin";
+import { listDepartmentsForAdmin } from "@/features/departments/read/list-departments-for-admin";
 
 export const metadata: Metadata = { title: "Template" };
 
@@ -44,7 +45,7 @@ export default async function TemplateDetailPage({
 
   const canManage = hasAtLeastRole(actor.role, "MANAGER");
   const isAdmin = actor.role === "ADMIN";
-  const [galleryFiles, youtubeTargets] = await Promise.all([
+  const [galleryFiles, youtubeTargets, departmentChoices] = await Promise.all([
     isAdmin
       ? listAllGalleryFilesForAdmin(actor)
       : listGalleryFiles(actor, { page: 1, pageSize: 100 }).then(
@@ -61,6 +62,9 @@ export default async function TemplateDetailPage({
         ? listAllYoutubeTargetsForTemplateFormAdmin(actor)
         : listYoutubeTargetsForTemplateForm(actor, template.departmentId)
       : Promise.resolve([]),
+    // ADMIN-only — lets `TemplateForm` offer a Department transfer
+    // (docs/domain/templates.md "Department transfer", ADR-0040).
+    isAdmin ? listDepartmentsForAdmin(actor) : undefined,
   ]);
 
   return (
@@ -80,6 +84,7 @@ export default async function TemplateDetailPage({
         template={template}
         galleryFiles={galleryFiles}
         youtubeTargets={youtubeTargets}
+        departmentChoices={departmentChoices}
         readOnly={!canManage || Boolean(template.deletedAt)}
       />
     </PageShell>

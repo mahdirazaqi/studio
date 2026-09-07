@@ -40,6 +40,11 @@ export interface CurrentUser {
   id: string;
   role: Role;
   departmentId: string;
+  /** Display-only — resolved via the same session join, no extra query
+   * (docs/domain/departments.md "Profile display"). ADMIN's own department is
+   * just their "home" department (OD-46-adjacent, unresolved) — shown as-is,
+   * never hidden or faked. */
+  departmentName: string;
   displayName: string;
   email: string;
 }
@@ -59,6 +64,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     id: sessionUser.id,
     role: sessionUser.role,
     departmentId: sessionUser.departmentId,
+    departmentName: sessionUser.departmentName,
     displayName: sessionUser.fullName,
     email: sessionUser.email,
   };

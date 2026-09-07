@@ -87,7 +87,7 @@ columns**, never combined into one field (Phase 5 brief §7). `templateLifecycle
 | Field                                                 | Notes                                                                                                                                                                                                                                                                                                                             |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`                                                  | Referenced by a future Job's snapshot forever — never reused, never removed.                                                                                                                                                                                                                                                      |
-| `departmentId`                                        | Required. Scopes ownership. Immutable after creation (no reassignment path — matches OD-08's "not supported" default).                                                                                                                                                                                                            |
+| `departmentId`                                        | Required. Scopes ownership. Set at creation; **may be changed later, ADMIN-only** — see "Department transfer" below (ADR-0040, revises the earlier "immutable" design).                                                                                                                                                           |
 | `createdByUserId`                                     | Always set (Users are never deleted — ADR-0007 — so this FK is `onDelete: Restrict`, not nullable).                                                                                                                                                                                                                               |
 | `name`                                                | Unique per Department among non-deleted rows — **ADR-0027, resolves OD-09.**                                                                                                                                                                                                                                                      |
 | `status`                                              | `ACTIVE` \| `DISABLED`. Independent of `deletedAt` — see "Lifecycle" above.                                                                                                                                                                                                                                                       |
@@ -157,12 +157,49 @@ A Template can therefore never silently end up pointing at a missing File (Phase
 
 ### Department ownership
 
-A Template belongs to one Department, fixed at creation and never reassigned (matches
-OD-08's "not supported" default for every resource). USER/MANAGER see and use only their
-department's Templates; ADMIN sees and manages all, and may choose an explicit target
-department when creating one (validated against `departmentExists`, mirroring
-`features/files/use-cases/upload-file.ts`'s `resolveTargetDepartment`). A future Job can
-only be created from a Template in the Job's own Department.
+A Template belongs to one Department, set at creation, and — **revised, Phase 11,
+ADR-0040** — may later be **transferred to a different Department, ADMIN-only**. See
+"Department transfer" below. USER/MANAGER see and use only their department's
+Templates; ADMIN sees and manages all, and may choose an explicit target department when
+creating one (validated against `departmentExists`, mirroring
+`features/files/use-cases/upload-file.ts`'s `resolveTargetDepartment`). A Job can only be
+created from a Template in the Job's own Department.
+
+### Department transfer — implemented, Phase 11 (ADR-0040)
+
+**Only ADMIN may change a Template's Department**, on edit — never USER, never MANAGER,
+even one otherwise authorized to edit the Template in its current Department, and even
+via a crafted request that includes a `departmentId` differing from the Template's
+current one: `updateTemplate` gates the transfer branch with `requireRole(actor,
+"ADMIN")` before it ever looks at whether `input.departmentId` differs, so a non-ADMIN's
+attempted `departmentId` change is silently ignored, not merely rejected after the fact.
+
+A transfer:
+
+1. Requires the target Department to actually exist (`departmentExists`) — a
+   nonexistent target is rejected with a clean `business_rule` error.
+2. **Re-verifies every dependent reference against the _target_ Department, not the
+   original** — `verifyAssetFileReferences`/`verifyYoutubeTargetReference` (the same
+   functions a plain same-department edit already runs) are called with the target
+   Department id. An asset `defaultFileId` or `youtubeTargetId` that doesn't resolve in
+   the target Department is rejected with the same `business_rule` error a same-
+   department edit pointing at a nonexistent reference would get — the transfer is never
+   applied halfway, and nothing about the Template or its dependencies is silently
+   mutated to "fix" the mismatch.
+3. Needs **no historical-integrity mechanism of its own**. `Job.departmentId` is copied
+   onto the Job row once, at Job-creation time, from the Template's Department _at that
+   moment_ — a plain stored column, never a live join through `Job.templateId →
+Template.departmentId` (see `docs/data/historical-integrity.md` and ADR-0028). Moving
+   a Template to a different Department afterward does not, and structurally cannot,
+   retroactively change which Department any existing Job belongs to. A Job's own
+   immutable `snapshot`/`JobAsset` rows (ADR-0028) are equally unaffected — they were
+   captured from the Template as it existed at that Job's creation, and a later transfer
+   doesn't touch them.
+
+A same-Department edit (`departmentId` omitted, or unchanged) is unaffected by any of
+this — the transfer branch is only entered when `input.departmentId` is present and
+actually differs from the existing value, so a MANAGER's ordinary edit of their own
+department's Template still works exactly as before.
 
 ### Creation & editing
 

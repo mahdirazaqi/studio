@@ -35,6 +35,7 @@ export default async function DashboardLayout({
           displayName: user.displayName,
           email: user.email,
           role: user.role,
+          departmentName: user.departmentName,
         }}
       />
       <SidebarInset className="flex min-h-svh flex-col">

@@ -2,7 +2,8 @@
 
 **Implemented, Phase 9** (ADR-0039). Studio publishes a finished render to YouTube as
 part of Job delivery, triggered by the Worker's result-upload request
-(docs/integrations/worker-api.md §2).
+(docs/integrations/worker-api.md §2). **YouTube Target management moved to ADMIN-only,
+many-to-many Department scope, Phase 11** (ADR-0040).
 
 ## 1. Legacy behavior (reference only) `LEGACY`
 
@@ -63,22 +64,43 @@ The legacy `Channel` concept is `YouTubeTarget` (`prisma/schema.prisma`):
 | `encryptedRefreshToken`/`encryptedAccessToken` | AES-256-GCM, `server/adapters/youtube/token-cipher.ts` — never plaintext at rest, never logged, never returned to a client.                                                                      |
 | `accessTokenExpiresAt`                         | Drives on-demand refresh with a safety margin (`features/youtube/use-cases/get-valid-access-token.ts`).                                                                                          |
 | `status`                                       | `CONNECTED` \| `DISCONNECTED` \| `ERROR` — a refresh failure (revoked token) marks it `ERROR` with a safe `lastErrorReason`, taking it out of future Job creation eligibility until reconnected. |
-| `departmentId`                                 | **Required — department-scoped** (resolves OD-36 per its own recommendation). ADMIN may connect/manage any department's Target.                                                                  |
+| `departments`                                  | **Revised, ADR-0040: many-to-many with `Department`, not a single FK.** A Target may serve several Departments (one channel is commonly shared) — see "Management & Department scope" below.     |
 
 **Connection is a verified refresh-token entry, not a "Connect with Google" OAuth
 consent-screen flow** (ADR-0039 point 5) — a deliberate scope reduction, not an
 oversight:
 
-1. A MANAGER+ operator obtains a refresh token for the target channel out-of-band
-   (Google's OAuth Playground, or an equivalent one-time consent flow against Studio's
-   own registered `YOUTUBE_CLIENT_ID`/`YOUTUBE_CLIENT_SECRET`).
+1. An **ADMIN** (revised, ADR-0040 — was MANAGER+, department-scoped) obtains a refresh
+   token for the target channel out-of-band (Google's OAuth Playground, or an equivalent
+   one-time consent flow against Studio's own registered `YOUTUBE_CLIENT_ID`/
+   `YOUTUBE_CLIENT_SECRET`).
 2. They paste it into Studio's `/youtube` page (`features/youtube/components/
-youtube-targets-manager.tsx`) along with a display name.
+youtube-targets-manager.tsx`) along with a display name and the set of Departments the
+   channel should serve.
 3. `connectYoutubeTarget` (`features/youtube/use-cases/connect-youtube-target.ts`)
    immediately exchanges it for an access token and calls the real `channels.list` API —
    a bad/expired/revoked token is rejected right there, never silently stored.
 4. The refresh token is encrypted and stored; the resolved `youtubeChannelId`/channel
-   title come from the API response, never the client's input.
+   title come from the API response, never the client's input. `youtubeChannelId` is now
+   globally unique (was unique per-Department) — a channel is no longer owned by exactly
+   one Department, so reconnecting the same channel updates the existing row rather than
+   creating a duplicate per Department.
+
+### Management & Department scope — revised, ADR-0040
+
+`youtube:manage` (connect/disconnect/edit-Department-scope) is **ADMIN-only** — the same
+reasoning `worker_key:manage` uses (docs/integrations/worker-api.md §3a): choosing which
+Departments may use a shared channel is system-wide infrastructure configuration, not a
+Department-local operation a MANAGER should own. From `/youtube`, an ADMIN can also edit
+an existing Target's Department scope — a full replace of the assigned Departments
+(never a diff), taking effect immediately (nothing cached; the next Template-form load or
+Job creation re-reads the relation fresh).
+
+**Non-ADMIN users are unaffected in what they can _do_.** `USER`/`MANAGER` never manage
+Target connections — they only ever _select_ an already-connected, already-scoped
+channel when authoring a Job or Template, filtered to Targets assigned to their own
+Department (`findConnectedYoutubeTargetForDepartment`), gated by `template:manage`/
+`job:manage` exactly as before, never by `youtube:manage`.
 
 A full self-service OAuth consent-screen UI (`GET /api/youtube/oauth/callback` + a
 "Connect with Google" button) is a documented, deliberately deferred future enhancement —

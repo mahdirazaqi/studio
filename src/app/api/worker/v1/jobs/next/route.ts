@@ -25,8 +25,8 @@ import { buildFileUrlFromRequest } from "@/app/api/worker/v1/_lib/build-file-url
 export const POST = defineRouteHandler({
   name: "worker.jobs.next",
   authenticate: authenticateWorker,
-  handler: async ({ request }) => {
-    const job = await claimNextJob();
+  handler: async ({ request, auth }) => {
+    const job = await claimNextJob(auth.allowedDepartmentIds);
     if (!job) return null;
     return buildWorkerJobPayload(job, (fileId) =>
       buildFileUrlFromRequest(request, fileId),

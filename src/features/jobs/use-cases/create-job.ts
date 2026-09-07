@@ -1,7 +1,7 @@
 import { authorize, type Actor } from "@/server/authz";
 import { businessRuleError, notFoundError } from "@/server/errors/app-error";
 import { findTemplateInScope } from "@/features/templates/repository/template-repository";
-import { findConnectedYoutubeTargetInDepartment } from "@/features/youtube/repository/youtube-target-repository";
+import { findConnectedYoutubeTargetForDepartment } from "@/features/youtube/repository/youtube-target-repository";
 import { resolveJobAssets } from "@/features/jobs/use-cases/resolve-job-assets";
 import { createJobWithAssets } from "@/features/jobs/repository/job-repository";
 import type { JobSnapshot, SafeJobDetail } from "@/features/jobs/domain/job";
@@ -50,7 +50,7 @@ export async function createJob(
             "This template has no connected YouTube channel, so a job created from it cannot deliver to YouTube.",
           );
         }
-        const target = await findConnectedYoutubeTargetInDepartment(
+        const target = await findConnectedYoutubeTargetForDepartment(
           template.departmentId,
           template.youtubeTargetId,
         );

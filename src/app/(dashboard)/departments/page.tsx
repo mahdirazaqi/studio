@@ -1,41 +1,40 @@
 import type { Metadata } from "next";
 
 import { PageHeader, PageShell } from "@/components/layout/page-shell";
+import { ForbiddenPage } from "@/components/layout/forbidden-page";
 import { requireUser } from "@/server/auth/current-user";
 import { toActor } from "@/server/authz";
 import { DepartmentsManager } from "@/features/departments/components/departments-manager";
-import { listDepartmentsForManagement } from "@/features/departments/use-cases/list-departments-for-management";
+import { listAllDepartments } from "@/features/departments/repository/department-repository";
 
 export const metadata: Metadata = { title: "Departments" };
 
 /**
- * `/departments` is reachable by every signed-in role (docs/domain/
- * authorization.md — "View own department" ✅ for USER/MANAGER/ADMIN); only
- * ADMIN sees the create/rename controls. There is no separate `ForbiddenPage`
- * gate here the way `/users` has — viewing your own department is not a
- * privileged operation, matching the permission matrix exactly (only
- * "List all departments" and "Create / rename department" are ADMIN-only,
- * and both are gated inside `listDepartmentsForManagement`/the
- * create-rename actions themselves, not by hiding this page).
+ * `/departments` is **ADMIN-only** (revised — docs/domain/departments.md
+ * "Profile display"): Department management now sits alongside Worker API
+ * Key and YouTube Channel scoping as system-wide admin configuration, not a
+ * resource any USER/MANAGER views directly. A USER/MANAGER instead sees
+ * their own Department's name in the sidebar footer
+ * (`components/layout/app-sidebar.tsx`) — resolved from their own session,
+ * no separate page or query. Direct URL access is checked here server-side;
+ * hiding the nav item (`navigationForRole`) is only a presentation choice.
  */
 export default async function DepartmentsPage() {
   const user = await requireUser();
   const actor = toActor(user);
-  const isAdmin = actor.role === "ADMIN";
+  if (actor.role !== "ADMIN") {
+    return <ForbiddenPage />;
+  }
 
-  const departments = await listDepartmentsForManagement(actor);
+  const departments = await listAllDepartments();
 
   return (
     <PageShell>
       <PageHeader
         title="Departments"
-        description={
-          isAdmin
-            ? "The tenancy boundary. Create and rename departments system-wide."
-            : "Your department — the tenancy boundary your resources belong to."
-        }
+        description="The tenancy boundary. Create and rename departments system-wide."
       />
-      <DepartmentsManager departments={departments} isAdmin={isAdmin} />
+      <DepartmentsManager departments={departments} isAdmin />
     </PageShell>
   );
 }

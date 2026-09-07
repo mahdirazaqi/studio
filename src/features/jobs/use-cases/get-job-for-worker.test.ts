@@ -13,17 +13,24 @@ beforeEach(() => {
 });
 
 describe("getJobForWorker", () => {
-  it("returns the job when found, regardless of department", async () => {
+  it("returns the job when it's in an allowed department", async () => {
     findJobById.mockResolvedValue({ id: "job-1", departmentId: "dept-b" });
-    await expect(getJobForWorker("job-1")).resolves.toMatchObject({
-      id: "job-1",
-    });
+    await expect(
+      getJobForWorker("job-1", ["dept-a", "dept-b"]),
+    ).resolves.toMatchObject({ id: "job-1" });
   });
 
   it("throws not_found when the job doesn't exist", async () => {
     findJobById.mockResolvedValue(null);
-    await expect(getJobForWorker("missing")).rejects.toMatchObject({
+    await expect(getJobForWorker("missing", ["dept-a"])).rejects.toMatchObject({
       kind: "not_found",
     });
+  });
+
+  it("throws not_found (never forbidden) for a job outside the Worker's allowed departments", async () => {
+    findJobById.mockResolvedValue({ id: "job-1", departmentId: "dept-c" });
+    await expect(
+      getJobForWorker("job-1", ["dept-a", "dept-b"]),
+    ).rejects.toMatchObject({ kind: "not_found" });
   });
 });

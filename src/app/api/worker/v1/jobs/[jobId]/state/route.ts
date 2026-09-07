@@ -21,8 +21,12 @@ export const PATCH = defineRouteHandler({
   authenticate: authenticateWorker,
   params: z.object({ jobId: commonSchemas.id }),
   body: workerTransitionSchema,
-  handler: async ({ params, body }) => {
-    const job = await transitionJobForWorker(params.jobId, body);
+  handler: async ({ params, body, auth }) => {
+    const job = await transitionJobForWorker(
+      params.jobId,
+      body,
+      auth.allowedDepartmentIds,
+    );
     return { id: job.id, state: job.state };
   },
 });

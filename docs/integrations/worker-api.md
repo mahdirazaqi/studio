@@ -1,9 +1,10 @@
 # Render Worker REST API
 
 **Implemented, Phase 7** (claim/get/state/progress/duration). **Result delivery
-implemented, Phase 9** (§2, ADR-0039). ADR-0004 (surface & auth requirement), ADR-0032
-(authentication mechanism), ADR-0033 (API surface & versioning), ADR-0034 (trust model &
-idempotency).
+implemented, Phase 9** (§2, ADR-0039). **Per-Worker, Department-scoped API keys
+implemented, Phase 11** (§3/§4, ADR-0040 — supersedes ADR-0032's single shared static
+key). ADR-0004 (surface & auth requirement), ADR-0033 (API surface & versioning),
+ADR-0034 (trust model & idempotency, revised by ADR-0040).
 
 The **Render Worker** is an external service (not in this repo) that performs the actual
 video rendering. It is the **only** first-class REST client of Studio. Studio must keep it
@@ -43,8 +44,9 @@ internal capability the Worker never needed).
 
 - **Compatibility first:** the claim/get-by-id response keeps legacy's exact field
   names; only new fields are added.
-- **Authenticated:** every endpoint requires the Worker's shared service credential
-  (ADR-0004, ADR-0032). **This is the one deliberate breaking change.**
+- **Authenticated:** every endpoint requires a valid, ACTIVE `WorkerApiKey` credential
+  (ADR-0004, ADR-0040), scoped to one or more Departments. **This is the one deliberate
+  breaking change from legacy.**
 - **Versioned:** `/api/worker/v1/...`.
 - **Thin handlers → shared use cases.** Every handler is `defineRouteHandler({ name,
 authenticate: authenticateWorker, params/body, handler })` — authenticate, validate,
@@ -55,15 +57,15 @@ authenticate: authenticateWorker, params/body, handler })` — authenticate, val
 
 ### Endpoints
 
-| Method  | Path                               | Maps to legacy             | Handler calls                                                       |
-| ------- | ---------------------------------- | -------------------------- | ------------------------------------------------------------------- |
-| `POST`  | `/api/worker/v1/jobs/next`         | `GET /jobs/fetch`          | `claimNextJob()` — atomic; `204` when the queue is empty.           |
-| `GET`   | `/api/worker/v1/jobs/:id`          | `GET /jobs/:id`            | `getJobForWorker(id)` — unscoped, see §4.                           |
-| `PATCH` | `/api/worker/v1/jobs/:id/state`    | `PATCH /jobs/:id/state`    | `transitionJobForWorker(id, body)` → `transitionJob` (Phase 6).     |
-| `PATCH` | `/api/worker/v1/jobs/:id/progress` | `PATCH /jobs/:id/progress` | `updateJobProgress({ jobId, progress })` (Phase 6).                 |
-| `PATCH` | `/api/worker/v1/jobs/:id/duration` | `PATCH /jobs/:id/duration` | `updateJobDuration({ jobId, durationSeconds })` (Phase 6).          |
-| `POST`  | `/api/worker/v1/jobs/:id/result`   | `POST /jobs/:id/upload`    | `acceptJobResult(id, videoBuffer)` (Phase 9, ADR-0039).             |
-| `GET`   | `/api/files/:fileId`               | n/a (new)                  | Worker-authenticated branch of the existing Phase 4 route — see §5. |
+| Method  | Path                               | Maps to legacy             | Handler calls                                                            |
+| ------- | ---------------------------------- | -------------------------- | ------------------------------------------------------------------------ |
+| `POST`  | `/api/worker/v1/jobs/next`         | `GET /jobs/fetch`          | `claimNextJob()` — atomic; `204` when the queue is empty.                |
+| `GET`   | `/api/worker/v1/jobs/:id`          | `GET /jobs/:id`            | `getJobForWorker(id, allowedDepartmentIds)` — Department-scoped, see §4. |
+| `PATCH` | `/api/worker/v1/jobs/:id/state`    | `PATCH /jobs/:id/state`    | `transitionJobForWorker(id, body)` → `transitionJob` (Phase 6).          |
+| `PATCH` | `/api/worker/v1/jobs/:id/progress` | `PATCH /jobs/:id/progress` | `updateJobProgress({ jobId, progress })` (Phase 6).                      |
+| `PATCH` | `/api/worker/v1/jobs/:id/duration` | `PATCH /jobs/:id/duration` | `updateJobDuration({ jobId, durationSeconds })` (Phase 6).               |
+| `POST`  | `/api/worker/v1/jobs/:id/result`   | `POST /jobs/:id/upload`    | `acceptJobResult(id, videoBuffer)` (Phase 9, ADR-0039).                  |
+| `GET`   | `/api/files/:fileId`               | n/a (new)                  | Worker-authenticated branch of the existing Phase 4 route — see §5.      |
 
 **`POST /api/worker/v1/jobs/:id/result` — implemented, Phase 9.** Delivers the finished
 render (docs/integrations/youtube.md "Rendered result flow"). **Not multipart** — the
@@ -176,41 +178,86 @@ historical or in-flight Job's payload can never change meaning underneath the Wo
 not `404` (legacy) and not an ambiguous `200` with an empty body. A Worker's poll
 finding nothing to do is a normal outcome (ADR-0033).
 
-## 3. Authentication — implemented (ADR-0032)
+## 3. Authentication — implemented (ADR-0040, supersedes ADR-0032)
 
-A single shared static API key, `WORKER_API_KEY` (required environment variable — the
-process refuses to start without it), sent as `Authorization: Bearer <key>` on every
+Each Worker identity is a `WorkerApiKey` row — created, scoped to one or more
+Departments, revoked/reactivated, and re-scoped by an **ADMIN** at `/worker-keys`
+(`worker_key:manage`, ADMIN-only) — sent as `Authorization: Bearer <secret>` on every
 `/api/worker/v1/**` request and on a Worker-authenticated `/api/files/[fileId]` request.
-Compared with a timing-safe check (`@/server/worker-auth`) — see ADR-0032 for exactly
-why (fixed-length digest comparison, not a raw string compare). Missing, malformed
-(no `Bearer` prefix, empty token), or incorrect credentials all produce the same `401
-unauthenticated` response, with no indication of which case it was and no part of the
-submitted value echoed back.
+`@/server/worker-auth`'s `authenticateWorker` is the sole place this credential is read,
+hashed (SHA-256, `WorkerApiKey.keyHash`, `@unique` — doubles as the lookup index), or
+compared — the same "only a hash is ever stored" trust model `Session` already uses
+(ADR-0020): a database read alone never yields a usable credential. Missing, malformed
+(no `Bearer` prefix, empty token), revoked, or unknown credentials all produce the same
+`401 unauthenticated` response, with no indication of which case it was and no part of
+the submitted value echoed back. The raw secret is shown to the ADMIN **exactly once**,
+immediately after creation — never stored anywhere retrievable, never re-displayed.
 
-**Not implemented, deliberately** (ADR-0032): a `WorkerCredential` database table,
-per-Worker identity, key rotation without a redeploy, multiple simultaneous keys,
-API-key management UI. Rotating the credential means changing the environment variable
-and redeploying.
+`authenticateWorker` resolves a `WorkerAuthContext { workerApiKeyId,
+allowedDepartmentIds }` once, at authentication — every Worker Route Handler receives
+it as `ctx.auth` (a `defineRouteHandler` `authenticate` hook, `@/server/api`) and passes
+`allowedDepartmentIds` straight into its use case. **This is the only place a Worker's
+Department scope is ever resolved** — never re-derived from anything client-supplied,
+never trusted from a request body/query param.
+
+**Not implemented, deliberately** (ADR-0040): per-Worker rate limiting beyond what
+ADR-0034 already covers, key rotation that auto-expires the old secret (revoking and
+creating a new key is the rotation mechanism), a `WorkerApiKey`-scoped audit log beyond
+`lastUsedAt` (best-effort telemetry, never blocks or fails a request).
 
 The Worker principal:
 
-- is not a `User`, has no Department, never becomes an `Actor`;
+- is not a `User`, has no single Department (it may hold several), never becomes an
+  `Actor`;
 - can call `/api/worker/**` and (with the same credential) `/api/files/[fileId]`;
 - is **not** individually rate-limited or logged beyond what
   [../security/security.md](../security/security.md) already covers for the whole app —
   a dedicated Worker-credential rate limiter was not built this phase (OD-41 stays
   open; Worker authentication itself remains mandatory regardless).
 
-## 4. Trust model — implemented (ADR-0034)
+### 3a. Managing Worker API Keys — implemented (`/worker-keys`, ADMIN-only)
 
-Studio's Worker is **one shared, non-departmental principal** — there is no per-Worker
-identity to restrict by, and this page does not pretend otherwise (Phase 7 brief §14):
+An ADMIN creates a Worker API Key at `/worker-keys`: a human-readable name plus at
+least one Department. The raw secret is displayed **once**, immediately after
+creation, in a dismissible banner with a "copy this now" warning — it is never stored
+anywhere it could be re-displayed, and no endpoint returns it again. From the same
+page, an ADMIN can:
 
-- `GET /api/worker/v1/jobs/:id` returns **any** Job by id, claimed or not, from any
-  Department. Resolves OD-30.
-- If two physical Worker processes somehow share the credential, each can read and
-  mutate (via progress/duration/state) any Job the other is working on. This is an
-  accepted consequence of skipping per-Worker identity (ADR-0032), not an oversight.
+- **Revoke** a key (its very next Worker request gets `401`, nothing cached) or
+  **reactivate** a previously revoked one — never a hard delete, so a revoked key's
+  history (who created it, when it was last used) stays inspectable.
+- **Edit its Department scope** — a full replace of the assigned Departments (never a
+  diff), taking effect on the Worker's very next request.
+- Inspect metadata: status, assigned Departments, `lastUsedAt` (best-effort, updated
+  opportunistically on each authenticated request), `createdAt`, who created it.
+
+A key with zero Departments cannot be created (`departmentIds` requires at least one) —
+there is no such thing as an unscoped Worker credential under this mechanism.
+
+## 4. Trust model & Department scope — implemented (ADR-0034, revised ADR-0040)
+
+Studio's Worker is a machine principal identified by its `WorkerApiKey`, scoped to one
+or more Departments (never zero — creation requires at least one) — this is the one
+piece ADR-0034's "single shared, non-departmental principal" framing no longer describes
+correctly; ADR-0040 supersedes it:
+
+- Every Worker operation on a _specific_ Job (`GET /jobs/:id`, `PATCH .../state`,
+  `PATCH .../progress`, `PATCH .../duration`, `POST .../result`) checks
+  `assertWorkerDepartmentAccess(allowedDepartmentIds, job.departmentId)` before touching
+  it — `404 not_found`, **never** `403 forbidden`, matching every other cross-department
+  access pattern in this codebase: a scoped-out Worker cannot distinguish "exists in a
+  Department I can't reach" from "doesn't exist." Resolves OD-30 honestly in the other
+  direction from ADR-0034's original answer — there **is** now a real per-credential
+  boundary to enforce.
+- `POST /api/worker/v1/jobs/next`'s atomic claim (`SELECT ... FOR UPDATE SKIP LOCKED`)
+  filters `WHERE "departmentId" = ANY(allowedDepartmentIds)` as part of the same atomic
+  statement, not a check applied after the row is already locked — a scoped-out `QUEUED`
+  Job is never considered for claiming by a Worker that can't reach it, race or no race.
+- If two physical Worker processes share the same credential, each can read and mutate
+  any Job within that credential's Department scope the other is working on — an
+  accepted consequence of one credential having no _sub_-identity within its own scope,
+  not an oversight. Issue separate `WorkerApiKey`s per physical Worker process if that
+  distinction matters.
 - Dashboard-user Department isolation is completely unaffected — this is a property of
   the Worker being a different kind of principal, not a weakening of `Actor`-based
   authorization anywhere.
@@ -249,14 +296,14 @@ correctly regardless of how the Worker reaches Studio.
 
 ## 6a. Worker compatibility matrix (five required operations)
 
-| Legacy route               | Legacy method | Studio route                       | Studio method | Request                                                                  | Response                                                          | Auth                          | Notes                                                                                                                                                                                            |
-| -------------------------- | ------------- | ---------------------------------- | ------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /jobs/fetch`          | `GET`         | `/api/worker/v1/jobs/next`         | `POST`        | none                                                                     | `200` claim payload (see §2) or `204 No Content` if none eligible | `Authorization: Bearer <key>` | Method intentionally changed: a side-effecting `GET` is forbidden (Security Requirements §11); atomic claim (`SELECT ... FOR UPDATE SKIP LOCKED`), never a find-then-update race.                |
-| `POST /jobs/:id/upload`    | `POST`        | `/api/worker/v1/jobs/:id/result`   | `POST`        | Raw video bytes (any `Content-Type`; sniffed server-side), not multipart | `200 { id, state, videoFileId }`                                  | `Authorization: Bearer <key>` | Renamed `upload` → `result` (delivering the render output, not uploading an input file); synchronous, not fire-and-forget; idempotent on a duplicate submission.                                 |
-| `PATCH /jobs/:id/state`    | `PATCH`       | `/api/worker/v1/jobs/:id/state`    | `PATCH`       | `{ state }` — legacy integer 0–9 **or** a Studio state name              | `200 { id, state }`                                               | `Authorization: Bearer <key>` | Legacy accepted **any** integer with no validation; Studio validates against the state machine (`422`/`409` for an illegal/raced transition). `errorReason` required when the target is `ERROR`. |
-| `PATCH /jobs/:id/progress` | `PATCH`       | `/api/worker/v1/jobs/:id/progress` | `PATCH`       | `{ progress: 0..100 }`                                                   | `200 { id, progress }`                                            | `Authorization: Bearer <key>` | Legacy `{progress}` was unvalidated; Studio validates the range and rejects once the Job is terminal.                                                                                            |
-| `PATCH /jobs/:id/duration` | `PATCH`       | `/api/worker/v1/jobs/:id/duration` | `PATCH`       | `{ durationSeconds: >=0 }`                                               | `200 { id, durationSeconds }`                                     | `Authorization: Bearer <key>` | Legacy key was `duration`; Studio renamed to `durationSeconds` (resolves OD-33) and validates non-negative.                                                                                      |
-| n/a (Worker had none)      | —             | `GET /api/worker/v1/jobs/:id`      | `GET`         | none                                                                     | `200` same payload shape as claim                                 | `Authorization: Bearer <key>` | New — lets a Worker that crashed mid-render re-fetch the Job it was working on, by id, instead of losing its place.                                                                              |
+| Legacy route               | Legacy method | Studio route                       | Studio method | Request                                                                  | Response                                                          | Auth                                                                        | Notes                                                                                                                                                                                            |
+| -------------------------- | ------------- | ---------------------------------- | ------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /jobs/fetch`          | `GET`         | `/api/worker/v1/jobs/next`         | `POST`        | none                                                                     | `200` claim payload (see §2) or `204 No Content` if none eligible | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Method intentionally changed: a side-effecting `GET` is forbidden (Security Requirements §11); atomic claim (`SELECT ... FOR UPDATE SKIP LOCKED`), never a find-then-update race.                |
+| `POST /jobs/:id/upload`    | `POST`        | `/api/worker/v1/jobs/:id/result`   | `POST`        | Raw video bytes (any `Content-Type`; sniffed server-side), not multipart | `200 { id, state, videoFileId }`                                  | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Renamed `upload` → `result` (delivering the render output, not uploading an input file); synchronous, not fire-and-forget; idempotent on a duplicate submission.                                 |
+| `PATCH /jobs/:id/state`    | `PATCH`       | `/api/worker/v1/jobs/:id/state`    | `PATCH`       | `{ state }` — legacy integer 0–9 **or** a Studio state name              | `200 { id, state }`                                               | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Legacy accepted **any** integer with no validation; Studio validates against the state machine (`422`/`409` for an illegal/raced transition). `errorReason` required when the target is `ERROR`. |
+| `PATCH /jobs/:id/progress` | `PATCH`       | `/api/worker/v1/jobs/:id/progress` | `PATCH`       | `{ progress: 0..100 }`                                                   | `200 { id, progress }`                                            | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Legacy `{progress}` was unvalidated; Studio validates the range and rejects once the Job is terminal.                                                                                            |
+| `PATCH /jobs/:id/duration` | `PATCH`       | `/api/worker/v1/jobs/:id/duration` | `PATCH`       | `{ durationSeconds: >=0 }`                                               | `200 { id, durationSeconds }`                                     | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Legacy key was `duration`; Studio renamed to `durationSeconds` (resolves OD-33) and validates non-negative.                                                                                      |
+| n/a (Worker had none)      | —             | `GET /api/worker/v1/jobs/:id`      | `GET`         | none                                                                     | `200` same payload shape as claim                                 | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | New — lets a Worker that crashed mid-render re-fetch the Job it was working on, by id, instead of losing its place.                                                                              |
 
 All five required routes plus the new GET-by-id were re-verified with real HTTP requests
 against a running dev server (not just unit tests) during the most recent Worker-API

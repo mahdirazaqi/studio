@@ -121,13 +121,28 @@ Jobs are never deleted, so a Department with history can't be cleanly removed.
 - _Hard delete with reassignment:_ needs cross-department move; high complexity.
 - _Hard delete with cascade:_ violates ADR-0005/0007 — not acceptable.
 
-### OD-08 — Cross-department resource move / reassignment
+### OD-08 — Cross-department resource move / reassignment — 🟨 PARTIALLY RESOLVED (ADR-0040)
 
-_Where:_ [../domain/departments.md](../domain/departments.md).
+_Where:_ [../domain/departments.md](../domain/departments.md),
+[../domain/templates.md](../domain/templates.md).
 
-- _Not supported:_ simplest, no historical ambiguity.
-- _ADMIN can reassign:_ useful for reorgs; complicates historical reporting; would need
-  auditing and arguably snapshotting the department on the Job.
+**Resolved for Templates, Phase 11:** ADMIN may transfer a Template to a different
+Department (`updateTemplate`, `requireRole(actor, "ADMIN")` gates the branch) — dependent
+File/YouTube-Target references are re-verified against the target Department, and no
+audit/snapshot mechanism was needed because `Job.departmentId` is already a plain column
+copied at Job-creation time, never a live join through the Template (see ADR-0040 and
+`docs/domain/templates.md` "Department transfer").
+
+**Still open for Job / File / User** — the reasoning that made Templates safe to move
+(the resource being moved isn't itself the historical record) does not apply the same
+way to a Job, which _is_ the historical record:
+
+- _Not supported (Job/File/User):_ simplest, no historical ambiguity.
+- _ADMIN can reassign (Job/File/User):_ useful for reorgs; complicates historical
+  reporting (a Job's department could change after the fact — unlike a Template's
+  transfer, this would actually be visible on existing history unless the department
+  were snapshotted onto the Job the way Template-level fields already are); would need
+  auditing and arguably snapshotting.
 
 ### OD-09 — Template `name` uniqueness scope — ✅ RESOLVED (ADR-0027)
 
@@ -298,16 +313,20 @@ timeline timestamp are left exactly as they were at the moment of cancellation.
 
 ## Integrations / infrastructure
 
-### OD-27 — Worker authentication mechanism — ✅ RESOLVED (ADR-0032)
+### OD-27 — Worker authentication mechanism — ✅ RESOLVED (ADR-0040, supersedes ADR-0032)
 
 _Where:_ [../integrations/worker-api.md](../integrations/worker-api.md), ADR-0004.
 
-**Resolved, Phase 7:** a single shared static API key (`WORKER_API_KEY`, required env
-var), sent as `Authorization: Bearer <key>`, compared with a timing-safe check. No
-`WorkerCredential` table, no per-Worker identity, no rotation-without-redeploy — a
-deliberate simplification (the original recommendation's "hashed at rest" language
-assumed a database table this phase decided not to build). Revisit HMAC/mTLS/per-Worker
-identity only if a concrete requirement calls for it.
+**Resolved, Phase 7 (ADR-0032):** a single shared static API key (`WORKER_API_KEY`,
+required env var), sent as `Authorization: Bearer <key>`, compared with a timing-safe
+check. No `WorkerCredential` table, no per-Worker identity, no rotation-without-redeploy.
+
+**Superseded, Phase 11 (ADR-0040):** a real `WorkerCredential`-equivalent now exists —
+`WorkerApiKey` (hashed secret, `ACTIVE`/`REVOKED` status, many-to-many Department scope,
+ADMIN-managed CRUD at `/worker-keys`). `WORKER_API_KEY` is removed entirely, no
+fallback. This is exactly the concrete requirement OD-27's original resolution said
+would justify revisiting: multiple Workers, each independently revocable and scoped to
+its own Department set.
 
 ### OD-28 — Worker API versioning scheme — ✅ RESOLVED (ADR-0033)
 
@@ -371,16 +390,24 @@ _Where:_ [../data/lifecycle-rules.md](../data/lifecycle-rules.md), [../integrati
 Expiration is checked lazily on next read, not by a scheduled sweep (OD-40's durable-work
 mechanism doesn't exist yet).
 
-### OD-36 — YouTubeTarget scoping — ✅ RESOLVED, Phase 9 (ADR-0039)
+### OD-36 — YouTubeTarget scoping — ✅ RESOLVED, Phase 9 (ADR-0039), revised Phase 11 (ADR-0040)
 
 _Where:_ [../integrations/youtube.md](../integrations/youtube.md).
 
 **Resolved, Phase 9: department-scoped**, exactly per this OD's own recommendation.
-`YouTubeTarget.departmentId` is required; `youtube:manage` is `MANAGER+` within their own
-department, ADMIN may connect/manage a Target for any department. **Also resolved
+`YouTubeTarget.departmentId` was required; `youtube:manage` was `MANAGER+` within their
+own department, ADMIN may connect/manage a Target for any department. **Also resolved
 alongside this:** the connection mechanism itself is a verified refresh-token entry, not
 a self-service OAuth consent-screen flow — see ADR-0039 point 5 for why, and for the
 documented future-enhancement status of a real "Connect with Google" UI.
+
+**Revised, Phase 11 (ADR-0040):** a single FK undersold how channels are actually
+shared — `YouTubeTarget.departmentId` is now `departments`, a many-to-many with
+`Department`, and `youtube:manage` moved to ADMIN-only (connecting/scoping a channel is
+system-wide infrastructure configuration, the same category as `worker_key:manage`).
+Non-ADMIN capability is unaffected: USER/MANAGER still pick an already-connected channel
+for their own Department's Templates/Jobs, gated by `template:manage`/`job:manage` as
+before.
 
 ### OD-37 — YouTube video privacy / metadata configurability
 

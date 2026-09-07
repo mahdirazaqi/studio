@@ -54,12 +54,28 @@ delete path at all and no decision yet on OD-07 —
   - A USER/MANAGER creating a Job/Template/File → that resource's `departmentId` = the
     actor's `departmentId`.
   - An ADMIN creating a resource must specify the target Department.
-- **Moving a resource between Departments** is not a supported operation.
-  > **`OPEN DECISION` — cross-department move / reassignment.** _Consequence of "not
-  > supported":_ simplest, no historical ambiguity. _Consequence of "ADMIN can
-  > reassign":_ useful for reorganizations but complicates historical reporting (a Job's
-  > department could change after the fact) — if allowed, the change must be audited and
-  > arguably snapshotted on the Job.
+- **Moving a resource between Departments — partially resolved, ADR-0040 (Phase 11):**
+  a **Template** may now be transferred to a different Department, **ADMIN-only**
+  (`docs/domain/templates.md` "Department transfer"). `Job`/`File`/`User` remain
+  not-movable — the OPEN DECISION below is narrowed to those three, not closed entirely.
+  A Template transfer needed no audit/snapshot mechanism: `Job.departmentId` is already a
+  plain column copied once at Job creation, never a live join through
+  `Job.templateId → Template.departmentId`, so an existing Job's department is
+  structurally unaffected by a later transfer of the Template it was created from.
+  > **`OPEN DECISION` — cross-department move / reassignment for Job / File / User.**
+  > _Consequence of "not supported":_ simplest, no historical ambiguity. _Consequence of
+  > "ADMIN can reassign":_ useful for reorganizations but complicates historical
+  > reporting (a Job's department could change after the fact) — if ever allowed for
+  > Jobs specifically (unlike Templates, a Job **is** the historical record itself), the
+  > change would need auditing and arguably snapshotting, which Templates' transfer did
+  > not need because Jobs already snapshot everything they need from a Template at
+  > creation time.
+
+`WorkerApiKey` and `YouTubeTarget` are a different shape entirely (ADR-0040): both are
+**many-to-many** with Department, not owned by exactly one — a single Worker credential
+or YouTube channel commonly serves several Departments at once. Assigning/reassigning
+either's Department set is an ordinary ADMIN-only edit (a full replace, not a "move"),
+not an instance of this OPEN DECISION.
 
 ## Enforcement pattern (for implementers)
 
@@ -94,6 +110,20 @@ Every use case receives an `actor` context: `{ userId, role, departmentId }`.
 > | **Hard delete with cascade**                   | Violates ADR-0005/0007. Not acceptable.                                                                                                                                       |
 >
 > Recommended pending decision: **soft-deactivate (`ARCHIVED`) only.**
+
+## Navigation & profile visibility — implemented, Phase 11
+
+The `/departments` management page and its nav item are **ADMIN-only**
+(`@/lib/navigation.ts`'s `minRole: "ADMIN"` on the `Departments` entry) — a USER/MANAGER
+never sees it, matching the `department:manage`/`department:view_all` capability floor
+this page already enforced. A USER/MANAGER's own Department is not hidden from them
+entirely, though: `CurrentUser.departmentName` (resolved server-side alongside the rest
+of the session, `@/server/auth/current-user`) is shown in the dashboard sidebar/profile
+area for every role — no new page, no new capability, just a read-only display of a
+value already scoped to the actor. As with every other nav-hidden route, `/departments`
+itself independently re-checks the actor's role server-side (`ForbiddenPage` on
+anything below ADMIN) — hiding the nav item is a presentation choice, not the
+enforcement.
 
 ## Not a "Channel"
 

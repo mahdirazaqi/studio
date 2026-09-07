@@ -290,7 +290,8 @@ authenticated, versioned REST surface — a thin adapter layer, no new business 
 - `WORKER_API_KEY` — a single, shared, required environment variable, checked with a
   timing-safe comparison (`@/server/worker-auth`) — resolves OD-27 (ADR-0032). No
   `WorkerCredential` table, no per-Worker identity, no rotation without a redeploy: a
-  deliberate simplification, not an oversight.
+  deliberate simplification, not an oversight. **Superseded, Phase 11 (ADR-0040):** a
+  real `WorkerApiKey` table now exists — see that phase's own section below.
 - `/api/worker/v1/jobs/next` (`POST`, atomic claim, `204` on an empty queue),
   `/api/worker/v1/jobs/:id` (`GET`), `.../state` / `.../progress` / `.../duration`
   (`PATCH`) — every handler a thin `defineRouteHandler` wrapper calling straight into
@@ -409,7 +410,7 @@ upload quota, automatic/scheduled artifact cleanup, any background-job/queue
 infrastructure, configurable YouTube privacy/metadata, a dashboard in-app notification
 center, user/department management.
 
-### Phase 10 — UI completion, testing & production hardening _(complete, final phase)_
+### Phase 10 — UI completion, testing & production hardening _(complete)_
 
 **Goal:** no new features — complete the two features every prior phase status
 explicitly deferred by name (Users, Departments), audit the whole system for security/
@@ -450,9 +451,61 @@ requeue sweep (OD-31); rate limiting (OD-41); a dashboard in-app notification ce
 per-YouTube-target upload quota; a self-service `User.phone`-editing UI (ADR-0036);
 Department archive/deactivate (OD-07); MANAGER minting another MANAGER (OD-05).
 
-**This is the final phase.** Studio is feature-complete for its currently defined scope.
-Any of the items above is a new decision to make explicitly, not a "Phase 11" to start
-automatically.
+Studio was feature-complete for its scope at this point. Any item above was a new
+decision to make explicitly, not a phase to start automatically — Phase 11 below was
+exactly that: an explicit new brief, not a silent continuation.
+
+### Phase 11 — Department UX, Worker API Key scoping, YouTube Department many-to-many, Template Department transfer _(complete)_
+
+**Goal:** an explicit follow-on brief, not a self-initiated continuation — narrow the
+`/departments`/`/youtube` nav+pages to ADMIN-only while keeping a non-ADMIN's own
+Department visible; replace the single static `WORKER_API_KEY` with real, admin-managed,
+Department-scoped Worker credentials; move `YouTubeTarget` from a single-Department FK to
+many-to-many and ADMIN-only management; let ADMIN transfer a Template's Department.
+
+**Delivered:**
+
+- `WorkerApiKey` (`ADR-0040`): hashed secret (`keyHash`, SHA-256, `@unique`), `ACTIVE`/
+  `REVOKED` status, many-to-many `departments`, ADMIN-only CRUD at `/worker-keys`
+  (`worker_key:manage`) — create (secret shown once), revoke/reactivate, edit-Department-
+  scope (full replace). `WORKER_API_KEY` removed from `@/server/env` entirely, no
+  fallback. Every Worker Job operation now derives its Department scope server-side from
+  the authenticated key (`WorkerAuthContext.allowedDepartmentIds`, threaded through
+  `defineRouteHandler`'s new `TAuth` generic as `ctx.auth`) — the atomic claim query
+  (`claimNextJobRow`) filters `WHERE "departmentId" = ANY(allowedDepartmentIds)` inside
+  the same `SELECT ... FOR UPDATE SKIP LOCKED` statement, and every other Job operation
+  (`getJobForWorker`, `transitionJobForWorker`, `updateJobProgress`,
+  `updateJobDuration`, `acceptJobResult`) calls `assertWorkerDepartmentAccess` before
+  touching a specific Job — `404`, never `403`.
+- `YouTubeTarget.departmentId` (single FK) → `departments` (implicit many-to-many);
+  `youtubeChannelId` became globally unique (was unique per-Department). `youtube:manage`
+  moved to ADMIN-only (was `MANAGER+`, department-scoped) — connecting/scoping a shared
+  channel is system-wide infrastructure configuration. Non-ADMIN Template/Job authoring
+  is unaffected: still gated by `template:manage`/`job:manage`, filtered to the
+  Department's assigned Targets.
+- Template Department transfer: ADMIN-only, gated inside `updateTemplate` by
+  `requireRole(actor, "ADMIN")` on the transfer branch specifically (a MANAGER/USER's
+  `departmentId` is silently ignored, not merely rejected). Dependent File/YouTube-Target
+  references are re-verified against the target Department. No historical-integrity
+  mechanism was needed — `Job.departmentId` is a plain column copied once at Job
+  creation, never a live join through the Template.
+- `/departments`, `/youtube`, `/worker-keys` nav items and pages all moved to
+  ADMIN-only, independently re-checked server-side on each page, not just hidden from
+  nav. A non-ADMIN's own Department name is shown via `CurrentUser.departmentName` in the
+  dashboard sidebar without the management page.
+- New tests: Worker Job-scoping (positive in-scope / negative out-of-scope → 404 for
+  every Worker operation, plus the atomic claim's Department filter), `WorkerApiKey`
+  use-cases (create/list/revoke/reactivate/update-departments), `YouTubeTarget`
+  ADMIN-only + multi-department connect, Template transfer (ADMIN success,
+  MANAGER/USER rejection, nonexistent-department rejection, orphaned-reference
+  rejection). Real end-to-end HTTP verification against Postgres additionally confirmed
+  the atomic Department-scoped claim race behavior and the cross-department
+  `404`-never-`403` guarantee for every Worker endpoint. `npm run check`/`npm run build`
+  both pass.
+
+**Explicitly not in Phase 11:** per-Worker rate limiting beyond ADR-0034's existing
+idempotency guarantees; a generic multi-tenant RBAC system (still exactly three fixed
+roles); any Worker-initiated Department self-service.
 
 ## Working on a task (any phase)
 

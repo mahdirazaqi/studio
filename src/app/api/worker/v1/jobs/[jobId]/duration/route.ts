@@ -15,11 +15,11 @@ export const PATCH = defineRouteHandler({
   authenticate: authenticateWorker,
   params: z.object({ jobId: commonSchemas.id }),
   body: z.object({ durationSeconds: z.number().int().min(0) }),
-  handler: async ({ params, body }) => {
-    const job = await updateJobDuration({
-      jobId: params.jobId,
-      durationSeconds: body.durationSeconds,
-    });
+  handler: async ({ params, body, auth }) => {
+    const job = await updateJobDuration(
+      { jobId: params.jobId, durationSeconds: body.durationSeconds },
+      auth.allowedDepartmentIds,
+    );
     return { id: job.id, durationSeconds: job.durationSeconds };
   },
 });

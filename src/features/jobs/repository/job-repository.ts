@@ -22,11 +22,15 @@ import type {
 /**
  * The only module that queries the `Job`/`JobAsset` tables — mirrors
  * `features/templates/repository/template-repository.ts`. Every read applies
- * `departmentScopeFilter(actor)`; the Worker-facing operations
- * (`claimNextJobRow`, `transitionJobRow`, `setProgress`, `setDuration`) are
- * deliberately **not** department-scoped — a Worker claims from the global
- * queue and updates whatever job it holds, exactly like legacy's `fetch` did,
- * just atomic (docs/domain/jobs.md "Worker claim").
+ * `departmentScopeFilter(actor)`. The Worker-facing operations
+ * (`transitionJobRow`, `setProgress`, `setDuration`) themselves remain
+ * unscoped by Department at this layer — Department-scope enforcement for a
+ * *specific* Job lives one level up, in the Worker use cases
+ * (`assertWorkerDepartmentAccess`, `@/server/worker-auth`), the same
+ * find-then-authorize shape `findJobInScope`'s human callers already use.
+ * `claimNextJobRow` is the one exception: since it selects *which* Job to
+ * operate on rather than being handed one, its Department scope is folded
+ * directly into the atomic query itself (ADR-0040) — see its own doc comment.
  */
 
 const SAFE_JOB_SELECT = {
@@ -298,8 +302,11 @@ export async function createJobWithAssets(
  * scope, matching every other function below it. */
 export async function findJobState(
   jobId: string,
-): Promise<{ state: JobState } | null> {
-  return db.job.findUnique({ where: { id: jobId }, select: { state: true } });
+): Promise<{ state: JobState; departmentId: string } | null> {
+  return db.job.findUnique({
+    where: { id: jobId },
+    select: { state: true, departmentId: true },
+  });
 }
 
 /**
@@ -382,17 +389,31 @@ export async function listJobs(
  * given `QUEUED` row, and `SKIP LOCKED` means a second, simultaneous caller
  * moves on to the next-oldest queued row instead of blocking on the first.
  * This can only be expressed with a raw query — Prisma's query builder has
- * no `SKIP LOCKED` support. Global, not department-scoped, oldest-first —
- * matches legacy's single shared queue (docs/domain/jobs.md "claim scope &
- * ordering" OPEN DECISION: FIFO by `createdAt` is what's implemented).
+ * no `SKIP LOCKED` support. Oldest-first within scope — matches legacy's
+ * single shared queue (docs/domain/jobs.md "claim scope & ordering" OPEN
+ * DECISION: FIFO by `createdAt` is what's implemented).
+ *
+ * **Department-scoped inside the atomic query itself (ADR-0040), not a
+ * post-hoc check** — `allowedDepartmentIds` (from the authenticated
+ * `WorkerApiKey`, never client-supplied) is part of the `SELECT ... FOR
+ * UPDATE SKIP LOCKED`'s `WHERE` clause. Filtering after the fact would still
+ * let a Worker A restricted to Department X win the race to lock (and thus
+ * transiently claim) a Department Y row before a rejection could be applied
+ * — folding the filter into the row-selection itself means a scoped-out row
+ * is never even considered, let alone locked.
  */
-export async function claimNextJobRow(): Promise<SafeJobDetail | null> {
+export async function claimNextJobRow(
+  allowedDepartmentIds: readonly string[],
+): Promise<SafeJobDetail | null> {
+  if (allowedDepartmentIds.length === 0) return null;
+
   const rows = await db.$queryRaw<{ id: string }[]>`
     UPDATE "jobs"
     SET "state" = 'CLAIMED', "claimedAt" = now(), "updatedAt" = now()
     WHERE "id" = (
       SELECT "id" FROM "jobs"
       WHERE "state" = 'QUEUED'
+        AND "departmentId" = ANY(${allowedDepartmentIds})
       ORDER BY "createdAt" ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 1

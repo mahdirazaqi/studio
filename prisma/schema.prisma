@@ -50,6 +50,7 @@ model Department {
   templates      Template[]
   jobs           Job[]
   youtubeTargets YouTubeTarget[]
+  workerApiKeys  WorkerApiKey[]
 
   @@map("departments")
 }
@@ -104,6 +105,7 @@ model User {
   retriedJobs  Job[] @relation("JobRetriedBy")
 
   createdYoutubeTargets YouTubeTarget[] @relation("YoutubeTargetCreatedBy")
+  createdWorkerApiKeys  WorkerApiKey[]  @relation("WorkerApiKeyCreatedBy")
 
   /// Ephemeral Telegram conversation state (ADR-0014/ADR-0035) — not a
   /// historical record, unlike everything else this User relates to; see
@@ -709,16 +711,19 @@ model TelegramWizardState {
   @@map("telegram_wizard_states")
 }
 
-/// A connected YouTube channel a Department's Templates may deliver rendered
-/// Jobs to (legacy `Channel`, Phase 9, ADR-0039 — resolves OD-36 as
-/// department-scoped, matching the rest of Studio's tenancy model; ADMIN may
-/// still manage/select any Department's Target).
+/// A connected YouTube channel, manageable **only by ADMIN** (revised) and
+/// assignable to **any number of Departments** (many-to-many, revised from
+/// Phase 9's single `departmentId` — a real-world channel is not owned by one
+/// Department's namespace; the same channel may legitimately publish for
+/// several). A Template may only pick a Target that is assigned to the
+/// Template's own Department (`verify-youtube-target.ts`); ADMIN may
+/// see/manage every Target regardless of assignment.
 ///
 /// **Connection model is deliberately simplified from a full OAuth
 /// consent-screen flow** (ADR-0039): an operator obtains a refresh token for
 /// the target channel out-of-band (Google OAuth Playground or an equivalent
 /// one-time flow) and registers it here — the same "credential obtained
-/// elsewhere, entered once" trust model `WORKER_API_KEY` already uses. Studio
+/// elsewhere, entered once" trust model Worker API Keys use. Studio
 /// exchanges it for access tokens itself from then on
 /// (`features/youtube/infrastructure/youtube-client.ts`). A self-service
 /// "Connect with Google" consent screen is a real product feature, not a
@@ -733,12 +738,20 @@ enum YouTubeTargetStatus {
 model YouTubeTarget {
   id String @id @default(cuid())
 
-  departmentId String
-  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  /// Many-to-many (ADR-0040) — replaces Phase 9's single `departmentId` FK.
+  /// A channel with zero Departments assigned is valid (just not selectable
+  /// by any Template yet) but every write path that matters
+  /// (`connect-youtube-target.ts`) requires at least one at creation.
+  departments Department[]
 
   /// Display name only (e.g. "Main Channel") — never used to build a request.
-  name             String
-  youtubeChannelId String
+  name String
+
+  /// Globally unique now that a channel is not scoped to one Department's
+  /// namespace — reconnecting the same real-world channel updates the
+  /// existing row rather than creating a duplicate, regardless of which
+  /// Departments it's assigned to.
+  youtubeChannelId String @unique
 
   /// AES-256-GCM ciphertext (`iv:authTag:ciphertext`, base64 — see
   /// `@/server/adapters/youtube/token-cipher.ts`), keyed by
@@ -767,10 +780,6 @@ model YouTubeTarget {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // One row per real YouTube channel per Department — reconnecting the same
-  // channel updates the existing row rather than creating a duplicate.
-  @@unique([departmentId, youtubeChannelId])
-  @@index([departmentId])
   @@map("youtube_targets")
 }
 
@@ -830,4 +839,52 @@ model DeliveryAttempt {
   @@unique([jobId, provider, attemptNumber])
   @@index([jobId, provider])
   @@map("delivery_attempts")
+}
+
+/// An external Render Worker's machine identity, department-scoped
+/// (ADR-0040 — supersedes ADR-0032's single shared static `WORKER_API_KEY`).
+/// **ADMIN-only to create/manage.** The raw secret is generated once, shown
+/// to the Admin exactly once at creation, and never stored — only its
+/// SHA-256 hash (`keyHash`, mirrors `Session.tokenHash`'s exact trust model,
+/// ADR-0020: a database read alone never yields a usable credential).
+enum WorkerApiKeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+model WorkerApiKey {
+  id String @id @default(cuid())
+
+  /// Admin-facing label only (e.g. "Production Render Worker") — never used
+  /// in any authorization decision.
+  name String
+
+  /// SHA-256 hex digest of the raw secret. `@unique` doubles as the
+  /// authentication lookup index (`@/server/worker-auth`) — one query,
+  /// keyed by hash, exactly like session token resolution.
+  keyHash String @unique
+
+  status WorkerApiKeyStatus @default(ACTIVE)
+
+  /// Which Departments this Worker identity may operate on
+  /// (docs/integrations/worker-api.md "Worker API Keys") — many-to-many,
+  /// since one Worker process commonly renders for several Departments.
+  /// Never trusted from the client: every Worker request derives its
+  /// allowed Department set from *this* relation, resolved server-side from
+  /// the authenticated key, and enforced inside the same atomic queries
+  /// Phase 6 already established (`assertWorkerDepartmentAccess`).
+  departments Department[]
+
+  createdByUserId String
+  createdBy       User   @relation("WorkerApiKeyCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  /// Best-effort telemetry, updated opportunistically (never blocks or fails
+  /// a request if the write itself fails) — lets an Admin see whether a key
+  /// is actually in use before revoking it. `null` until first used.
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("worker_api_keys")
 }

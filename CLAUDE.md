@@ -226,6 +226,16 @@ Telegram must never bypass authorization.
 - **Do not implement authorization in Next.js middleware.** The `(dashboard)` layout's
   session check is the only coarse-grained gate; resource-level authorization lives in
   use cases/pages, per `docs/architecture/authorization.md` "Why not middleware".
+- **`department:manage`/`department:view_all`, `youtube:manage`, and `worker_key:manage`
+  are all ADMIN-only** — connecting/scoping shared infrastructure (Departments, YouTube
+  channels, Worker credentials) is system-wide configuration, not a Department-local
+  MANAGER operation (ADR-0040, revised `youtube:manage` from its earlier `MANAGER+`
+  floor). The `/departments`, `/youtube`, and `/worker-keys` nav items and pages are all
+  ADMIN-only accordingly; a non-ADMIN still sees their own Department's name in the
+  sidebar/profile area (`CurrentUser.departmentName`) without needing the management
+  page. USER/MANAGER's ability to _select_ an already-connected YouTube channel when
+  authoring a Job/Template is unaffected — that stays gated by `template:manage`/
+  `job:manage`, never `youtube:manage`.
 
 ## 9. Files & storage rules (summary)
 
@@ -299,6 +309,15 @@ verify-file-references.ts`.
 - **Job creation now enforces Template state (disabled/deleted) — implemented, Phase 6.**
   `features/jobs/use-cases/create-job.ts` rejects a `DISABLED` or soft-deleted Template —
   the enforcement point Templates' own design always deferred to "a future Job feature."
+- **Department transfer is ADMIN-only — implemented, Phase 11 (ADR-0040).** On edit,
+  ADMIN may change a Template's `departmentId`; MANAGER/USER cannot, even via a crafted
+  request carrying `departmentId` — `updateTemplate` gates the transfer branch with
+  `requireRole(actor, "ADMIN")`, not just a capability floor. Every dependent reference
+  (asset `defaultFileId`, `youtubeTargetId`) is re-verified against the **target**
+  Department, never silently left pointing at the original. No historical-integrity
+  mechanism was needed for this: `Job.departmentId` is a plain column copied once at Job
+  creation, never a live join through the Template — see `docs/domain/templates.md`
+  "Department transfer" before touching this code path.
 
 ## 11. Jobs rules (summary)
 
@@ -366,34 +385,55 @@ WHERE state IN (fromStates)`** — never a read-then-write, never a direct
 
 Full detail: [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md),
 [`docs/architecture/decisions.md`](docs/architecture/decisions.md)
-ADR-0004/ADR-0032/ADR-0033/ADR-0034. **Implemented, Phase 7** — versioned under
+ADR-0004/ADR-0033/ADR-0034/ADR-0040. **Implemented, Phase 7, per-Worker Department-scoped
+API keys implemented Phase 11 (ADR-0040, supersedes ADR-0032)** — versioned under
 `/api/worker/v1/**`, plus a Worker-auth branch on `/api/files/[fileId]`.
 
 - **Every `/api/worker/v1/**` Route Handler is a thin `defineRouteHandler` wrapper**:
   `authenticate: authenticateWorker` (`@/server/worker-auth`), a Zod `params`/`body`
-  schema, and a handler that calls a Phase 6 use case (or a small Phase 7 adapter over
-  one — `transitionJobForWorker`, `getJobForWorker` — for input mapping only) and maps
-  the result. **Never** write Job state-machine logic, quota logic, or a raw Prisma
-  mutation directly inside a route handler — that logic already exists in
-  `features/jobs/use-cases/*` (Phase 6); the Worker layer only authenticates, validates,
-  and delegates.
-- **`authenticateWorker` is the only place the Worker credential is read or compared.**
-  It compares fixed-length SHA-256 digests via `crypto.timingSafeEqual`, never a raw
-  string `===`. Do not add a second Worker-auth check anywhere else, and do not log the
-  `Authorization` header or any part of `WORKER_API_KEY`.
+  schema, and a handler that destructures `ctx.auth.allowedDepartmentIds` and passes it
+  into a Phase 6 use case (or a small Phase 7 adapter over one — `transitionJobForWorker`,
+  `getJobForWorker` — for input mapping only), which maps the result. **Never** write Job
+  state-machine logic, quota logic, or a raw Prisma mutation directly inside a route
+  handler — that logic already exists in `features/jobs/use-cases/*` (Phase 6); the
+  Worker layer only authenticates, validates, and delegates.
+- **`authenticateWorker` is the only place a Worker credential is read, hashed, or
+  compared.** Each Worker identity is a `WorkerApiKey` row (`keyHash` — SHA-256, `@unique`
+  — looked up by hash, exactly like `Session.tokenHash`; a database read alone never
+  yields a usable credential, ADR-0020's trust model reused verbatim, ADR-0040). Do not
+  add a second Worker-auth check anywhere else, and do not log the `Authorization` header
+  or any part of a Worker secret.
+- **Every Worker Job operation is Department-scoped, server-side, never client-supplied
+  (ADR-0040).** `authenticateWorker` resolves `WorkerAuthContext { workerApiKeyId,
+allowedDepartmentIds }` once, at authentication — handed to every handler as `ctx.auth`
+  (`defineRouteHandler`'s `TAuth` generic). `claimNextJobRow`'s atomic `SELECT ... FOR
+UPDATE SKIP LOCKED` filters `WHERE "departmentId" = ANY(allowedDepartmentIds)` as part
+  of the same atomic statement — never a post-hoc check after a row is already locked.
+  Every other Worker Job operation (`getJobForWorker`, `transitionJobForWorker`,
+  `updateJobProgress`, `updateJobDuration`, `acceptJobResult`) calls
+  `assertWorkerDepartmentAccess(allowedDepartmentIds, job.departmentId)` before touching a
+  specific Job id — `not_found` (404), **never** `forbidden` (403), matching every other
+  cross-department access pattern in this codebase. Do not add a Department check that
+  returns 403 for this, and do not skip the check because "the claim query already
+  filtered" — every operation re-checks independently.
 - **The Worker never becomes an `Actor` and is never authenticated via the dashboard
   session.** `claimNextJob`, `updateJobProgress`, `updateJobDuration`, `transitionJob`,
   `getJobForWorker`, and `getFileForWorkerServing` all take **no `Actor` parameter** —
   keep it that way; do not thread a fake/system `Actor` through them "for consistency."
-- **`WORKER_API_KEY` is a required environment variable** (`@/server/env`) — the process
-  must fail to start if it's missing, never silently run with Worker auth disabled.
-  There is deliberately no `WorkerCredential` database table, no per-Worker identity, and
-  no rotation-without-redeploy (ADR-0032) — do not add one without a new ADR revisiting
-  that trade-off.
+  (They now take `allowedDepartmentIds: string[]` where Department-scoped — that is not
+  an `Actor` and must not be treated like one.)
+- **`WorkerApiKey` management (create/revoke/reactivate/edit-Department-scope) is
+  ADMIN-only** (`worker_key:manage`) at `/worker-keys` — see
+  [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md) §3a. The raw
+  secret is shown exactly once, at creation, never re-displayed or stored anywhere
+  retrievable. **`WORKER_API_KEY` no longer exists** — removed from `@/server/env`
+  entirely, no fallback path. Do not reintroduce a shared static key without a new ADR.
 - **`/api/files/[fileId]` has two independent auth paths**: an `Authorization` header
   present means "authenticate as the Worker, unscoped by Department, or reject" — it
   never falls back to session auth. No header means the original session-cookie path,
-  unchanged. Do not blur this into a single combined check.
+  unchanged. Do not blur this into a single combined check. (File serving itself remains
+  unscoped by Department — only Job operations are, per ADR-0040; do not conflate the
+  two without re-reading `docs/integrations/worker-api.md` §5 first.)
 - **The claim/get-by-id payload keeps legacy's exact field names**
   (`output`/`title`/`composition`/`template`/`assets[].{composition,layer,type,src,text}`)
   — only add fields, never rename or remove one without a compatibility review.
@@ -452,8 +492,9 @@ Single Track/Album/List/Retry/Cancel/Cancel-All flows.
   unmodified `uploadFile` use case (real content-type sniffing, never Telegram's declared
   media type) — there is no separate temporary-upload/`JOB_ARTIFACT`-on-input concept to
   build or clean up (ADR-0038).
-- **`TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET` are optional**, unlike
-  `WORKER_API_KEY` — Studio must run fully with Telegram unconfigured. The webhook
+- **`TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET` are optional** — Studio must run
+  fully with Telegram unconfigured, unlike Worker authentication, which is always
+  mandatory (a `WorkerApiKey` must exist and be `ACTIVE`, ADR-0040). The webhook
   (`@/server/telegram-webhook-auth`) fails closed (`503`) when unconfigured, `401` on a
   missing/wrong secret — never an open, unauthenticated endpoint.
 - **One Telegraf instance per process** (`@/server/adapters/telegram/client.ts`'s
@@ -635,7 +676,7 @@ deliver-job-result.ts`) drives `RENDERED -> DELIVERING -> UPLOADED`/`ERROR` thro
   per-target upload quota, automatic/scheduled artifact cleanup, any background-job/queue
   infrastructure, a dashboard in-app notification center, configurable YouTube privacy.
   **Still no user/department management UI.**
-- **Phase 10 (UI completion, testing & production hardening) — complete. Final phase.**
+- **Phase 10 (UI completion, testing & production hardening) — complete.**
   Users (`/users`, `/users/new`) and Departments (`/departments`) — the last two
   placeholder pages — are now real: create/list/disable-enable/ADMIN-only role-change for
   Users (wiring Phase 3's already-tested `authorize-user-management.ts` policy to real
@@ -657,11 +698,28 @@ deliver-job-result.ts`) drives `RENDERED -> DELIVERING -> UPLOADED`/`ERROR` thro
   tests (23 unit + a real end-to-end run against Postgres covering department creation,
   duplicate-name/duplicate-email conflicts, MANAGER-cannot-create-MANAGER,
   cross-department 404, self-lockout, idempotent status/role changes, and department-
-  scoped listing). `npm run check` and `npm run build` both pass. **Studio is
-  feature-complete for its currently defined scope — this is the final phase.**
+  scoped listing). `npm run check` and `npm run build` both pass.
+- **Phase 11 (Department UX, Worker API Key scoping, YouTube Department many-to-many,
+  Template Department transfer) — complete (ADR-0040).** `/departments`, `/youtube`, and
+  the new `/worker-keys` nav items/pages moved to ADMIN-only (a non-ADMIN still sees
+  their own Department's name via `CurrentUser.departmentName` in the sidebar, without
+  the management page); `WorkerApiKey` (hashed secret, `ACTIVE`/`REVOKED`,
+  many-to-many Department scope, ADMIN CRUD at `/worker-keys`, secret shown once)
+  entirely replaces the single static `WORKER_API_KEY` env var — every Worker Job
+  operation now derives its Department scope server-side from the authenticated key,
+  with the atomic claim query itself filtering by that scope (never a post-hoc check);
+  `YouTubeTarget.departmentId` (single FK) became `departments` (many-to-many),
+  `youtube:manage` moved to ADMIN-only (was `MANAGER+`); ADMIN can transfer a Template to
+  a different Department on edit (MANAGER/USER cannot, even via a crafted request),
+  re-verifying dependent File/YouTube references against the target Department, needing
+  no new historical-integrity mechanism since `Job.departmentId` was already a plain
+  column copied at Job creation, never a live join. Real end-to-end HTTP verification
+  against Postgres confirmed the Department-scoped atomic claim, cross-department
+  `404`-never-`403` enforcement, and progress/duration/state scope checks. `npm run
+check`/`npm run build` both pass.
 
-This is the final phase. Do not start another phase, and do not add speculative features
-— see [`docs/development/workflow.md`](docs/development/workflow.md) for the full history
+Do not start a new phase beyond this unless explicitly asked — see
+[`docs/development/workflow.md`](docs/development/workflow.md) for the full history
 and [`docs/development/open-decisions.md`](docs/development/open-decisions.md) for what
 remains genuinely undecided (not a backlog to silently resolve).
 

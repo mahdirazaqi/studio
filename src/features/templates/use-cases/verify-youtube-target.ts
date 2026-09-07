@@ -1,12 +1,13 @@
 import { businessRuleError } from "@/server/errors/app-error";
-import { findConnectedYoutubeTargetInDepartment } from "@/features/youtube/repository/youtube-target-repository";
+import { findConnectedYoutubeTargetForDepartment } from "@/features/youtube/repository/youtube-target-repository";
 
 /**
- * A Template's `youtubeTargetId` must resolve to a `CONNECTED` Target in the
- * Template's own Department — never the actor's (the ADMIN-authoring-for-
- * another-department case), and never trusted from the client as-is. Mirrors
- * `verify-file-references.ts`'s exact reasoning for `defaultFileId`
- * (docs/domain/templates.md "Template ↔ Target").
+ * A Template's `youtubeTargetId` must resolve to a `CONNECTED` Target
+ * **assigned to** the Template's own Department (ADR-0040 — a Target may now
+ * be assigned to several Departments, not owned by exactly one) — never the
+ * actor's (the ADMIN-authoring-for-another-department case), and never
+ * trusted from the client as-is. Mirrors `verify-file-references.ts`'s exact
+ * reasoning for `defaultFileId` (docs/domain/templates.md "Template ↔ Target").
  */
 export async function verifyYoutubeTargetReference(
   departmentId: string,
@@ -14,7 +15,7 @@ export async function verifyYoutubeTargetReference(
 ): Promise<string | null> {
   if (!youtubeTargetId) return null;
 
-  const target = await findConnectedYoutubeTargetInDepartment(
+  const target = await findConnectedYoutubeTargetForDepartment(
     departmentId,
     youtubeTargetId,
   );

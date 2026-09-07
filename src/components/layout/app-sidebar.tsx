@@ -48,6 +48,10 @@ export interface AppSidebarUser {
   displayName: string;
   email: string;
   role: Role;
+  /** Shown here because a USER/MANAGER has no other way to see it — the
+   * `/departments` management page is now ADMIN-only (docs/domain/
+   * departments.md "Profile display"). */
+  departmentName: string;
 }
 
 export function AppSidebar({ currentUser }: { currentUser: AppSidebarUser }) {
@@ -127,7 +131,7 @@ export function AppSidebar({ currentUser }: { currentUser: AppSidebarUser }) {
                       {currentUser.displayName}
                     </span>
                     <span className="text-muted-foreground truncate text-xs">
-                      {currentUser.email}
+                      {currentUser.departmentName}
                     </span>
                   </div>
                   <ChevronsUpDown className="ml-auto size-4" />
@@ -151,6 +155,9 @@ export function AppSidebar({ currentUser }: { currentUser: AppSidebarUser }) {
                       </span>
                       <span className="text-muted-foreground truncate text-xs">
                         {currentUser.email}
+                      </span>
+                      <span className="text-muted-foreground truncate text-xs">
+                        {currentUser.departmentName}
                       </span>
                     </div>
                     <Badge variant="secondary">{currentUser.role}</Badge>

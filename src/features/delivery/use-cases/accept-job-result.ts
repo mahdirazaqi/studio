@@ -1,3 +1,4 @@
+import { assertWorkerDepartmentAccess } from "@/server/worker-auth";
 import {
   businessRuleError,
   conflictError,
@@ -52,9 +53,11 @@ const VIDEO_MAX_SIZE_BYTES =
 export async function acceptJobResult(
   jobId: string,
   videoBuffer: Buffer,
+  allowedDepartmentIds: readonly string[],
 ): Promise<SafeJobDetail> {
   const job = await findJobById(jobId);
   if (!job) throw notFoundError();
+  assertWorkerDepartmentAccess(allowedDepartmentIds, job.departmentId);
 
   if (job.state !== "RENDERING") {
     if (job.videoFileId) {

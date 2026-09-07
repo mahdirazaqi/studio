@@ -9,7 +9,7 @@ Binding security requirements for Studio. Many are direct responses to
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Web panel        | **Implemented, Phase 2.** Custom DB-backed session (opaque token, httpOnly cookie, SHA-256 hash stored server-side — ADR-0020, [../architecture/authentication.md](../architecture/authentication.md)). Only `ACTIVE` users authenticate — enforced by the same lookup that resolves the session, so disabling a user invalidates every session on the next request. Passwords hashed with bcrypt (`bcryptjs`, cost 12). Department archive doesn't exist yet (OD-07 open) so that half is not yet applicable.                                                                                                                                  |
 | Server Actions   | Every action resolves and verifies the session before doing anything. No anonymous Server Action mutates state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Worker REST      | **Implemented, Phase 7.** **Every** `/api/worker/v1/**` endpoint (and the Worker-auth branch of `/api/files/[fileId]`) requires the shared `WORKER_API_KEY` as `Authorization: Bearer <key>`, checked with a timing-safe comparison (`@/server/worker-auth`, ADR-0004, ADR-0032). No unauthenticated worker endpoint — ever. Required env var; the process refuses to start without it.                                                                                                                                                                                                                                                         |
+| Worker REST      | **Implemented, Phase 7; per-Worker Department-scoped keys, Phase 11.** **Every** `/api/worker/v1/**` endpoint (and the Worker-auth branch of `/api/files/[fileId]`) requires a valid, `ACTIVE` `WorkerApiKey` credential as `Authorization: Bearer <secret>` — looked up by SHA-256 hash (`@/server/worker-auth`, ADR-0004, ADR-0040, supersedes ADR-0032's single shared static key). No unauthenticated worker endpoint — ever. Every Job operation additionally checks the authenticated key's Department scope server-side (`assertWorkerDepartmentAccess`, 404 never 403); the atomic claim query itself filters by that scope.            |
 | Telegram         | **Implemented, Phase 8.** Identity via phone-linked `User` (`features/telegram/use-cases/resolve-telegram-identity.ts`) — only an `ACTIVE` User's linked Telegram id resolves to an `Actor`; unlinked or since-disabled users are refused and shown the linking prompt. The webhook itself is verified with Telegram's own secret-token mechanism (`@/server/telegram-webhook-auth`, timing-safe comparison, same technique as `@/server/worker-auth`) before any update is processed. Optional feature — unconfigured (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET` unset) means the webhook responds `503`, never an unauthenticated `200`. |
 | Health endpoints | No sensitive data; may be unauthenticated but must expose nothing about domain state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
@@ -160,18 +160,22 @@ create-job-artifact.ts` reuses `sniffContentType`/`resolveFileKind` unmodified) 
   never logged, never returned to any client — the repository layer
   (`features/youtube/repository/youtube-target-repository.ts`) selects the ciphertext
   columns only in the two functions that legitimately need them.
-- **Implemented, Phase 7 (ADR-0032):** the Worker API key (`WORKER_API_KEY`) lives only
-  in environment configuration — **not** in a database table, so "hashed at rest" does
-  not apply the way it would to a stored credential; the environment itself is the trust
-  boundary, the same one `DATABASE_URL` already relies on. Compared with a timing-safe
-  check (`@/server/worker-auth`), never logged, never echoed in an error response.
-  Rotation is a redeploy with a new value — there is no revoke-without-redeploy path
-  (a deliberate simplification; see ADR-0032 for the trade-off).
-- **Implemented, Phase 8:** `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` follow the
-  identical environment-only pattern as `WORKER_API_KEY` — no database table, timing-safe
-  comparison for the webhook secret (`@/server/telegram-webhook-auth`), never logged.
-  Unlike `WORKER_API_KEY`, both are **optional**: Studio does not require Telegram to be
-  configured to start, and an unconfigured webhook fails closed (`503`), never open.
+- **Implemented, Phase 7 (ADR-0032), superseded Phase 11 (ADR-0040):** a Worker
+  credential is now a `WorkerApiKey` database row — only its SHA-256 `keyHash` is ever
+  stored (`@unique`, doubles as the authentication lookup index), the exact "database
+  read alone never yields a usable credential" trust model `Session.tokenHash` already
+  established (ADR-0020). The raw secret is shown to the creating ADMIN **exactly once**,
+  at creation, never stored anywhere retrievable, never re-displayed, never logged, never
+  echoed in an error response. `@/server/worker-auth`'s `authenticateWorker` is the sole
+  place it is read, hashed, or compared. Revocation (`WorkerApiKey.status = REVOKED`)
+  takes effect on the credential's very next use — no redeploy needed, unlike the earlier
+  env-var mechanism (ADR-0032's "rotation is a redeploy" limitation no longer applies).
+- **Implemented, Phase 8:** `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` remain a
+  plain environment-only pattern — no database table, timing-safe comparison for the
+  webhook secret (`@/server/telegram-webhook-auth`), never logged. Unlike Worker
+  authentication (mandatory — a `WorkerApiKey` must exist and be `ACTIVE`), both are
+  **optional**: Studio does not require Telegram to be configured to start, and an
+  unconfigured webhook fails closed (`503`), never open.
 - No secret is logged. Log redaction for tokens/keys.
 - **Do not copy any real secret out of the legacy repo** (the legacy `.env` contains live
   keys — treat them as compromised, do not reuse).

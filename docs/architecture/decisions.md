@@ -1540,3 +1540,137 @@ sweep calls.
   (`null` = automatic, a user id = manual retry) — sufficient for this phase's needs.
 
 **Status:** DECIDED.
+
+---
+
+## ADR-0040 — Per-Worker API Keys with Department scope; YouTube Targets and Worker
+
+identity move to ADMIN-only, many-to-many Department infrastructure; Template Department
+transfer
+
+**Context.** ADR-0032 accepted a single, shared, non-departmental `WORKER_API_KEY` as
+the simplest secure starting point, explicitly leaving the door open to "a new
+`WorkerCredential` table and a new ADR" if Studio ever needed multiple Workers with
+independent revocation or Department scoping. That need arrived: a Studio deployment
+serving several Departments wants to run separate Worker processes per Department (or
+per Department group), each holding a credential that can only claim and update Jobs
+belonging to the Departments it was actually issued for — and wants any leaked/misused
+key's blast radius limited to its own scope, not the entire Job queue.
+
+Separately, `YouTubeTarget` (ADR-0039) was designed department-scoped by a single FK,
+`MANAGER+`-manageable — but a real channel is commonly shared across several
+Departments' Templates, and connecting/managing a channel is closer to system-wide
+infrastructure configuration (the same category as choosing which Departments a Worker
+credential may serve) than to a Department-local operation a MANAGER should own.
+
+Finally, a Template's Department was treated as fixed at creation — correct as far as it
+went, but ADMIN (who already operates across every Department) had no way to correct a
+Template authored into the wrong Department without deleting and recreating it, which
+`docs/domain/templates.md`'s soft-delete design makes irreversible and historically
+messy.
+
+**Decision.**
+
+1. **`WorkerApiKey` replaces `WORKER_API_KEY` entirely — no dual-mode fallback.** A new
+   `WorkerApiKey` model (`id`, `name`, `keyHash` — SHA-256, `@unique`, doubling as the
+   authentication lookup index — `status: ACTIVE | REVOKED`, `departments` — implicit
+   many-to-many with `Department`, `createdByUserId`, `lastUsedAt`, timestamps),
+   ADMIN-managed (`worker_key:manage`, ADMIN-only) via a full CRUD UI at `/worker-keys`:
+   create (name + at least one Department, secret shown exactly once, never re-displayed
+   or stored anywhere retrievable), revoke/reactivate (never a hard delete — history
+   stays inspectable), and edit-Department-scope (full replace, never diffed — mirrors
+   how a Template's asset list and a `YouTubeTarget`'s Department set are already
+   replaced wholesale on every edit). The trust model is a direct copy of `Session`'s
+   (ADR-0020): only a hash is ever stored, so a database read alone never yields a usable
+   credential. `@/server/worker-auth`'s `authenticateWorker` is the sole place this
+   credential is read, hashed, or compared — mirroring `@/server/auth/session.ts` being
+   the sole boundary for human sessions — and resolves a `WorkerAuthContext {
+workerApiKeyId, allowedDepartmentIds }` once, at authentication, which
+   `defineRouteHandler`'s `authenticate` hook hands straight to every Worker Route
+   Handler as `ctx.auth` (a minimal, backward-compatible extension to
+   `defineRouteHandler` — a new `TAuth` generic, defaulting to `void` for every
+   non-Worker route).
+2. **Department scope is enforced server-side, never client-supplied, and folded into
+   the atomic claim query itself — not a post-hoc check.** `claimNextJobRow`'s `SELECT
+... FOR UPDATE SKIP LOCKED` now filters `WHERE "departmentId" = ANY(allowedDepartmentIds)`
+   as part of the same atomic statement (ADR-0029's guarantee is unchanged, just
+   narrowed) — a scoped-out Job is never even considered for locking, let alone
+   transiently claimed before a rejection could apply. Every other Worker Job operation
+   (`getJobForWorker`, `transitionJobForWorker`, `updateJobProgress`,
+   `updateJobDuration`, `acceptJobResult`) calls the same
+   `assertWorkerDepartmentAccess(allowedDepartmentIds, job.departmentId)` gate before
+   touching a _specific_ Job id — safe as a plain pre-check (not folded into an atomic
+   conditional update) because `Job.departmentId` is immutable once created (see point 4
+   below), so there is no concurrent-Template-transfer race to guard against the way the
+   claim query's row-selection needs one. Every rejection is `not_found` (404), never
+   `forbidden` (403) — the same 403-vs-404 discipline every dashboard feature already
+   applies to cross-department access, now extended to the Worker's own credential scope
+   so a scoped-out Worker cannot distinguish "exists in a Department I can't reach" from
+   "doesn't exist."
+3. **`youtube:manage` and the new `worker_key:manage` both move to ADMIN-only** (was
+   `MANAGER+`, Department-scoped, for YouTube). Connecting a channel or issuing a Worker
+   credential and choosing which Departments may use it is system-wide infrastructure
+   configuration — the same category as `department:manage`, not a Department-local
+   operation. `YouTubeTarget.departmentId` (a single FK) becomes `departments`, an
+   implicit many-to-many with `Department` — one channel now serves several Departments,
+   matching `WorkerApiKey`'s shape and real-world channel reuse. `youtubeChannelId`
+   becomes globally unique (was unique per-Department) since a channel is no longer
+   owned by exactly one. Non-ADMIN users are unaffected in what they can _do_: `USER`/
+   `MANAGER` still select an already-connected, already-scoped channel when authoring a
+   Job/Template, filtered to Targets assigned to their own Department
+   (`findConnectedYoutubeTargetForDepartment`) — gated by `template:manage`/`job:manage`
+   exactly as before, never by `youtube:manage`.
+4. **ADMIN may transfer a Template to a different Department; MANAGER/USER cannot, even
+   via a crafted request carrying `departmentId`.** `updateTemplate` gates the transfer
+   branch with `requireRole(actor, "ADMIN")` — not just a capability floor a crafted
+   payload could otherwise slip past — and only when `input.departmentId` actually
+   differs from the Template's current Department; a non-ADMIN's `departmentId` is
+   silently ignored whenever it would differ (never trusted from the client, matching
+   every other cross-department input in this codebase). The target Department must
+   exist, and every dependent reference is **re-verified against the target Department,
+   not the original**: `verifyAssetFileReferences`/`verifyYoutubeTargetReference` already
+   do exactly this check for a plain same-department edit, so a transfer that would leave
+   the Template pointing at another Department's Files/Target is rejected with the same
+   clean `business_rule` error, never silently transferred anyway.
+   **No historical-integrity mechanism needed for this** — `Job.departmentId` is copied
+   onto the Job row once, at creation, from the Template's Department _at that time_; it
+   is a plain stored column, never a live join through `Job.templateId`. Moving a
+   Template to a different Department later does not, and cannot, retroactively change
+   which Department any existing Job belongs to. This is also exactly what makes point 2
+   above race-free without needing to fold the Worker's Department check into an atomic
+   conditional update the way the claim query does.
+
+**Consequences.**
+
+- New table: `WorkerApiKey`. `YouTubeTarget.departmentId` (single FK) is replaced by
+  `departments` (implicit m2m) — a real, hand-verified-empty-table migration, not a
+  destructive one (no `YouTubeTarget` rows existed at migration time in every
+  environment this was applied to).
+- `WORKER_API_KEY` is removed from `@/server/env` entirely — no environment-variable
+  fallback path exists or should be added; every existing Worker deployment must be
+  reissued a `WorkerApiKey` via `/worker-keys` before this ships.
+- `Department` navigation/nav item visibility, `YouTube` navigation, and the new
+  `Worker API Keys` navigation item are all ADMIN-only in `@/lib/navigation.ts` — every
+  one of the pages behind them independently re-checks the actor's role server-side
+  (`ForbiddenPage` gate), not just via the nav's own `minRole` filter, matching every
+  other management page in this codebase. Non-ADMIN users retain their own Department's
+  name in the sidebar/profile area (`CurrentUser.departmentName`) even without the
+  `/departments` management page.
+- `job-repository.ts`'s module doc comment is corrected: Worker-facing operations are no
+  longer blanket "not department-scoped" — only `claimNextJobRow` folds the scope into
+  its own atomic query; every other Worker operation is scoped one layer up, in the use
+  case, via `assertWorkerDepartmentAccess`.
+- Resolves OD-27 (Worker-auth mechanism, superseding ADR-0032's static-key answer) and
+  OD-36 (YouTube Department scoping, superseding ADR-0039's single-FK answer).
+
+**Out of scope, deliberately** (do not build without a new decision):
+
+- Per-Worker rate limiting, per-Worker request idempotency keys beyond what ADR-0034
+  already established (unaffected by moving from one shared key to many scoped ones).
+- A generic multi-tenant RBAC/permission-table system — Studio still has exactly three
+  fixed roles; `worker_key:manage`/`youtube:manage` are two more entries in the existing
+  fixed capability registry, not a new mechanism.
+- Any Worker-initiated Department self-service (a Worker cannot request its own scope
+  change) — Department scope is exclusively ADMIN-assigned.
+
+**Status:** DECIDED.

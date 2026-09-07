@@ -39,7 +39,7 @@ export const POST = defineRouteHandler({
   name: "worker.jobs.result",
   authenticate: authenticateWorker,
   params: z.object({ jobId: commonSchemas.id }),
-  handler: async ({ params, request }) => {
+  handler: async ({ params, request, auth }) => {
     const contentLength = request.headers.get("content-length");
     if (contentLength && Number(contentLength) > VIDEO_MAX_SIZE_BYTES) {
       throw validationError(
@@ -48,7 +48,11 @@ export const POST = defineRouteHandler({
     }
 
     const videoBuffer = Buffer.from(await request.arrayBuffer());
-    const job = await acceptJobResult(params.jobId, videoBuffer);
+    const job = await acceptJobResult(
+      params.jobId,
+      videoBuffer,
+      auth.allowedDepartmentIds,
+    );
     return {
       id: job.id,
       state: job.state,

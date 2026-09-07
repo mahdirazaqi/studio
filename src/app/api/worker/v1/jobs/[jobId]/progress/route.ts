@@ -16,11 +16,11 @@ export const PATCH = defineRouteHandler({
   authenticate: authenticateWorker,
   params: z.object({ jobId: commonSchemas.id }),
   body: z.object({ progress: z.number().int().min(0).max(100) }),
-  handler: async ({ params, body }) => {
-    const job = await updateJobProgress({
-      jobId: params.jobId,
-      progress: body.progress,
-    });
+  handler: async ({ params, body, auth }) => {
+    const job = await updateJobProgress(
+      { jobId: params.jobId, progress: body.progress },
+      auth.allowedDepartmentIds,
+    );
     return { id: job.id, progress: job.progress };
   },
 });

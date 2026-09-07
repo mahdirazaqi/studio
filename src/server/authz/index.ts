@@ -151,10 +151,18 @@ const CAPABILITY_POLICIES: Partial<Record<Capability, CapabilityPolicy>> = {
   // default until decided.
   "template:manage": { minRole: "MANAGER" },
 
-  // Connecting/disconnecting a YouTube channel is department-level
-  // infrastructure configuration, not a per-Job operation — MANAGER+, same
-  // floor as `template:manage` (Phase 9, docs/integrations/youtube.md).
-  "youtube:manage": { minRole: "MANAGER" },
+  // Revised, ADR-0040: ADMIN-only (was MANAGER+, department-scoped —
+  // Phase 9). Connecting a YouTube channel and choosing which Departments
+  // may use it is system-wide infrastructure configuration, the same
+  // reasoning `worker_key:manage` uses. Picking an *already-connected*
+  // channel for a Template stays gated by `template:manage` instead — see
+  // `features/templates/use-cases/list-youtube-targets-for-template-form.ts`.
+  "youtube:manage": { minRole: "ADMIN" },
+
+  // New, ADR-0040: creating/revoking a Worker API Key and choosing its
+  // Department scope — ADMIN-only, the machine-identity counterpart to
+  // `user:manage`.
+  "worker_key:manage": { minRole: "ADMIN" },
 };
 
 export interface AuthorizeOptions {

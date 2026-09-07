@@ -11,10 +11,14 @@ export const YOUTUBE_TARGET_STATUSES = [
 export type YouTubeTargetStatus = (typeof YOUTUBE_TARGET_STATUSES)[number];
 
 /** Never carries a token, encrypted or not — safe to hand to a Server
- * Component or return from a Server Action. */
+ * Component or return from a Server Action.
+ *
+ * `departmentIds` (revised, ADR-0040): many-to-many, not a single
+ * `departmentId` — a real-world channel may serve any number of
+ * Departments. */
 export interface SafeYouTubeTarget {
   id: string;
-  departmentId: string;
+  departmentIds: string[];
   name: string;
   youtubeChannelId: string;
   status: YouTubeTargetStatus;

@@ -4,7 +4,6 @@ import type { Prisma } from "@prisma/client";
 
 import { db } from "@/server/db";
 import { conflictError } from "@/server/errors/app-error";
-import { departmentScopeFilter, type Actor } from "@/server/authz";
 import type {
   SafeYouTubeTarget,
   YouTubeTargetStatus,
@@ -18,11 +17,17 @@ import type {
  * uses `SAFE_TARGET_SELECT`, which omits them entirely, so a token can never
  * accidentally end up in a value handed back up the call stack toward a
  * client.
+ *
+ * **Revised (ADR-0040):** `departmentId` is now a many-to-many
+ * `departments` relation, not a single FK — a Target may serve any number of
+ * Departments. Management is ADMIN-only (`youtube:manage`, revised from
+ * MANAGER+), so no function here takes an `Actor`/department-scope filter
+ * the way a MANAGER-reachable feature would — ADMIN sees and manages every
+ * Target unconditionally.
  */
 
-const SAFE_TARGET_SELECT = {
+const RAW_TARGET_SELECT = {
   id: true,
-  departmentId: true,
   name: true,
   youtubeChannelId: true,
   status: true,
@@ -30,16 +35,17 @@ const SAFE_TARGET_SELECT = {
   createdByUserId: true,
   createdBy: { select: { fullName: true } },
   createdAt: true,
+  departments: { select: { id: true } },
 } satisfies Prisma.YouTubeTargetSelect;
 
-type SafeTargetRow = Prisma.YouTubeTargetGetPayload<{
-  select: typeof SAFE_TARGET_SELECT;
+type RawTargetRow = Prisma.YouTubeTargetGetPayload<{
+  select: typeof RAW_TARGET_SELECT;
 }>;
 
-function toSafeTarget(row: SafeTargetRow): SafeYouTubeTarget {
+function toSafeTarget(row: RawTargetRow): SafeYouTubeTarget {
   return {
     id: row.id,
-    departmentId: row.departmentId,
+    departmentIds: row.departments.map((department) => department.id),
     name: row.name,
     youtubeChannelId: row.youtubeChannelId,
     status: row.status,
@@ -51,35 +57,31 @@ function toSafeTarget(row: SafeTargetRow): SafeYouTubeTarget {
 }
 
 export interface ConnectTargetData {
-  departmentId: string;
+  departmentIds: string[];
   name: string;
   youtubeChannelId: string;
   encryptedRefreshToken: string;
   createdByUserId: string;
 }
 
-/** Upserts on `(departmentId, youtubeChannelId)` — reconnecting the same
- * channel (e.g. a rotated refresh token) updates the existing row instead of
- * creating a duplicate Target with stale history. */
+/** Upserts on the now-globally-unique `youtubeChannelId` — reconnecting the
+ * same real-world channel (e.g. a rotated refresh token) updates the
+ * existing row (including replacing its Department assignments with
+ * whatever was just submitted) instead of creating a duplicate. */
 export async function upsertYoutubeTarget(
   data: ConnectTargetData,
 ): Promise<SafeYouTubeTarget> {
   try {
     const row = await db.youTubeTarget.upsert({
-      where: {
-        departmentId_youtubeChannelId: {
-          departmentId: data.departmentId,
-          youtubeChannelId: data.youtubeChannelId,
-        },
-      },
+      where: { youtubeChannelId: data.youtubeChannelId },
       create: {
-        departmentId: data.departmentId,
         name: data.name,
         youtubeChannelId: data.youtubeChannelId,
         encryptedRefreshToken: data.encryptedRefreshToken,
         createdByUserId: data.createdByUserId,
         status: "CONNECTED",
         lastErrorReason: null,
+        departments: { connect: data.departmentIds.map((id) => ({ id })) },
       },
       update: {
         name: data.name,
@@ -88,8 +90,9 @@ export async function upsertYoutubeTarget(
         lastErrorReason: null,
         encryptedAccessToken: null,
         accessTokenExpiresAt: null,
+        departments: { set: data.departmentIds.map((id) => ({ id })) },
       },
-      select: SAFE_TARGET_SELECT,
+      select: RAW_TARGET_SELECT,
     });
     return toSafeTarget(row);
   } catch (error) {
@@ -99,56 +102,79 @@ export async function upsertYoutubeTarget(
   }
 }
 
-export async function listYoutubeTargets(
-  actor: Actor,
-): Promise<SafeYouTubeTarget[]> {
+/** ADMIN-only listing — every Target, regardless of Department assignment. */
+export async function listYoutubeTargets(): Promise<SafeYouTubeTarget[]> {
   const rows = await db.youTubeTarget.findMany({
-    where: departmentScopeFilter(actor),
-    select: SAFE_TARGET_SELECT,
+    select: RAW_TARGET_SELECT,
     orderBy: { createdAt: "desc" },
   });
   return rows.map(toSafeTarget);
 }
 
-/** Department-scoped, `CONNECTED` only — the set a Template's YouTube-channel
- * picker offers (docs/domain/templates.md). */
-export async function listConnectedYoutubeTargetsInDepartment(
+/** The set a Template's YouTube-channel picker offers — every `CONNECTED`
+ * Target assigned to `departmentId` (docs/domain/templates.md). */
+export async function listConnectedYoutubeTargetsForDepartment(
   departmentId: string,
 ): Promise<SafeYouTubeTarget[]> {
   const rows = await db.youTubeTarget.findMany({
-    where: { departmentId, status: "CONNECTED" },
-    select: SAFE_TARGET_SELECT,
+    where: { status: "CONNECTED", departments: { some: { id: departmentId } } },
+    select: RAW_TARGET_SELECT,
     orderBy: { name: "asc" },
   });
   return rows.map(toSafeTarget);
 }
 
-export async function findYoutubeTargetInScope(
-  actor: Actor,
+/** ADMIN-only — no department scope, unlike most `findXInScope` helpers
+ * elsewhere, since YouTube Target management itself is no longer
+ * department-scoped (ADR-0040). */
+export async function findYoutubeTargetById(
   targetId: string,
 ): Promise<SafeYouTubeTarget | null> {
-  const row = await db.youTubeTarget.findFirst({
-    where: { id: targetId, ...departmentScopeFilter(actor) },
-    select: SAFE_TARGET_SELECT,
+  const row = await db.youTubeTarget.findUnique({
+    where: { id: targetId },
+    select: RAW_TARGET_SELECT,
   });
   return row ? toSafeTarget(row) : null;
 }
 
 /**
- * Verifies a Target id belongs to `departmentId` and is `CONNECTED` — the
- * same "resolve server-side, never trust the client's claim" pattern
+ * Verifies a Target id is assigned to `departmentId` and is `CONNECTED` —
+ * the same "resolve server-side, never trust the client's claim" pattern
  * `findGalleryFileIdsInDepartment` uses for `TemplateAsset.defaultFileId`
- * (docs/domain/templates.md "File Gallery Integration").
+ * (docs/domain/templates.md "File Gallery Integration"). Used by both
+ * `verify-youtube-target.ts` (Template save) and `create-job.ts` (Job
+ * creation) to check Template-department ↔ Target-assignment membership.
  */
-export async function findConnectedYoutubeTargetInDepartment(
+export async function findConnectedYoutubeTargetForDepartment(
   departmentId: string,
   targetId: string,
 ): Promise<SafeYouTubeTarget | null> {
   const row = await db.youTubeTarget.findFirst({
-    where: { id: targetId, departmentId, status: "CONNECTED" },
-    select: SAFE_TARGET_SELECT,
+    where: {
+      id: targetId,
+      status: "CONNECTED",
+      departments: { some: { id: departmentId } },
+    },
+    select: RAW_TARGET_SELECT,
   });
   return row ? toSafeTarget(row) : null;
+}
+
+/** ADMIN edits a Target's Department scope (docs/integrations/youtube.md
+ * "Editing scope") — a full replace, mirroring how a Template's asset list
+ * is replaced wholesale on every edit rather than diffed. Takes effect
+ * immediately: the very next Template-form load or Job creation re-reads
+ * this relation fresh, there is nothing cached to invalidate. */
+export async function setYoutubeTargetDepartments(
+  targetId: string,
+  departmentIds: string[],
+): Promise<SafeYouTubeTarget> {
+  const row = await db.youTubeTarget.update({
+    where: { id: targetId },
+    data: { departments: { set: departmentIds.map((id) => ({ id })) } },
+    select: RAW_TARGET_SELECT,
+  });
+  return toSafeTarget(row);
 }
 
 export interface YoutubeTargetTokens {
