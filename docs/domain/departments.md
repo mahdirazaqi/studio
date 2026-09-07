@@ -71,11 +71,11 @@ delete path at all and no decision yet on OD-07 —
   > not need because Jobs already snapshot everything they need from a Template at
   > creation time.
 
-`WorkerApiKey` and `YouTubeTarget` are a different shape entirely (ADR-0040): both are
-**many-to-many** with Department, not owned by exactly one — a single Worker credential
-or YouTube channel commonly serves several Departments at once. Assigning/reassigning
-either's Department set is an ordinary ADMIN-only edit (a full replace, not a "move"),
-not an instance of this OPEN DECISION.
+`WorkerApiKey` is a different shape entirely (ADR-0040): it is **many-to-many** with
+Department, not owned by exactly one — a single Worker credential commonly serves
+several Departments at once. Assigning/reassigning its Department set is an ordinary
+ADMIN-only edit (a full replace, not a "move"), not an instance of this OPEN DECISION.
+(`YouTubeTarget` was the same shape, Phases 9–11 — it was removed entirely, ADR-0041.)
 
 ## Enforcement pattern (for implementers)
 
@@ -128,5 +128,5 @@ enforcement.
 ## Not a "Channel"
 
 The legacy term _Channel_ refers to a connected **YouTube channel**, not a Department.
-Studio keeps the YouTube-target concept in [../integrations/youtube.md](../integrations/youtube.md).
-A Department is purely an internal org/isolation unit.
+Studio does not upload rendered Jobs to YouTube (ADR-0041) — that concept no longer
+exists at all. A Department is purely an internal org/isolation unit.

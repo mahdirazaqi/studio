@@ -45,13 +45,14 @@ src/
 │   │   ├── loading.tsx  error.tsx
 │   │   ├── jobs/                 → IMPLEMENTED (Phase 6/9) — list, `new/`, `[jobId]/`
 │   │   │                         (Phase 9: delivery status + retry-delivery UI)
-│   │   ├── templates/            → IMPLEMENTED (Phase 5/9) — list, `new/`, `[templateId]/`
-│   │   │                         (Phase 9: YouTube channel picker)
+│   │   ├── templates/            → IMPLEMENTED (Phase 5) — list, `new/`, `[templateId]/`
 │   │   ├── files/                → IMPLEMENTED (Phase 4) — real gallery page
-│   │   ├── youtube/               → IMPLEMENTED (Phase 9) — connect/list/disconnect
-│   │   │                         YouTubeTarget management page (MANAGER+)
-│   │   ├── users/                → role-gated (MANAGER+) PlaceholderPage or ForbiddenPage
-│   │   └── departments/          → role-gated (ADMIN) PlaceholderPage or ForbiddenPage
+│   │   ├── users/                → IMPLEMENTED (Phase 10) — list, `new/` (MANAGER+)
+│   │   ├── departments/          → IMPLEMENTED (Phase 10) — list, create/rename (ADMIN-only, Phase 11)
+│   │   └── worker-keys/          → IMPLEMENTED (Phase 11) — WorkerApiKey CRUD (ADMIN-only)
+│
+│   YouTube upload/delivery is removed (ADR-0041) — the `youtube/` dashboard page,
+│   `features/youtube/`, and `server/adapters/youtube/` no longer exist.
 │   └── api/
 │       ├── health/route.ts       health check
 │       ├── files/[fileId]/route.ts   binary content delivery (Phase 4) — plain handler,
@@ -129,28 +130,21 @@ src/
 │                                 exactly once; keyboards.ts, messages.ts — pure
 │                                 rendering; incoming.ts — downloads Telegram media into a
 │                                 transport-neutral shape)
-│   ├── youtube/                   IMPLEMENTED (Phase 9) — domain/ (youtube-target.ts),
-│   │                             repository/ (youtube-target-repository.ts — the only
-│   │                             module that selects token ciphertext), use-cases/
-│   │                             (connect-youtube-target, list-youtube-targets,
-│   │                             disconnect-youtube-target, get-valid-access-token,
-│   │                             resolve-target-department), schemas/, actions/,
-│   │                             components/ (youtube-targets-manager.tsx)
-│   └── delivery/                  IMPLEMENTED (Phase 9) — domain/ (tag-substitution.ts),
-│                                 repository/ (delivery-repository.ts — DeliveryAttempt
-│                                 writes only; reads come from jobs/repository's own
-│                                 SafeJobDetail.deliveryAttempts), use-cases/
+│   └── delivery/                  IMPLEMENTED (Phase 9, revised ADR-0041) — use-cases/
 │                                 (accept-job-result, generate-render-artifacts,
-│                                 deliver-job-result, retry-job-delivery,
 │                                 cleanup-job-artifacts), infrastructure/telegram
-│                                 (telegram-delivery-adapter.ts — best-effort DM),
-│                                 infrastructure/youtube (youtube-delivery-adapter.ts —
-│                                 wraps features/youtube + server/adapters/youtube),
-│                                 schemas/, actions/ (retry-job-delivery.action.ts) — a
-│                                 second deliberate cross-feature-import exception
-│                                 alongside Telegram's (§3 below): delivery is inherently
-│                                 an orchestrator over Jobs/Files/Telegram/YouTube, not a
-│                                 competing implementation
+│                                 (telegram-delivery-adapter.ts — best-effort "rendered"
+│                                 DM) — a deliberate cross-feature-import exception
+│                                 alongside Telegram's (§3 below): accepting a rendered
+│                                 result touches Jobs/Files/Telegram, not a competing
+│                                 implementation. YouTube delivery (the
+│                                 `infrastructure/youtube/` adapter, `deliver-job-result`,
+│                                 `retry-job-delivery`, `tag-substitution.ts`,
+│                                 `delivery-repository.ts`/`DeliveryAttempt`) is removed
+│                                 (ADR-0041) — this feature now only accepts/registers a
+│                                 rendered result, it does not deliver anywhere.
+│
+│   `features/youtube/` and `server/adapters/youtube/` no longer exist (ADR-0041).
 │
 │   (every feature above is now implemented, Phase 10 — no placeholder-only feature
 │   folder remains; `components/layout/placeholder-page.tsx` was removed as dead code
@@ -196,9 +190,6 @@ src/
 │   ├── adapters/media/          ffmpeg-adapter.ts — the only module that shells out for
 │   │                             media processing (execFile, fixed argument array,
 │   │                             ADR-0039, Phase 9)
-│   ├── adapters/youtube/        youtube-client.ts — the only module that imports
-│   │                             googleapis (ADR-0039, Phase 9); token-cipher.ts —
-│   │                             AES-256-GCM encrypt/decrypt for YouTubeTarget tokens
 │   └── media/                   probe.ts — sniffContentType / probeImageDimensions / hashContent (Phase 4)
 │
 ├── types/                       cross-cutting client-safe types (Maybe, Paginated, Result)
@@ -255,15 +246,14 @@ application layer is what justifies it, not a general relaxation of the rule abo
 **`delivery`'s cross-feature imports are the same pattern's second, narrower instance
 (Phase 9, ADR-0039):** `features/delivery/use-cases/*` imports
 `features/jobs/use-cases/transition-job` (the state-machine primitive, never a raw
-`db.job.update`), and reads/writes File bytes via `features/files/use-cases/
-read-file-buffer-for-delivery.ts` and `create-job-artifact.ts`, and a User's linked
-Telegram id via `features/telegram/repository/telegram-repository.ts`. This is correct
-for the identical reason Telegram's is: `delivery` **is** the orchestrator that ties
-Jobs/Files/Telegram/YouTube together after a render completes — it has no Job/File/
-Telegram domain logic of its own to duplicate. `features/youtube` is a normal feature
-(no cross-`use-cases` imports of its own) — `delivery` calls into
-`features/youtube/use-cases/get-valid-access-token.ts` the same way it calls into
-Telegram's repository, one directed edge, never the reverse.
+`db.job.update`), creates File rows via `features/files/use-cases/
+create-job-artifact.ts`, and notifies a User's linked Telegram id via
+`features/telegram/repository/telegram-repository.ts`. This is correct for the
+identical reason Telegram's is: `delivery` **is** the orchestrator that ties Jobs/Files/
+Telegram together after a render completes — it has no Job/File/Telegram domain logic
+of its own to duplicate. (Before ADR-0041, `delivery` also called into
+`features/youtube/`'s use-cases the same way — that edge no longer exists, since
+`features/youtube/` was removed entirely.)
 
 ## 4. Cross-cutting conventions
 

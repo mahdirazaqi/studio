@@ -11,10 +11,11 @@ import {
 } from "@/features/files/repository/file-repository";
 
 /**
- * Hard-deletes a completed Job's rendered-video artifact (never the
- * screenshot/thumbnail — small, kept for potential future display) once
- * delivery no longer needs it (docs/data/lifecycle-rules.md "Job Artifact
- * retention", OD-18). **Not wired to any automatic trigger this phase** —
+ * Hard-deletes a completed (`RENDERED`) Job's rendered-video artifact
+ * (never the screenshot/thumbnail — small, kept for potential future
+ * display), once it's no longer needed (docs/data/lifecycle-rules.md "Job
+ * Artifact retention", OD-18). **Not wired to any automatic trigger this
+ * phase** —
  * OD-18's grace-period/scheduling question stays open (no durable-work
  * mechanism exists yet, OD-40); this exists as the safe, tested primitive a
  * future scheduled sweep calls, per the Phase 9 brief's own "implement
@@ -38,26 +39,10 @@ export async function cleanupJobArtifacts(
   const job = await findJobById(jobId);
   if (!job) throw notFoundError();
 
-  if (job.state !== "UPLOADED") {
+  if (job.state !== "RENDERED") {
     throw businessRuleError(
-      "Only a job in the UPLOADED state may have its rendered video cleaned up.",
+      "Only a job in the RENDERED state may have its rendered video cleaned up.",
     );
-  }
-
-  if (job.deliverToYouTube) {
-    const youtubeSucceeded = job.deliveryAttempts.some(
-      (attempt) =>
-        attempt.provider === "YOUTUBE" && attempt.status === "SUCCEEDED",
-    );
-    if (!youtubeSucceeded) {
-      // Should not be reachable — a Job cannot reach UPLOADED with
-      // deliverToYouTube=true unless its YouTube delivery succeeded
-      // (deliver-job-result.ts). Refusing rather than guessing keeps this
-      // function's own safety invariant self-contained.
-      throw businessRuleError(
-        "This job's required YouTube delivery has no recorded success — refusing to delete its video.",
-      );
-    }
   }
 
   if (!job.videoFileId) return { cleaned: false };

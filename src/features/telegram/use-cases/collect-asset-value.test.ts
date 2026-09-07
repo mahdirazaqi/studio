@@ -21,7 +21,6 @@ function payload(overrides: Partial<WizardPayload> = {}): WizardPayload {
   return {
     templateId: "tpl-1",
     templateName: "T",
-    deliverToYouTube: false,
     trackCount: 1,
     slots: [
       { key: "title", kind: "DATA" },

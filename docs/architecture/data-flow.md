@@ -17,9 +17,8 @@ Use case  createJob(actor, input)
   │  3. validate every asset slot has a value; resolve File references
   │     (each File must be readable by the actor's department)
   │  4. build immutable SNAPSHOT of template + resolved asset values
-  │  5. enforce upload cap (if job.deliverToYouTube)      ← cap model: OPEN DECISION
-  │  6. repository.create(job, state = QUEUED)
-  │  7. write audit entry
+  │  5. repository.create(job, state = QUEUED)
+  │  6. write audit entry
   ▼
 Job row (state = QUEUED)  +  snapshot stored on the job
 
@@ -45,32 +44,27 @@ use cases  changeState / reportProgress / reportDuration
   ▼
 
 Render Worker
-  │  POST /api/worker/v1/jobs/:id/result   (multipart, mp4)
+  │  POST /api/worker/v1/jobs/:id/result   (raw video bytes, not multipart)
   ▼
-Route Handler → use case  attachResult(job, file)
+Route Handler → use case  acceptJobResult(job, videoBuffer)
   │  store video bytes via storage adapter
-  │  generate screenshot (ffmpeg, execFile) + thumbnail (ImageMagick, execFile)
+  │  generate screenshot + thumbnail (ffmpeg only, execFile — ADR-0039)
   │  persist artifact File rows (category = JOB_ARTIFACT)
-  │  set state = RENDERED (or the worker already did)
-  │  enqueue delivery  (durable — NOT fire-and-forget)
+  │  set state = RENDERED, atomically, together with the artifact File ids
+  │     ← this is the Job's final, successful state (ADR-0041) — no delivery step
+  │  send a best-effort "rendered" Telegram notification (never blocks the Job)
   ▼
-Delivery worker/task  completeAndDeliver(job)
-  │  if job.deliverToYouTube: YouTube adapter → upload video + thumbnail
-  │  if job.deliverToTelegram: Telegram adapter → send document to creator
-  │  record per-target outcome (success / failure + reason) on the job
-  │  set state = UPLOADED on success, or ERROR with reason on failure
-  ▼
-Operator sees final state + any error reason in the panel; gets a notification
+Operator sees the final state in the panel; gets a Telegram notification if linked
 ```
 
 ### Durability requirements in this flow
 
 - **Job claim is atomic** — two concurrent workers can never claim the same job.
   (Legacy `findOne` + later `save` had a race; do not reproduce.)
-- **Delivery is durable** — it survives a process restart. Options (OPEN DECISION):
-  a `delivery_outcome` table polled by a task, a real queue, or transactional-outbox.
-  Whatever the mechanism, the job must never be stuck silently: every job either reaches
-  a terminal state or is visibly retryable.
+- **There is no delivery step to make durable** — a Job's lifecycle ends at `RENDERED`
+  (ADR-0041). Result acceptance itself (the state transition + artifact File creation)
+  is the one atomic unit that must never be stuck silently: every Job either reaches a
+  terminal state or is visibly retryable.
 - **State transitions are validated** — the worker cannot set an arbitrary integer.
 
 ## 2. Create via Telegram (durable wizard)
@@ -81,8 +75,7 @@ Telegram user → Telegram (webhook or long-poll) → Telegram Adapter
   │  if not linked → prompt to authenticate (share phone) → link on match
   ▼
 Adapter loads/updates the WIZARD STATE ROW for this telegram user (PostgreSQL)
-  │  step: pick template → (ask deliver? if template has a YouTube target)
-  │        → fill each asset slot one message at a time
+  │  step: pick template → fill each asset slot one message at a time
   │  each inbound message advances the row; nothing is kept in memory
   ▼
 when all slots filled:
@@ -103,19 +96,18 @@ when all slots filled:
 Operator/Telegram → retryJob(actor, originalJobId)
   │  1. authorize (job:retry in the job's department)
   │  2. load original job; check retry eligibility (state + age rules — see jobs.md)
-  │  3. if original.deliverToYouTube: check upload cap  ← BEFORE creating anything
-  │  4. create a NEW job:
+  │  3. create a NEW job:
   │       - copies the snapshot (template + asset values) from the original
   │       - state = QUEUED
   │       - retryOfJobId = original.id   (lineage preserved)
   │       - attemptNumber = original.attemptNumber + 1
   │       - retriedByUserId, retryReason, createdAt
-  │  5. original job is UNTOUCHED (never deleted, never mutated destructively)
-  │  6. audit entry
+  │  4. original job is UNTOUCHED (never deleted, never mutated destructively)
+  │  5. audit entry
 ```
 
-Legacy deleted the original job _before_ checking the cap, so a failed retry could leave
-the user with nothing. Studio never deletes and checks the cap before writing.
+Legacy deleted the original job (destructively) before creating the retry, so a failed
+retry could leave the user with nothing. Studio never deletes the original.
 
 ## 4. Cancel
 
@@ -131,11 +123,10 @@ Cancellation is a **state transition**, not a delete. The job row remains foreve
 
 ## 5. Notifications
 
-| Event        | Channel(s)                                                     | Notes                                                  |
-| ------------ | -------------------------------------------------------------- | ------------------------------------------------------ |
-| Job RENDERED | in-app notification + Telegram DM (if creator linked)          | Consistent across transitions — legacy was asymmetric. |
-| Job UPLOADED | in-app notification + Telegram DM                              |                                                        |
-| Job ERROR    | in-app notification + Telegram DM, **with the failure reason** | Legacy only logged the reason server-side.             |
+| Event        | Channel(s)                                           | Notes                                                                                          |
+| ------------ | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Job RENDERED | Telegram DM (if creator linked)                      | Best-effort, never blocks the Job. `RENDERED` is the Job's final, successful state (ADR-0041). |
+| Job ERROR    | Not currently notified — see `accept-job-result.ts`. | Only the render-success path sends a notification this phase.                                  |
 
 Notification delivery is best-effort but **logged**; a failed notification never blocks
 or reverts a job transition.

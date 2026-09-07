@@ -53,7 +53,7 @@ Every File has a `category`:
 
 - **Files are hard-deleted (row + bytes). There is no soft delete.**
 - A File may be deleted only when it breaks **no active or required dependency**:
-  - No `QUEUED` / `CLAIMED` / `RENDERING` / `DELIVERING` Job references it as an input —
+  - No `QUEUED` / `CLAIMED` / `RENDERING` Job references it as an input —
     **enforced, Phase 6** (`assertNoActiveJobDependencies`, real since Job/JobAsset
     exist; see [jobs.md](jobs.md) and ADR-0028).
   - **No Template asset currently defaults to it** — enforced, Phase 5
@@ -67,21 +67,21 @@ Every File has a `category`:
   crash.**
 - **Job Artifact auto-cleanup:**
 
-  > **Phase 9 status.** `JOB_ARTIFACT` now has a real writer:
+  > **Phase 9 status (revised ADR-0041).** `JOB_ARTIFACT` now has a real writer:
   > `features/delivery/use-cases/generate-render-artifacts.ts` creates the rendered
   > video, a screenshot, and a thumbnail as `JOB_ARTIFACT` Files on every accepted Worker
-  > result (docs/integrations/youtube.md "Rendered result flow"). The deletion-safety
-  > hook (`assertNoActiveJobDependencies`) is unaffected — a `JOB_ARTIFACT` video is
-  > referenced only by its own Job's `videoFileId`, never a `JobAsset` input, so it isn't
-  > subject to that check at all; its own dedicated cleanup primitive is
-  > `features/delivery/use-cases/cleanup-job-artifacts.ts` (ADR-0039) — safe, idempotent,
-  > and reference-aware (only deletes the video, only from `UPLOADED`, only after a
-  > required YouTube delivery actually succeeded).
+  > result (docs/domain/jobs.md "Rendered result") — `RENDERED` is the Job's final,
+  > successful state, reached directly, with no delivery step after it. The
+  > deletion-safety hook (`assertNoActiveJobDependencies`) is unaffected — a
+  > `JOB_ARTIFACT` video is referenced only by its own Job's `videoFileId`, never a
+  > `JobAsset` input, so it isn't subject to that check at all; its own dedicated cleanup
+  > primitive is `features/delivery/use-cases/cleanup-job-artifacts.ts` (ADR-0039) — safe,
+  > idempotent, and reference-aware (only deletes the video, only from `RENDERED`).
 
   > **`OPEN DECISION` — artifact retention (OD-18) — primitive built, trigger still
   > open.** The safe cleanup function above exists but is **not auto-triggered** — no
   > grace period, no scheduler (OD-40's durable-work mechanism doesn't exist yet). When
-  > exactly it should run (immediately on `UPLOADED` / after a retention window / on
+  > exactly it should run (immediately on `RENDERED` / after a retention window / on
   > storage pressure) remains undecided; screenshot + thumbnail are never deleted by this
   > function regardless.
 
@@ -137,8 +137,8 @@ duration itself comes from the Worker's own report, `Job.durationSeconds`, not f
 probing the artifact File). **No `ownerJobId` column was added** — a `JOB_ARTIFACT`'s
 owning Job is found via `Job.videoFileId`/`screenshotFileId`/`thumbnailFileId` (the FK
 lives on `Job`, pointing at `File`, not the other way around) since each artifact belongs
-to exactly one Job and Studio already needed those columns on `Job` for the delivery
-pipeline itself (docs/integrations/youtube.md). Job **input** references (the opposite
+to exactly one Job and Studio already needed those columns on `Job` for the rendered
+result itself (docs/domain/jobs.md "Rendered result"). Job **input** references (the opposite
 direction — a `JobAsset` pointing at a Gallery File) are implemented, Phase 6 — see
 "Referencing from Jobs/Templates" below.
 
@@ -173,7 +173,7 @@ direction — a `JobAsset` pointing at a Gallery File) are implemented, Phase 6 
   [../data/historical-integrity.md](../data/historical-integrity.md)).
 - A live FK (`JobAsset.fileId`, nullable, `onDelete: SetNull`) is kept for **active**
   dependency checks (`assertNoActiveJobDependencies`, real since Phase 6 — blocks
-  deletion while a Job in `QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING` still references
+  deletion while a Job in `QUEUED`/`CLAIMED`/`RENDERING` still references
   the File) and for the "media still stored?" indicator. `ownerJobId` (the reverse
   direction, for a `JOB_ARTIFACT` a Job produced) was not added as a column on `File` —
   the equivalent FKs live on `Job` instead (`videoFileId`/`screenshotFileId`/

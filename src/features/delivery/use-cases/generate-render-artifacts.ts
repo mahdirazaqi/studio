@@ -18,13 +18,15 @@ import {
 import type { SafeFile } from "@/features/files/domain/file";
 
 /**
- * `MediaProcessingService` (docs/integrations/youtube.md "Media processing",
- * Phase 9, ADR-0039): turns a rendered video buffer into the three
- * `JOB_ARTIFACT` Files a Job needs — the video itself, a screenshot (used as
- * the YouTube thumbnail source, legacy: `00:00:04.000`), and a small resized
- * thumbnail (legacy: ImageMagick `-resize x150`, done here via `ffmpeg`'s
- * `scale` filter instead — see `ffmpeg-adapter.ts`'s doc comment for why a
- * second native dependency was not introduced).
+ * `MediaProcessingService` (docs/domain/jobs.md "Rendered result", Phase 9,
+ * ADR-0039): turns a rendered video buffer into the three `JOB_ARTIFACT`
+ * Files a Job needs — the video itself, a screenshot (fixed offset, legacy:
+ * `00:00:04.000`), and a small resized thumbnail (legacy: ImageMagick
+ * `-resize x150`, done here via `ffmpeg`'s `scale` filter instead — see
+ * `ffmpeg-adapter.ts`'s doc comment for why a second native dependency was
+ * not introduced). All three exist for the dashboard's own Job detail view
+ * (preview/download the rendered result) — independent of any external
+ * delivery destination, which Studio no longer has (ADR-0041).
  *
  * All filesystem work happens in a private, per-call temp directory
  * (`mkdtemp` — never a predictable/shared path) that is always removed in

@@ -23,17 +23,18 @@ carried over.
 | `Department` **(implemented)**          | Archive only (deletion = OPEN DECISION)     | — (is the scope)                   | Tenancy boundary. `id`, `name`, timestamps only so far.                                                                                                                                             |
 | `User` **(implemented)**                | Never (status `ACTIVE`/`DISABLED`)          | yes (`departmentId`)               | Referenced forever by Jobs/Templates/Files/audit. `phone`/`telegramUserId` **implemented, Phase 8**; disable-audit fields (`disabledAt`/`disabledByUserId`) not added yet (see domain/users.md).    |
 | `Session` **(implemented)**             | Row deleted on logout/expiry                | via linked User                    | Auth session (ADR-0020) — not in the original Phase 0 model; added for login.                                                                                                                       |
-| `Template` **(implemented)**            | Soft (`status`/`deletedAt`, independent)    | yes                                | Render recipe + asset slots. Row kept forever. `youtubeTargetId` **implemented, Phase 9**.                                                                                                          |
+| `Template` **(implemented)**            | Soft (`status`/`deletedAt`, independent)    | yes                                | Render recipe + asset slots. Row kept forever.                                                                                                                                                      |
 | `TemplateAsset` **(implemented)**       | With its Template (soft)                    | via Template                       | Slot definitions — child rows (resolves OD-22's Template half); replaced wholesale on edit.                                                                                                         |
 | `Job` **(implemented)**                 | **Never**                                   | yes (derived from Template)        | Permanent record. `snapshot` (JSONB) + `JobAsset` rows together are the immutable creation-time record — see ADR-0028. `videoFileId`/`screenshotFileId`/`thumbnailFileId` **implemented, Phase 9**. |
 | `JobAsset` **(implemented)**            | With its Job (never)                        | via Job                            | Resolved per-slot values — child rows (resolves OD-22's Job half), each with its own copied File metadata.                                                                                          |
 | `File` **(implemented)**                | Hard delete when safe                       | yes                                | `GALLERY_ASSET` or `JOB_ARTIFACT` — both categories now have real writers (Phase 9). `durationSeconds` still not added (see domain/files.md); no `ownerJobId` — the FK lives on `Job` instead.      |
 | `TelegramWizardState` **(implemented)** | Lazily expired by TTL (no active sweep yet) | via linked User (`userId @unique`) | Durable Telegram conversation state (ADR-0014, ADR-0037). One row per Telegram user, at most one per Studio User.                                                                                   |
 | `AuditEntry`                            | Never (retention = OPEN DECISION)           | yes                                | Who did what, when.                                                                                                                                                                                 |
-| `WorkerCredential`                      | Revoke (status)                             | —                                  | Service credential(s) for the Worker (mechanism = OPEN DECISION).                                                                                                                                   |
-| `YouTubeTarget` **(implemented)**       | Status flip (`DISCONNECTED`), never deleted | yes (`departmentId`)               | Connected YouTube channel + encrypted OAuth tokens (Phase 9, ADR-0039). Legacy `Channel`.                                                                                                           |
-| `DeliveryAttempt` **(implemented)**     | With its Job (never)                        | via Job                            | Per-provider delivery attempt/outcome — child rows (Phase 9, ADR-0039). Resolves the delivery-outcome half of OD-22.                                                                                |
-| `UploadQuotaUsage` (maybe)              | Rolling / TTL                               | per cap scope                      | Backs the upload cap if not computed on the fly. Still not a real table — the cap is computed on the fly (ADR-0030), unaffected by Phase 9.                                                         |
+| `WorkerApiKey` **(implemented)**        | Revoke (status), never deleted              | yes (m2m, `departments`)           | Per-Worker service credential (Phase 11, ADR-0040 — supersedes the earlier `WorkerCredential`/static-key placeholder).                                                                              |
+
+**Removed, ADR-0041** (Studio no longer uploads to YouTube): `YouTubeTarget`,
+`DeliveryAttempt`, and the daily upload-quota logic (`JOB_UPLOAD_DAILY_CAP`,
+ADR-0030) — none had a Studio purpose beyond configuring/gating a YouTube upload.
 
 > **`OPEN DECISION` — assets & outcomes: related rows vs JSONB.** Resolved for
 > **Template** assets (Phase 5): implemented as **child rows** (`TemplateAsset`), replaced
@@ -66,14 +67,12 @@ User 0/1─1 TelegramWizardState
 Template 1───* TemplateAsset           (implemented, Phase 5)
 Template 1───* Job                     (templateId; Template is soft-deleted only,
                                         so this FK always resolves)
-Template *───0/1 YouTubeTarget         (youtubeTargetId, implemented Phase 9 — ADR-0039)
 TemplateAsset *───0/1 File             (defaultFileId, implemented Phase 5 — ADR-0027)
 
-Department 1───* YouTubeTarget         (implemented, Phase 9)
-User 1───* YouTubeTarget                (createdBy, implemented Phase 9)
+Department *───* WorkerApiKey          (implemented, Phase 11 — ADR-0040)
+User 1───* WorkerApiKey                (createdBy, implemented Phase 11)
 
 Job 1───* JobAsset             (implemented, Phase 6 — child rows, not JSONB)
-Job 1───* DeliveryAttempt      (implemented, Phase 9 — ADR-0039)
 Job 0/1─1 Job                 (retryOfJobId → original job; lineage chain — implemented)
 Job *───0/1 File              (videoFileId / screenshotFileId / thumbnailFileId,
                                implemented Phase 9 — set atomically together with the
@@ -133,17 +132,18 @@ itself doesn't need to record _which_ Worker claimed a Job to be correct.
 
 ## 5. Transactions — implemented, Phase 6
 
-- **Create Job** (`createJobWithAssets`): if `deliverToYouTube`, take the upload-quota
-  advisory lock + count + insert Job (+ `JobAsset` rows), atomically, in one
-  `$transaction`.
-- **Retry** (`createRetryJob`): `SELECT ... FOR UPDATE` the original Job row + (if
-  `deliverToYouTube`) the same quota lock + insert the new Job + assets, atomically;
-  original untouched.
+- **Create Job** (`createJobWithAssets`): a single `job.create` with nested `JobAsset`
+  creates. **Removed, ADR-0041**: the upload-quota advisory lock this section used to
+  describe — `deliverToYouTube` and the daily cap it gated no longer exist.
+- **Retry** (`createRetryJob`): `SELECT ... FOR UPDATE` the original Job row, inside one
+  `$transaction`, then insert the new Job + assets; original untouched.
 - **State transition** (`transitionJobRow`): a single conditional `UPDATE ... WHERE
 state IN (fromStates)` — atomic by virtue of being one statement, no explicit
   transaction wrapper needed (see ADR-0029 for why this is sufficient).
-- **Complete + deliver**: not implemented — no result-upload endpoint or delivery
-  mechanism exists yet (Phase 7+).
+- **Accept rendered result** (`acceptJobResult`): generates artifact Files, then the
+  atomic `RENDERING -> RENDERED` transition sets all three artifact File ids together —
+  `RENDERED` is the Job's final state (ADR-0041), so there is no further transaction in
+  this chain.
 - **Cancel bulk**: not implemented — only single-Job cancel exists this phase; it reuses
   the same conditional-update transition primitive.
 

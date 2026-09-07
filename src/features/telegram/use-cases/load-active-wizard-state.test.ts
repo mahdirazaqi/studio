@@ -13,7 +13,6 @@ const { loadActiveWizardState } = await import("./load-active-wizard-state");
 const validPayload = {
   templateId: "tpl-1",
   templateName: "T",
-  deliverToYouTube: false,
   trackCount: 1,
   slots: [{ key: "slot-1", kind: "DATA" }],
   tracks: [[]],

@@ -50,7 +50,6 @@ export function JobCreateForm({
 
   const [templateId, setTemplateId] = useState("");
   const [template, setTemplate] = useState<SafeTemplateDetail | null>(null);
-  const [deliverToYouTube, setDeliverToYouTube] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
 
   function handleTemplateChange(nextTemplateId: string) {
@@ -91,7 +90,6 @@ export function JobCreateForm({
     startTransition(async () => {
       const result = await createJobAction({
         templateId: template.id,
-        deliverToYouTube,
         assets,
       });
       if (!result.ok) {
@@ -142,20 +140,6 @@ export function JobCreateForm({
                 </option>
               ))}
             </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              id={`${formId}-upload`}
-              type="checkbox"
-              checked={deliverToYouTube}
-              disabled={isPending}
-              onChange={(e) => setDeliverToYouTube(e.target.checked)}
-              className="size-4"
-            />
-            <Label htmlFor={`${formId}-upload`} className="font-normal">
-              Deliver to YouTube when rendering completes
-            </Label>
           </div>
         </CardContent>
       </Card>

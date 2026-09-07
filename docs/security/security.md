@@ -129,7 +129,7 @@ create-job-artifact.ts` reuses `sniffContentType`/`resolveFileKind` unmodified) 
   the actual call shape (array args, no shell option) and with a real, generated test
   video during manual verification. **ImageMagick was deliberately not introduced** —
   `ffmpeg`'s own `scale` filter covers the one resize need legacy used `convert` for (see
-  docs/integrations/youtube.md "Media processing").
+  docs/domain/jobs.md "Rendered result").
 - Any future need to shell out goes through one reviewed helper that **forbids** string
   commands by type.
 - Legacy built ``exec(`convert ${filepath} ...`)`` with a user-influenced `filepath`
@@ -146,20 +146,15 @@ create-job-artifact.ts` reuses `sniffContentType`/`resolveFileKind` unmodified) 
 
 ## 9. Secret management
 
-- Secrets (DB URL, Worker credential, Telegram bot token, YouTube OAuth client secret)
-  come from **environment / a secret manager**, never the repo. There is deliberately no
-  session-signing secret to manage — sessions are opaque DB-backed tokens, not signed
-  JWTs (ADR-0020); tampering with a session cookie fails a hash lookup rather than
-  needing a secret to detect.
+- Secrets (DB URL, Worker credential, Telegram bot token) come from **environment / a
+  secret manager**, never the repo. There is deliberately no session-signing secret to
+  manage — sessions are opaque DB-backed tokens, not signed JWTs (ADR-0020); tampering
+  with a session cookie fails a hash lookup rather than needing a secret to detect.
 - `.env` files are git-ignored; only `.env.example` with **placeholder** values is
   committed.
-- **Implemented, Phase 9 (ADR-0039):** `YouTubeTarget` refresh/access tokens are
-  **encrypted at rest** with AES-256-GCM (`server/adapters/youtube/token-cipher.ts`,
-  `YOUTUBE_TOKEN_ENCRYPTION_KEY`) — a fresh random IV per encryption, verified round-trip
-  and tamper-detection (GCM auth tag) by unit test. Never plaintext in the database,
-  never logged, never returned to any client — the repository layer
-  (`features/youtube/repository/youtube-target-repository.ts`) selects the ciphertext
-  columns only in the two functions that legitimately need them.
+- **Removed, ADR-0041 (Phase 12):** `YouTubeTarget` (and the AES-256-GCM token
+  encryption, Google OAuth client credentials, and `YOUTUBE_TOKEN_ENCRYPTION_KEY` it
+  used) — Studio no longer uploads to YouTube, so there is no OAuth token to protect.
 - **Implemented, Phase 7 (ADR-0032), superseded Phase 11 (ADR-0040):** a Worker
   credential is now a `WorkerApiKey` database row — only its SHA-256 `keyHash` is ever
   stored (`@unique`, doubles as the authentication lookup index), the exact "database
@@ -215,24 +210,21 @@ create-job-artifact.ts` reuses `sniffContentType`/`resolveFileKind` unmodified) 
 ## 14. Auditability
 
 - Audit every privileged action: user create/disable/role-change, template
-  disable/soft-delete, job cancel/retry, department archive, YouTube target
-  connect/disconnect. No `AuditEntry` model exists yet (all deferred, OD-23). "Worker
-  credential create/revoke" no longer applies as an auditable _action_ — ADR-0032's
-  single-env-var key has no create/revoke operation in the app; rotation is a redeploy,
-  outside Studio's own audit trail by construction.
+  disable/soft-delete, job cancel/retry, department archive, Worker API Key
+  create/revoke/reactivate/rescope. No `AuditEntry` model exists yet (all deferred,
+  OD-23).
 - Audit entries record actor, target, action, before/after where meaningful, timestamp,
   department. Never deleted (retention window = OPEN DECISION).
-- Job state transitions and delivery outcomes are themselves an audit trail (Jobs are
-  never deleted).
+- Job state transitions are themselves an audit trail (Jobs are never deleted).
 
 ## 15. Data protection
 
 - Historical integrity (ADR-0009/0010) is also a security property: an audit record you
   can't trust to be complete is worthless.
-- YouTube OAuth tokens: encrypted as noted above. Worker key: environment-only, not a
-  database secret (ADR-0032) — see §9. Session tokens:
-  hashed (SHA-256) at rest, same reasoning as a password hash — a database read alone
-  never yields a usable session.
+- Worker API Key secrets: only a SHA-256 hash is ever stored (`WorkerApiKey.keyHash`,
+  ADR-0040) — see §9. Session tokens: hashed (SHA-256) at rest, same reasoning as a
+  password hash — a database read alone never yields a usable session or Worker
+  credential.
 - PII is minimal (name, email, phone). **Implemented, Phase 8:** `User.phone` and
   `User.telegramUserId` are real, populated columns now, not just documented-future
   fields — both are ordinary PII (not secrets), never logged in cleartext beyond what the

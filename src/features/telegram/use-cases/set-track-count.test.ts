@@ -11,7 +11,6 @@ const { setTrackCount } = await import("./set-track-count");
 const payload = {
   templateId: "tpl-1",
   templateName: "T",
-  deliverToYouTube: false,
   trackCount: 1,
   slots: [],
   tracks: [],

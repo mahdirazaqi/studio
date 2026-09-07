@@ -6,7 +6,7 @@ domain/application layer + dashboard UI, plus the Worker-facing adapters
 (`app/api/worker/v1/jobs/**`) that expose the same use cases (atomic claim,
 progress/duration, state transition) to the external Render Worker over REST.
 
-**Key rules** (`docs/domain/jobs.md`, ADR-0005/0010/0013/0028/0029/0030/0031):
+**Key rules** (`docs/domain/jobs.md`, ADR-0005/0010/0013/0028/0029/0031/0041):
 
 - A Job is **never deleted** and never generically edited (no hard/soft delete, no
   `editJob`). Every mutation is one of the named lifecycle operations.
@@ -21,12 +21,13 @@ progress/duration, state transition) to the external Render Worker over REST.
 - Retry creates a **new linked Job**, copying the original's snapshot/assets verbatim;
   the original is never touched. Eligible only from `ERROR`/`CANCELED`, within a
   configurable window.
-- The daily upload quota (`deliverToYouTube: true` Jobs) is global, UTC-day, and
-  enforced with a Postgres advisory transaction lock — never a plain count-then-insert.
 - `job:manage` (view/create/cancel/retry) is USER+, whole-department — not limited to a
   Job's creator.
-- **Delivery is not implemented** — `DELIVERING`/`UPLOADED` are real, reachable states,
-  but nothing drives a Job into them via an actual delivery mechanism yet.
+- **`RENDERED` is a terminal state — no delivery step after it (ADR-0041).** Studio does
+  not upload rendered Jobs to YouTube or anywhere else; `accept-job-result.ts` accepts
+  the Worker's rendered result and sends a best-effort Telegram notification, nothing
+  more. There is no upload quota, no `DELIVERING`/`UPLOADED` state, and no
+  `deliverToYouTube` field — all removed, ADR-0041.
 
 **Layout:**
 

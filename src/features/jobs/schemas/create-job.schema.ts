@@ -15,7 +15,6 @@ import { findDuplicateSlotKey } from "@/features/jobs/domain/job-asset-rules";
 export const createJobSchema = z
   .object({
     templateId: commonSchemas.id,
-    deliverToYouTube: z.boolean().default(false),
     assets: z.array(jobAssetInputSchema).max(50).default([]),
   })
   .superRefine((data, ctx) => {

@@ -10,17 +10,17 @@ Status: all **OPEN** unless noted. ID format `OD-nn`.
 
 ## Domain / business rules
 
-### OD-01 — Upload cap model — partially resolved, Phase 6 (ADR-0030)
+### OD-01 — Upload cap model — MOOT, Phase 12 (ADR-0041)
 
-_Where:_ [../domain/jobs.md](../domain/jobs.md), [../integrations/youtube.md](../integrations/youtube.md).
+_Where:_ [../domain/jobs.md](../domain/jobs.md).
 Legacy: hard-coded **global** cap of **3 per UTC day**, all users.
 
 **Resolved, Phase 6:** kept **global**, UTC-day, count-based, exactly as legacy —
 `JOB_UPLOAD_DAILY_CAP` (default 3, configurable via env), reject at creation with a clear
-`conflict` error. **Still open, Phase 9 update:** a `YouTubeTarget` model now exists
-(ADR-0039), but no per-target cap was built alongside it — no concrete quota-per-channel
-requirement was given, so the global cap remains unchanged and this half of the question
-is still deferred, not answered either way.
+`conflict` error. A `YouTubeTarget` model existed briefly (Phase 9, ADR-0039) with no
+per-target cap built alongside it. **Closed as moot, Phase 12:** the entire upload-cap
+concept (`JOB_UPLOAD_DAILY_CAP`, `Job.deliverToYouTube`) was removed — Studio no longer
+uploads rendered Jobs to YouTube, so there is nothing left to cap (ADR-0041).
 
 ### OD-02 — Retry eligibility window — ✅ RESOLVED (ADR-0029)
 
@@ -128,10 +128,11 @@ _Where:_ [../domain/departments.md](../domain/departments.md),
 
 **Resolved for Templates, Phase 11:** ADMIN may transfer a Template to a different
 Department (`updateTemplate`, `requireRole(actor, "ADMIN")` gates the branch) — dependent
-File/YouTube-Target references are re-verified against the target Department, and no
-audit/snapshot mechanism was needed because `Job.departmentId` is already a plain column
-copied at Job-creation time, never a live join through the Template (see ADR-0040 and
-`docs/domain/templates.md` "Department transfer").
+File references are re-verified against the target Department (a YouTube-Target
+reference was re-verified here too, Phase 11, before that field was removed entirely —
+ADR-0041), and no audit/snapshot mechanism was needed because `Job.departmentId` is
+already a plain column copied at Job-creation time, never a live join through the
+Template (see ADR-0040 and `docs/domain/templates.md` "Department transfer").
 
 **Still open for Job / File / User** — the reasoning that made Templates safe to move
 (the resource being moved isn't itself the historical record) does not apply the same
@@ -174,17 +175,16 @@ made N jobs) and avoids speculative schema for a "view an album as a unit" UI no
 asked for yet. Album's N Jobs are traceable as a batch only by having been created via the
 same confirmation (same template, close timestamps), not by a schema relationship.
 
-### OD-13 — Delivery-only retry — ✅ RESOLVED for YouTube, Phase 9 (ADR-0039)
+### OD-13 — Delivery-only retry — MOOT, Phase 12 (ADR-0041)
 
-_Where:_ [../integrations/youtube.md](../integrations/youtube.md).
+_Where:_ [../domain/jobs.md](../domain/jobs.md).
 
 **Resolved, Phase 9: delivery-only retry, not re-render.** `retryJobDelivery`
-(`features/delivery/use-cases/retry-job-delivery.ts`) reuses the already-rendered
-`videoFileId`/`screenshotFileId` and re-runs only the YouTube upload — the Job is never
-re-created and never re-rendered. Only reachable from `ERROR` with a video still present
-and no already-`SUCCEEDED` `DeliveryAttempt` for that provider. Telegram has no
-equivalent retry action since its own delivery is a best-effort notification, not a
-`DeliveryAttempt` (ADR-0039) — there is nothing durable to retry.
+(`features/delivery/use-cases/retry-job-delivery.ts`) reused the already-rendered
+`videoFileId`/`screenshotFileId` and re-ran only the YouTube upload — the Job was never
+re-created and never re-rendered. **Removed, Phase 12:** there is no delivery left to
+retry — `retryJobDelivery` and its Server Action/route were deleted along with the rest
+of YouTube delivery (ADR-0041). Job Retry (`retryJob`, unrelated) is unaffected.
 
 ### OD-14 — Aspect-ratio tolerance value
 
@@ -229,18 +229,20 @@ _Where:_ [../data/historical-integrity.md](../data/historical-integrity.md).
 ### OD-18 — Job Artifact retention specifics — cleanup primitive ✅ built, Phase 9; trigger/grace period still open
 
 _Where:_ [../data/lifecycle-rules.md](../data/lifecycle-rules.md), [../domain/files.md](../domain/files.md).
-When exactly is the rendered video purged (immediately on `UPLOADED` / after N days /
-after successful delivery + grace)? Keep screenshot+thumbnail longer? Grace period for
+When exactly is the rendered video purged (immediately on `RENDERED` / after N days /
+after a grace period)? Keep screenshot+thumbnail longer? Grace period for
 `ERROR`/`CANCELED` jobs' artifacts?
-**Recommendation:** purge video after successful required delivery + 7-day grace; keep
-screenshot + thumbnail 90 days; all configurable.
+**Recommendation:** purge video 7 days after reaching `RENDERED`; keep screenshot +
+thumbnail 90 days; all configurable.
 
-**Phase 9 status:** the safe, idempotent, reference-aware primitive now exists
-(`features/delivery/use-cases/cleanup-job-artifacts.ts`, ADR-0039) — it deletes only the
-video (never screenshot/thumbnail), only from `UPLOADED`, only after a required YouTube
-delivery actually succeeded. **Not auto-triggered** — no grace period, no scheduler. This
-OD stays open for exactly that: when/how something calls this function (OD-40's durable-
-work mechanism is the natural trigger once it exists).
+**Phase 9 status, revised Phase 12 (ADR-0041):** the safe, idempotent, reference-aware
+primitive still exists (`features/delivery/use-cases/cleanup-job-artifacts.ts`,
+ADR-0039) — it deletes only the video (never screenshot/thumbnail), only from
+`RENDERED` (its "required YouTube delivery must have succeeded" guard was removed along
+with `YouTubeTarget`, since `RENDERED` is now itself the terminal state). **Not
+auto-triggered** — no grace period, no scheduler. This OD stays open for exactly that:
+when/how something calls this function (OD-40's durable-work mechanism is the natural
+trigger once it exists).
 
 ### OD-19 — One-off Telegram/upload inputs: artifact or promotable? — Telegram's input side ✅ RESOLVED (ADR-0038)
 
@@ -390,36 +392,35 @@ _Where:_ [../data/lifecycle-rules.md](../data/lifecycle-rules.md), [../integrati
 Expiration is checked lazily on next read, not by a scheduled sweep (OD-40's durable-work
 mechanism doesn't exist yet).
 
-### OD-36 — YouTubeTarget scoping — ✅ RESOLVED, Phase 9 (ADR-0039), revised Phase 11 (ADR-0040)
+### OD-36 — YouTubeTarget scoping — MOOT, Phase 12 (ADR-0041)
 
-_Where:_ [../integrations/youtube.md](../integrations/youtube.md).
+_Where:_ [../domain/departments.md](../domain/departments.md).
 
 **Resolved, Phase 9: department-scoped**, exactly per this OD's own recommendation.
 `YouTubeTarget.departmentId` was required; `youtube:manage` was `MANAGER+` within their
 own department, ADMIN may connect/manage a Target for any department. **Also resolved
-alongside this:** the connection mechanism itself is a verified refresh-token entry, not
-a self-service OAuth consent-screen flow — see ADR-0039 point 5 for why, and for the
-documented future-enhancement status of a real "Connect with Google" UI.
+alongside this:** the connection mechanism itself was a verified refresh-token entry,
+not a self-service OAuth consent-screen flow (ADR-0039 point 5).
 
 **Revised, Phase 11 (ADR-0040):** a single FK undersold how channels are actually
-shared — `YouTubeTarget.departmentId` is now `departments`, a many-to-many with
-`Department`, and `youtube:manage` moved to ADMIN-only (connecting/scoping a channel is
-system-wide infrastructure configuration, the same category as `worker_key:manage`).
-Non-ADMIN capability is unaffected: USER/MANAGER still pick an already-connected channel
-for their own Department's Templates/Jobs, gated by `template:manage`/`job:manage` as
-before.
+shared — `YouTubeTarget.departmentId` became `departments`, a many-to-many with
+`Department`, and `youtube:manage` moved to ADMIN-only.
 
-### OD-37 — YouTube video privacy / metadata configurability
+**Closed as moot, Phase 12:** `YouTubeTarget` and `youtube:manage` were removed
+entirely — Studio no longer uploads to YouTube (ADR-0041).
 
-_Where:_ [../integrations/youtube.md](../integrations/youtube.md).
+### OD-37 — YouTube video privacy / metadata configurability — MOOT, Phase 12 (ADR-0041)
+
+_Where:_ [../domain/jobs.md](../domain/jobs.md).
 Keep hard-coded `private`, or expose privacy/scheduling/category per Template or Job.
 **Recommendation:** default `private`, allow `unlisted`/`public` at Template level; defer
 scheduling.
 
-**Phase 9 status: still open, unresolved as recommended.** `uploadVideo`
-(`server/adapters/youtube/youtube-client.ts`) hard-codes `privacyStatus: 'private'` and
-`madeForKids: false`, matching legacy exactly — no per-Template/per-Job override was
-built. Revisit if a real publishing-workflow requirement appears.
+**Phase 9 status:** still open, unresolved as recommended — `uploadVideo` hard-coded
+`privacyStatus: 'private'` and `madeForKids: false`, matching legacy exactly, no
+per-Template/per-Job override was built. **Closed as moot, Phase 12:** the entire
+YouTube upload feature was removed (ADR-0041) — there is no video privacy left to
+configure.
 
 ### OD-38 — Media processing location — ✅ RESOLVED, Phase 9 (ADR-0039)
 
@@ -449,15 +450,14 @@ Needed for: durable delivery, artifact cleanup, wizard TTL sweep, stuck-job reco
 into those states in the first place (no real Worker/render pipeline was running), so
 there was no live trigger point to notify from.
 
-**Resolved for Telegram notifications, Phase 9 (ADR-0039):** the trigger point now exists
-— `deliver-job-result.ts` calls `sendJobNotification` on `RENDERED`/`UPLOADED`/`ERROR`,
-synchronously, best-effort, no queue involved (a failed DM is logged, never retried, never
-blocks the Job — matches legacy exactly). This resolves the "no trigger point" half of
-this OD for Telegram specifically; it does **not** resolve the general
-background-work-mechanism question. **Durable delivery** (YouTube) also did not need a
-queue: `DeliveryAttempt`'s `PENDING`-before-the-call write pattern gives the required
-"intent is durable, recoverable after a crash" guarantee synchronously, inside the
-triggering request, per ADR-0039 point 3 — a queue would add infrastructure this need
+**Resolved for Telegram notifications, Phase 9 (ADR-0039), revised Phase 12 (ADR-0041):**
+the trigger point now exists — `accept-job-result.ts` calls `sendJobNotification` on
+`RENDERED` (the Job's final, successful state), synchronously, best-effort, no queue
+involved (a failed DM is logged, never retried, never blocks the Job — matches legacy
+exactly). This resolves the "no trigger point" half of this OD for Telegram
+specifically; it does **not** resolve the general background-work-mechanism question.
+(Phase 9's YouTube-delivery durability guarantee, `DeliveryAttempt`'s `PENDING`-before-
+the-call write pattern, no longer applies — that whole pipeline was removed, ADR-0041.)
 doesn't require. **Still open, unaffected:** artifact cleanup scheduling (OD-18), Telegram
 wizard TTL sweep, stuck-job recovery (OD-31) — none of these have Phase 9's "the
 triggering event already happens inside an existing request" property, so they still need

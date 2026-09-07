@@ -14,8 +14,9 @@ backend in one deployable — for operating a **video-rendering job pipeline**:
 - Operators define reusable **Templates** (a render recipe + a set of asset slots).
 - Operators create **Jobs** that bind concrete media/text to a Template's slots.
 - An external **Render Worker** (not in this repo) polls Studio over REST, renders the
-  video, reports progress/state, and uploads the finished file.
-- On completion, the video is optionally delivered to **YouTube** and/or **Telegram**.
+  video, reports progress/state, and sends back the finished file — a Job's lifecycle
+  ends at `RENDERED`. **Studio does not upload rendered Jobs to YouTube or anywhere else**
+  (ADR-0041); the operator is notified via Telegram (best-effort) on completion.
 - A **Telegram Bot** offers an alternative conversational way to create and monitor Jobs.
 - A **File Gallery** stores reusable media assets.
 
@@ -58,7 +59,6 @@ Studio replaces the `src/render` module of the legacy NestJS backend
 | Historical data integrity            | [`docs/data/historical-integrity.md`](docs/data/historical-integrity.md)                       |
 | Worker REST API                      | [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md)                           |
 | Telegram integration                 | [`docs/integrations/telegram.md`](docs/integrations/telegram.md)                               |
-| YouTube integration                  | [`docs/integrations/youtube.md`](docs/integrations/youtube.md)                                 |
 | Security requirements                | [`docs/security/security.md`](docs/security/security.md)                                       |
 | Legacy system overview               | [`docs/legacy/overview.md`](docs/legacy/overview.md)                                           |
 | Legacy render module — reading guide | [`docs/legacy/render-module.md`](docs/legacy/render-module.md)                                 |
@@ -226,16 +226,14 @@ Telegram must never bypass authorization.
 - **Do not implement authorization in Next.js middleware.** The `(dashboard)` layout's
   session check is the only coarse-grained gate; resource-level authorization lives in
   use cases/pages, per `docs/architecture/authorization.md` "Why not middleware".
-- **`department:manage`/`department:view_all`, `youtube:manage`, and `worker_key:manage`
-  are all ADMIN-only** — connecting/scoping shared infrastructure (Departments, YouTube
-  channels, Worker credentials) is system-wide configuration, not a Department-local
-  MANAGER operation (ADR-0040, revised `youtube:manage` from its earlier `MANAGER+`
-  floor). The `/departments`, `/youtube`, and `/worker-keys` nav items and pages are all
+- **`department:manage`/`department:view_all` and `worker_key:manage` are both
+  ADMIN-only** — connecting/scoping shared infrastructure (Departments, Worker
+  credentials) is system-wide configuration, not a Department-local MANAGER operation
+  (ADR-0040). The `/departments` and `/worker-keys` nav items and pages are both
   ADMIN-only accordingly; a non-ADMIN still sees their own Department's name in the
   sidebar/profile area (`CurrentUser.departmentName`) without needing the management
-  page. USER/MANAGER's ability to _select_ an already-connected YouTube channel when
-  authoring a Job/Template is unaffected — that stays gated by `template:manage`/
-  `job:manage`, never `youtube:manage`.
+  page. (`youtube:manage` existed the same way, Phases 9–11 — it was removed entirely
+  along with the rest of YouTube upload, ADR-0041.)
 
 ## 9. Files & storage rules (summary)
 
@@ -312,30 +310,42 @@ verify-file-references.ts`.
 - **Department transfer is ADMIN-only — implemented, Phase 11 (ADR-0040).** On edit,
   ADMIN may change a Template's `departmentId`; MANAGER/USER cannot, even via a crafted
   request carrying `departmentId` — `updateTemplate` gates the transfer branch with
-  `requireRole(actor, "ADMIN")`, not just a capability floor. Every dependent reference
-  (asset `defaultFileId`, `youtubeTargetId`) is re-verified against the **target**
-  Department, never silently left pointing at the original. No historical-integrity
-  mechanism was needed for this: `Job.departmentId` is a plain column copied once at Job
-  creation, never a live join through the Template — see `docs/domain/templates.md`
-  "Department transfer" before touching this code path.
+  `requireRole(actor, "ADMIN")`, not just a capability floor. The dependent asset
+  `defaultFileId` reference is re-verified against the **target** Department, never
+  silently left pointing at the original. No historical-integrity mechanism was needed
+  for this: `Job.departmentId` is a plain column copied once at Job creation, never a
+  live join through the Template — see `docs/domain/templates.md` "Department transfer"
+  before touching this code path.
+- **No `description`/`tags`/`youtubeTargetId` fields — removed, ADR-0041.** A Template
+  describes only the render itself; Studio has no YouTube (or any other external)
+  delivery destination to configure. Do not reintroduce delivery-destination fields on
+  Template without a new ADR.
 
 ## 11. Jobs rules (summary)
 
 Full detail: [`docs/domain/jobs.md`](docs/domain/jobs.md),
 [`docs/architecture/decisions.md`](docs/architecture/decisions.md)
-ADR-0005/ADR-0028/ADR-0029/ADR-0030/ADR-0031. **Implemented, Phase 6** (domain/application
-layer + dashboard UI only — no Worker REST API yet, that's Phase 7).
+ADR-0005/ADR-0028/ADR-0029/ADR-0031/ADR-0040/ADR-0041. **Implemented, Phase 6**
+(domain/application layer + dashboard UI), **Worker REST API Phase 7**, **rendered-result
+acceptance Phase 9**, **YouTube upload removed, Phase 12 (ADR-0041) — a Job's lifecycle
+now ends at `RENDERED`.**
 
 - **A Job is never deleted, never soft-deleted, and never generically edited.** No
   `deleteJob`/`editJob` exists or should ever exist. Every mutation is one of the named
   lifecycle operations: `createJob`, `transitionJob` (+ its callers `claimNextJob`/
-  `cancelJob`), `updateJobProgress`, `updateJobDuration`, `retryJob`.
+  `cancelJob`/`acceptJobResult`), `updateJobProgress`, `updateJobDuration`, `retryJob`.
 - **`Job.state` is written only via `transitionJobRow`'s atomic conditional `UPDATE ...
 WHERE state IN (fromStates)`** — never a read-then-write, never a direct
   `db.job.update({ data: { state } })` anywhere else. This is what makes a Worker-vs-human
   state race safe. Adding a new state-changing operation means calling `transitionJob`
   (or `transitionJobRow` directly, if `transitionJob`'s pre-check doesn't fit), not
   inventing a new update path.
+- **`RENDERED` is a terminal state — there is no `DELIVERING`/`UPLOADED` after it
+  (removed, ADR-0041).** `accept-job-result.ts` transitions `RENDERING -> RENDERED`
+  atomically together with the three artifact File ids, sends one best-effort "rendered"
+  Telegram notification, and returns — it never calls any external delivery API and
+  never attempts a further state transition. Do not reintroduce a delivery step without
+  a new ADR.
 - **The Job's Department is always derived from its Template** (`template.departmentId`)
   — there is no separate `departmentId` input to a Job-creation request, by construction.
   Never add one.
@@ -351,25 +361,25 @@ WHERE state IN (fromStates)`** — never a read-then-write, never a direct
   narrower than legacy on purpose (resolves OD-02). Cancel eligibility is
   `QUEUED`/`CLAIMED`/`RENDERING` only. Both live in
   `features/jobs/domain/job-state-machine.ts` — the one place these sets are defined.
-- **The daily upload quota (`JOB_UPLOAD_DAILY_CAP`, default 3, global, UTC-day) is
-  enforced via a Postgres advisory transaction lock inside the same transaction as the
-  Job insert** (`features/jobs/repository/job-repository.ts`) — never a plain
-  count-then-insert. The two-int `pg_advisory_xact_lock` overload needs explicit `::int`
-  casts on both arguments (a real bug caught during manual verification); do not remove
-  them.
+- **No upload quota — removed, ADR-0041.** `JOB_UPLOAD_DAILY_CAP`, its Postgres
+  advisory-lock enforcement, and `Job.deliverToYouTube` (what it gated) are all gone —
+  there is no YouTube upload left to cap. Do not reintroduce a quota mechanism without a
+  concrete new requirement and a new ADR.
 - **The Worker is never a `User` and never becomes an `Actor`.** `claimNextJob`,
   `updateJobProgress`, `updateJobDuration`, and `transitionJob` take no `Actor`
-  parameter — do not add one "for consistency." Phase 7's Worker Route Handlers will
-  authenticate the Worker's service credential first, then call these functions
-  directly.
+  parameter — do not add one "for consistency." Worker Route Handlers authenticate the
+  Worker's service credential first (`allowedDepartmentIds`, ADR-0040), then call these
+  functions directly.
 - **`job:manage` (view/create/cancel/retry) is USER+, whole-department** — resolves OD-03
   for Jobs as collaborative, not "own resources only." Do not narrow this to
   creator-only without the same level of explicit confirmation Phase 5's OD-04 required.
-- **Completion & delivery are implemented, Phase 9** — see §15. `RENDERED`/`DELIVERING`/
-  `UPLOADED` are now driven by a real pipeline, not just reachable states with no
-  adapter.
+- **Legacy Worker state codes `6` (Uploading)/`7` (Uploaded) are no longer mapped**
+  (`legacy-state-mapping.ts`) — a Worker sending either gets a `422 validation` error,
+  same as any other unrecognized value. Do not remap them to anything; the concept they
+  described no longer exists in Studio.
 - **Not implemented, deliberately**: rendering itself (the external Worker's own job), a
-  requeue sweep for stuck `CLAIMED`/`RENDERING` jobs (OD-31), bulk cancel.
+  requeue sweep for stuck `CLAIMED`/`RENDERING` jobs (OD-31), bulk cancel, any external
+  delivery destination for a rendered result.
 
 ## 12. Handling ambiguity
 
@@ -506,57 +516,46 @@ Single Track/Album/List/Retry/Cancel/Cancel-All flows.
   (matches the dashboard — OD-14 stays open), any Template-authoring surface via
   Telegram, a self-service phone-editing UI.
 
-## 15. Delivery & YouTube rules (summary)
+## 15. Rendered-result & notification rules (summary)
 
-Full detail: [`docs/integrations/youtube.md`](docs/integrations/youtube.md),
-[`docs/domain/jobs.md`](docs/domain/jobs.md) "Completion & delivery",
-[`docs/architecture/decisions.md`](docs/architecture/decisions.md) ADR-0039.
+Full detail: [`docs/domain/jobs.md`](docs/domain/jobs.md) "Rendered result",
+[`docs/architecture/decisions.md`](docs/architecture/decisions.md) ADR-0039/ADR-0041.
 **Implemented, Phase 9** — `POST /api/worker/v1/jobs/:id/result`, `ffmpeg`-based artifact
-generation, the Delivery Orchestrator, `DeliveryAttempt`, `YouTubeTarget`.
+generation. **YouTube delivery removed, Phase 12 (ADR-0041)** — Studio does not upload
+rendered Jobs to YouTube (or anywhere else); `RENDERED` is the Job's final state.
 
-- **The Worker's result-upload request is the one and only trigger for the entire
-  post-render pipeline.** `accept-job-result.ts` generates artifacts and calls
-  `deliver-job-result.ts` **synchronously, awaited** — never fire-and-forget. Do not add
-  a queue/background-job mechanism for this; the `DeliveryAttempt` `PENDING`-before-the-
-  call write pattern already gives the required "durable, recoverable after a crash"
-  guarantee without one (ADR-0039).
+- **`accept-job-result.ts` is the one and only handler for a Worker's rendered result,
+  and it does not deliver anywhere.** It generates artifacts, atomically transitions
+  `RENDERING -> RENDERED` together with the three artifact File ids, sends one
+  best-effort "rendered" Telegram notification, and returns. There is no delivery
+  orchestrator, no queue, no external API call from this path. Do not reintroduce one
+  without a new ADR.
 - **`ffmpeg` only — never add ImageMagick/`convert`.** `server/adapters/media/
 ffmpeg-adapter.ts` is the only module that shells out for media processing, always via
   `execFile` with a fixed argument array, never `shell: true`, never a template-built
   command string. Never add a second media-processing binary without a new ADR revisiting
   ADR-0039's reasoning.
-- **Telegram delivery is a best-effort notification, never a `DeliveryAttempt`, never able
-  to fail or block a Job.** YouTube delivery is a required delivery when
-  `Job.deliverToYouTube` is true, and is the only provider with durable
-  `DeliveryAttempt` rows / delivery-only retry. Do not build a Telegram-side retry — there
-  is nothing durable to retry.
-- **`ERROR -> DELIVERING` (delivery-only retry) is deliberately not in
-  `job-state-machine.ts`'s general transition graph.** `retry-job-delivery.ts` calls
-  `transitionJobRow` directly instead — the documented escape hatch for a state-changing
-  operation `transitionJob`'s general pre-check doesn't fit. Never add this edge to the
-  general graph; doing so silently breaks `isTerminalState`'s other caller
-  (Worker progress/duration rejection on a dead Job).
-- **Job Retry vs Delivery Retry are different operations — never confuse them.** A
-  Delivery Retry never re-renders or recreates a Job; it reuses the already-rendered
-  `videoFileId`/`screenshotFileId` verbatim.
-- **YouTube connection is a verified refresh-token entry, not a self-service OAuth
-  consent-screen flow.** A full "Connect with Google" UI is a documented future
-  enhancement (ADR-0039) — do not build it without revisiting that decision. Every
-  `YouTubeTarget` token is encrypted at rest (`server/adapters/youtube/token-cipher.ts`,
-  `YOUTUBE_TOKEN_ENCRYPTION_KEY`) — never logged, never returned to a client.
+- **Telegram notification is best-effort, never able to fail or block a Job.**
+  `sendJobNotification` (`features/delivery/infrastructure/telegram/
+telegram-delivery-adapter.ts`) logs a failed send and moves on — never retried, never
+  surfaced to the Worker. There is no `DeliveryAttempt` model anymore (removed,
+  ADR-0041) — do not reintroduce a durable delivery ledger without a real requirement.
 - **A `JOB_ARTIFACT` File is never deletable through the ordinary Gallery delete
   action, for any role, including ADMIN.** `assertCanDeleteFile` refuses it explicitly.
-  Its only deletion path is `features/delivery/use-cases/cleanup-job-artifacts.ts`, which
-  is safe, idempotent, and checks Job-state/delivery-outcome invariants the ordinary
-  `file:manage` capability cannot express. Do not add a second deletion path for it.
-- **YouTube privacy stays hard-coded (`private`, `madeForKids: false`).** Do not add a
-  per-Template/per-Job override without a new decision (OD-37 stays open).
-- **Not implemented, deliberately**: a self-service OAuth consent-screen UI, per-target
-  upload quota (the global cap is unchanged), automatic/scheduled artifact cleanup (the
-  primitive exists, nothing calls it — OD-18), any background-job/queue infrastructure
-  (BullMQ, pg-boss, a cron sweep — OD-40 stays open for the pieces this phase didn't need
-  one for), a dashboard in-app notification center (Telegram DM is the only completion
-  notification that exists).
+  Its only deletion path is `features/delivery/use-cases/cleanup-job-artifacts.ts`
+  (eligible once a Job reaches `RENDERED`), which is safe and idempotent. Do not add a
+  second deletion path for it.
+- **No YouTube feature exists at all — `features/youtube/`, `server/adapters/youtube/`,
+  `YouTubeTarget`, `youtube:manage`, `Template.youtubeTargetId`/`description`/`tags`,
+  `Job.deliverToYouTube`, the daily upload quota, and `JobState.DELIVERING`/`UPLOADED`
+  were all removed (ADR-0041).** Do not reintroduce any of them, or a generic "delivery
+  provider" abstraction anticipating a future one, without an explicit new product
+  decision and a new ADR.
+- **Not implemented, deliberately**: automatic/scheduled artifact cleanup (the primitive
+  exists, nothing calls it — OD-18), any background-job/queue infrastructure (BullMQ,
+  pg-boss, a cron sweep — OD-40 stays open for the pieces this phase didn't need one
+  for), a dashboard in-app notification center (Telegram DM is the only completion
+  notification that exists), any external delivery destination for a rendered result.
 
 ## 16. Security rules (summary)
 
@@ -717,6 +716,30 @@ deliver-job-result.ts`) drives `RENDERED -> DELIVERING -> UPLOADED`/`ERROR` thro
   against Postgres confirmed the Department-scoped atomic claim, cross-department
   `404`-never-`403` enforcement, and progress/duration/state scope checks. `npm run
 check`/`npm run build` both pass.
+- **Phase 12 (Remove YouTube upload; simplify Job lifecycle) — complete (ADR-0041).**
+  Explicit product decision: Studio does not upload rendered Jobs to YouTube at this
+  stage. Removed entirely — database (`YouTubeTarget`, `DeliveryAttempt`,
+  `Template.youtubeTargetId`/`description`/`tags`, `Job.deliverToYouTube`/`deliveredAt`/
+  `uploadedAt`, `JobState.DELIVERING`/`UPLOADED`, the daily upload quota and its
+  advisory-lock logic, `TelegramWizardStep.ASK_DELIVERY`), application code
+  (`features/youtube/`, `server/adapters/youtube/`, `deliver-job-result.ts`,
+  `retry-job-delivery.ts`, `tag-substitution.ts`, `delivery-repository.ts`), UI
+  (`/youtube` nav item/page, the Job detail "Delivery" card, the Template YouTube-channel
+  picker, the Job-create "deliver to YouTube?" checkbox), the `youtube:manage`
+  authorization capability, the `googleapis` dependency, and
+  `YOUTUBE_CLIENT_ID`/`YOUTUBE_CLIENT_SECRET`/`YOUTUBE_TOKEN_ENCRYPTION_KEY`. A real
+  Prisma migration dropped the corresponding tables/columns/enum values, verified empty
+  beforehand in every environment checked (zero data loss). `RENDERED` is now the Job's
+  terminal, successful completion state — `POST /api/worker/v1/jobs/:id/result` still
+  accepts the Worker's rendered bytes (unchanged shape) and generates the same
+  `ffmpeg`-based screenshot/thumbnail artifacts, but now only sends a best-effort
+  "rendered" Telegram notification afterward, never an external delivery call. Legacy
+  Worker state codes `6`/`7` (Uploading/Uploaded) are no longer mapped — rejected `422`.
+  Single Track's Telegram flow no longer asks "deliver to YouTube?" — it opens straight
+  into asset collection. Real end-to-end HTTP verification against Postgres (including a
+  genuine `ffmpeg`-generated test video) confirmed the full Worker flow reaches
+  `RENDERED` directly with no YouTube API call of any kind. `npm run check`/`npm run
+build` both pass; `npm install` succeeds cleanly after the `googleapis` removal.
 
 Do not start a new phase beyond this unless explicitly asked — see
 [`docs/development/workflow.md`](docs/development/workflow.md) for the full history

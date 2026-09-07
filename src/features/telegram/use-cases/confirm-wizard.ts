@@ -35,8 +35,8 @@ export type ConfirmWizardResult =
  *    `"already_processing"` — it never creates a second batch of Jobs.
  * 2. **Partial-failure reporting** (§26): Jobs are created **sequentially**,
  *    each through the unmodified `createJob` use case (Phase 6) — same
- *    validation, same historical snapshot, same upload-quota enforcement as
- *    the dashboard. On the first failure the loop stops (matches legacy's
+ *    validation and historical snapshot as the dashboard. On the first
+ *    failure the loop stops (matches legacy's
  *    actual behavior — an unhandled exception mid-loop aborted every
  *    remaining `addJob` call) and the result names exactly how many
  *    succeeded before it, never claiming full success when it wasn't.
@@ -74,7 +74,6 @@ export async function confirmWizard(
     try {
       const job = await createJob(actor, {
         templateId: payload.templateId,
-        deliverToYouTube: payload.deliverToYouTube,
         assets,
       });
       createdJobs.push(job);

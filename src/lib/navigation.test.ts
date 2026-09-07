@@ -3,23 +3,21 @@ import { describe, expect, it } from "vitest";
 import { navigation, navigationForRole } from "./navigation";
 
 describe("navigationForRole", () => {
-  it("hides MANAGER/ADMIN-only items from a plain USER, including Department/YouTube/Worker-key management", () => {
+  it("hides MANAGER/ADMIN-only items from a plain USER, including Department/Worker-key management", () => {
     const groups = navigationForRole("USER");
     const hrefs = groups.flatMap((g) => g.items.map((i) => i.href));
     expect(hrefs).not.toContain("/users");
     expect(hrefs).not.toContain("/departments");
-    expect(hrefs).not.toContain("/youtube");
     expect(hrefs).not.toContain("/worker-keys");
     expect(hrefs).toContain("/jobs");
   });
 
-  it("shows /users to MANAGER but not Department/YouTube/Worker-key management (now ADMIN-only)", () => {
+  it("shows /users to MANAGER but not Department/Worker-key management (ADMIN-only)", () => {
     const hrefs = navigationForRole("MANAGER").flatMap((g) =>
       g.items.map((i) => i.href),
     );
     expect(hrefs).toContain("/users");
     expect(hrefs).not.toContain("/departments");
-    expect(hrefs).not.toContain("/youtube");
     expect(hrefs).not.toContain("/worker-keys");
   });
 

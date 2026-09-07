@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   decodeCallbackData,
   encodeConfirmCreation,
-  encodeDeliveryChoice,
   encodeJobCancel,
   encodeJobDetail,
   encodeJobRetry,
@@ -26,17 +25,6 @@ describe("callback-data encode/decode", () => {
       kind: "pick_template",
       flow: "ALBUM",
       templateId: "tpl-123",
-    });
-  });
-
-  it("round-trips the delivery choice", () => {
-    expect(decodeCallbackData(encodeDeliveryChoice(true))).toEqual({
-      kind: "delivery_choice",
-      deliver: true,
-    });
-    expect(decodeCallbackData(encodeDeliveryChoice(false))).toEqual({
-      kind: "delivery_choice",
-      deliver: false,
     });
   });
 

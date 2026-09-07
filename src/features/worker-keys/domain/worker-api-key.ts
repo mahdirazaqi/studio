@@ -1,7 +1,7 @@
 /**
  * Pure domain types for the Worker API Key feature (docs/integrations/
  * worker-api.md "Worker API Keys", ADR-0040). No I/O, no Prisma import —
- * mirrors `features/youtube/domain/youtube-target.ts`.
+ * mirrors every other feature's `domain/` layer.
  */
 
 export const WORKER_API_KEY_STATUSES = ["ACTIVE", "REVOKED"] as const;

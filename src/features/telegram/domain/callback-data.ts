@@ -15,7 +15,6 @@
 export type CallbackAction =
   | { kind: "pick_template"; flow: "SINGLE_TRACK"; templateId: string }
   | { kind: "pick_template"; flow: "ALBUM"; templateId: string }
-  | { kind: "delivery_choice"; deliver: boolean }
   | { kind: "confirm_creation"; confirmed: boolean }
   | { kind: "job_detail"; jobId: string }
   | { kind: "job_retry"; jobId: string }
@@ -24,8 +23,6 @@ export type CallbackAction =
 const PREFIX = {
   pickSingle: "tpl:s:",
   pickAlbum: "tpl:a:",
-  deliverYes: "dlv:y",
-  deliverNo: "dlv:n",
   confirmYes: "cfm:y",
   confirmNo: "cfm:n",
   jobDetail: "job:d:",
@@ -38,10 +35,6 @@ export function encodePickTemplate(
   templateId: string,
 ): string {
   return `${flow === "SINGLE_TRACK" ? PREFIX.pickSingle : PREFIX.pickAlbum}${templateId}`;
-}
-
-export function encodeDeliveryChoice(deliver: boolean): string {
-  return deliver ? PREFIX.deliverYes : PREFIX.deliverNo;
 }
 
 export function encodeConfirmCreation(confirmed: boolean): string {
@@ -74,10 +67,6 @@ export function decodeCallbackData(data: string): CallbackAction | null {
       ? { kind: "pick_template", flow: "ALBUM", templateId }
       : null;
   }
-  if (data === PREFIX.deliverYes)
-    return { kind: "delivery_choice", deliver: true };
-  if (data === PREFIX.deliverNo)
-    return { kind: "delivery_choice", deliver: false };
   if (data === PREFIX.confirmYes)
     return { kind: "confirm_creation", confirmed: true };
   if (data === PREFIX.confirmNo)

@@ -6,7 +6,8 @@ const findJobById = vi.fn();
 const transitionJobRow = vi.fn();
 const generateRenderArtifacts = vi.fn();
 const rollbackRenderArtifacts = vi.fn();
-const deliverJobResult = vi.fn();
+const sendJobNotification = vi.fn();
+const findTelegramUserIdForUser = vi.fn();
 
 vi.mock("@/features/jobs/repository/job-repository", () => ({
   findJobById: (...args: unknown[]) => findJobById(...args),
@@ -20,8 +21,16 @@ vi.mock("@/features/delivery/use-cases/generate-render-artifacts", () => ({
     rollbackRenderArtifacts(...args),
 }));
 
-vi.mock("@/features/delivery/use-cases/deliver-job-result", () => ({
-  deliverJobResult: (...args: unknown[]) => deliverJobResult(...args),
+vi.mock(
+  "@/features/delivery/infrastructure/telegram/telegram-delivery-adapter",
+  () => ({
+    sendJobNotification: (...args: unknown[]) => sendJobNotification(...args),
+  }),
+);
+
+vi.mock("@/features/telegram/repository/telegram-repository", () => ({
+  findTelegramUserIdForUser: (...args: unknown[]) =>
+    findTelegramUserIdForUser(...args),
 }));
 
 const { acceptJobResult } = await import("./accept-job-result");
@@ -37,7 +46,6 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   state: "RENDERING",
   progress: null,
   durationSeconds: null,
-  deliverToYouTube: false,
   retryOfJobId: null,
   attemptNumber: 1,
   createdByUserId: "user-1",
@@ -52,10 +60,7 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
     source: "s",
     scriptRef: "s.js",
     outputPattern: "op",
-    description: null,
-    tags: [],
     assetSlotDefinitions: [],
-    youtubeTarget: null,
   },
   assets: [],
   retriedByUserId: null,
@@ -68,12 +73,9 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   claimedAt: null,
   startedAt: null,
   renderedAt: null,
-  deliveredAt: null,
-  uploadedAt: null,
   videoFileId: null,
   screenshotFileId: null,
   thumbnailFileId: null,
-  deliveryAttempts: [],
   ...overrides,
 });
 
@@ -85,6 +87,7 @@ const artifacts = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  findTelegramUserIdForUser.mockResolvedValue(null);
 });
 
 describe("acceptJobResult", () => {
@@ -104,13 +107,13 @@ describe("acceptJobResult", () => {
   });
 
   it("is idempotent for a duplicate Worker request — returns the existing result without reprocessing", async () => {
-    const alreadyDone = job({ state: "UPLOADED", videoFileId: "file-video" });
+    const alreadyDone = job({ state: "RENDERED", videoFileId: "file-video" });
     findJobById.mockResolvedValue(alreadyDone);
     const result = await acceptJobResult("job-1", Buffer.from("x"), ALLOWED);
     expect(result).toBe(alreadyDone);
     expect(generateRenderArtifacts).not.toHaveBeenCalled();
     expect(transitionJobRow).not.toHaveBeenCalled();
-    expect(deliverJobResult).not.toHaveBeenCalled();
+    expect(sendJobNotification).not.toHaveBeenCalled();
   });
 
   it("rejects an empty result body", async () => {
@@ -132,7 +135,7 @@ describe("acceptJobResult", () => {
     expect(generateRenderArtifacts).not.toHaveBeenCalled();
   });
 
-  it("accepts a valid result: generates artifacts, transitions to RENDERED, and runs delivery", async () => {
+  it("accepts a valid result: generates artifacts, transitions to RENDERED (the Job's final state), and never calls any external delivery", async () => {
     const rendering = job({ state: "RENDERING" });
     const rendered = job({
       state: "RENDERED",
@@ -143,7 +146,6 @@ describe("acceptJobResult", () => {
     findJobById.mockResolvedValue(rendering);
     generateRenderArtifacts.mockResolvedValue(artifacts);
     transitionJobRow.mockResolvedValue(rendered);
-    deliverJobResult.mockResolvedValue({ ...rendered, state: "UPLOADED" });
 
     const result = await acceptJobResult(
       "job-1",
@@ -165,8 +167,37 @@ describe("acceptJobResult", () => {
         thumbnailFileId: "file-thumbnail",
       }),
     );
-    expect(deliverJobResult).toHaveBeenCalledWith(rendered);
-    expect(result.state).toBe("UPLOADED");
+    expect(result.state).toBe("RENDERED");
+    expect(result).toBe(rendered);
+  });
+
+  it("sends a best-effort 'rendered' Telegram notification when the creator is linked", async () => {
+    const rendering = job({ state: "RENDERING" });
+    const rendered = job({ state: "RENDERED", videoFileId: "file-video" });
+    findJobById.mockResolvedValue(rendering);
+    generateRenderArtifacts.mockResolvedValue(artifacts);
+    transitionJobRow.mockResolvedValue(rendered);
+    findTelegramUserIdForUser.mockResolvedValue("tg-1");
+
+    await acceptJobResult("job-1", Buffer.from("video bytes"), ALLOWED);
+
+    expect(sendJobNotification).toHaveBeenCalledWith(
+      "tg-1",
+      expect.stringContaining("rendered successfully"),
+    );
+  });
+
+  it("skips the notification silently when the creator has no linked Telegram account", async () => {
+    const rendering = job({ state: "RENDERING" });
+    const rendered = job({ state: "RENDERED", videoFileId: "file-video" });
+    findJobById.mockResolvedValue(rendering);
+    generateRenderArtifacts.mockResolvedValue(artifacts);
+    transitionJobRow.mockResolvedValue(rendered);
+    findTelegramUserIdForUser.mockResolvedValue(null);
+
+    await acceptJobResult("job-1", Buffer.from("video bytes"), ALLOWED);
+
+    expect(sendJobNotification).not.toHaveBeenCalled();
   });
 
   it("on a lost RENDERING->RENDERED race, rolls back its own artifacts and returns the winner's result idempotently", async () => {
@@ -186,7 +217,7 @@ describe("acceptJobResult", () => {
 
     expect(rollbackRenderArtifacts).toHaveBeenCalledWith(artifacts);
     expect(result.videoFileId).toBe("file-video-winner");
-    expect(deliverJobResult).not.toHaveBeenCalled();
+    expect(sendJobNotification).not.toHaveBeenCalled();
   });
 
   it("throws conflict when the race is lost and no winner's result is visible either", async () => {

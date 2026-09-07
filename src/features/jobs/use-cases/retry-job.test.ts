@@ -27,10 +27,7 @@ const snapshot = {
   source: "s",
   scriptRef: "s.js",
   outputPattern: "op",
-  description: null,
-  tags: [],
   assetSlotDefinitions: [],
-  youtubeTarget: null,
 };
 
 const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
@@ -42,7 +39,6 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   state: "ERROR",
   progress: 40,
   durationSeconds: null,
-  deliverToYouTube: false,
   retryOfJobId: null,
   attemptNumber: 1,
   createdByUserId: "original-creator",
@@ -78,12 +74,9 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   claimedAt: null,
   startedAt: null,
   renderedAt: null,
-  deliveredAt: null,
-  uploadedAt: null,
   videoFileId: null,
   screenshotFileId: null,
   thumbnailFileId: null,
-  deliveryAttempts: [],
   ...overrides,
 });
 
@@ -141,13 +134,11 @@ describe("retryJob", () => {
     expect(createRetryJob).not.toHaveBeenCalled();
   });
 
-  it("rejects retrying a successfully completed job (RENDERED/DELIVERING/UPLOADED)", async () => {
-    for (const state of ["RENDERED", "DELIVERING", "UPLOADED"] as const) {
-      findJobInScope.mockResolvedValue(job({ state }));
-      await expect(retryJob(actor(), "job-1")).rejects.toMatchObject({
-        kind: "business_rule",
-      });
-    }
+  it("rejects retrying a successfully completed job (RENDERED)", async () => {
+    findJobInScope.mockResolvedValue(job({ state: "RENDERED" }));
+    await expect(retryJob(actor(), "job-1")).rejects.toMatchObject({
+      kind: "business_rule",
+    });
     expect(createRetryJob).not.toHaveBeenCalled();
   });
 

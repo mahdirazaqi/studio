@@ -30,10 +30,9 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   templateId: "template-1",
   templateName: "T",
   title: "Job title",
-  state: "UPLOADED",
+  state: "RENDERED",
   progress: 100,
   durationSeconds: 42,
-  deliverToYouTube: false,
   retryOfJobId: null,
   attemptNumber: 1,
   createdByUserId: "user-1",
@@ -48,10 +47,7 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
     source: "s",
     scriptRef: "s.js",
     outputPattern: "op",
-    description: null,
-    tags: [],
     assetSlotDefinitions: [],
-    youtubeTarget: null,
   },
   assets: [],
   retriedByUserId: null,
@@ -64,12 +60,9 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   claimedAt: null,
   startedAt: null,
   renderedAt: new Date(),
-  deliveredAt: new Date(),
-  uploadedAt: new Date(),
   videoFileId: "file-video",
   screenshotFileId: "file-screenshot",
   thumbnailFileId: "file-thumbnail",
-  deliveryAttempts: [],
   ...overrides,
 });
 
@@ -88,18 +81,8 @@ describe("cleanupJobArtifacts", () => {
     });
   });
 
-  it("refuses to clean up a job that isn't UPLOADED", async () => {
-    findJobById.mockResolvedValue(job({ state: "RENDERED" }));
-    await expect(cleanupJobArtifacts("job-1")).rejects.toMatchObject({
-      kind: "business_rule",
-    });
-    expect(deleteFileRow).not.toHaveBeenCalled();
-  });
-
-  it("refuses to clean up when YouTube delivery was required but never recorded a success", async () => {
-    findJobById.mockResolvedValue(
-      job({ deliverToYouTube: true, deliveryAttempts: [] }),
-    );
+  it("refuses to clean up a job that isn't RENDERED", async () => {
+    findJobById.mockResolvedValue(job({ state: "RENDERING" }));
     await expect(cleanupJobArtifacts("job-1")).rejects.toMatchObject({
       kind: "business_rule",
     });
@@ -120,29 +103,6 @@ describe("cleanupJobArtifacts", () => {
     expect(clearJobVideoFileId).toHaveBeenCalledWith("job-1", "file-video");
     expect(deleteFileRow).toHaveBeenCalledWith("file-video");
     expect(storageDelete).toHaveBeenCalledWith("dept-a/video.mp4");
-    expect(result).toEqual({ cleaned: true });
-  });
-
-  it("succeeds when YouTube delivery was required and recorded a success", async () => {
-    findJobById.mockResolvedValue(
-      job({
-        deliverToYouTube: true,
-        deliveryAttempts: [
-          {
-            id: "attempt-1",
-            provider: "YOUTUBE",
-            status: "SUCCEEDED",
-            attemptNumber: 1,
-            providerRef: "yt-1",
-            failureReason: null,
-            triggeredByUserId: null,
-            startedAt: new Date(),
-            completedAt: new Date(),
-          },
-        ],
-      }),
-    );
-    const result = await cleanupJobArtifacts("job-1");
     expect(result).toEqual({ cleaned: true });
   });
 

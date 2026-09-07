@@ -3,7 +3,9 @@
 **Implemented, Phase 8.** The Telegram bot is an **alternative front-end** for creating and
 monitoring Jobs. It is **not** a privileged bypass — Telegram users are real `User`s and
 get the **same authorization and department scoping** as the web UI. See ADR-0035/0036/
-0037/0038 for the decisions behind this page.
+0037/0038 for the decisions behind this page. **Revised, Phase 12 (ADR-0041):** Single
+Track no longer asks a "deliver to YouTube?" question — Studio has no YouTube delivery
+at all.
 
 ## 1. Legacy behavior (reference only) `LEGACY`
 
@@ -96,15 +98,15 @@ Telegram → webhook Route Handler (authenticate the secret token)
 
 `TelegramWizardState` table:
 
-| Field                    | Notes                                                                                                                                                                                             |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `telegramUserId`         | `@unique`. The stable Telegram numeric user id.                                                                                                                                                   |
-| `userId`                 | `@unique`. The linked Studio User — at most one active conversation per User.                                                                                                                     |
-| `flow`                   | `SINGLE_TRACK` \| `ALBUM`.                                                                                                                                                                        |
-| `step`                   | `PICK_TEMPLATE` \| `ASK_DELIVERY` \| `ASK_TRACK_COUNT` \| `COLLECT_ASSETS` \| `CONFIRM` \| `CREATING` \| `COMPLETED`.                                                                             |
-| `payload`                | JSONB, validated on every read/write (`wizardPayloadSchema`): chosen template id + name, a snapshot of its slots, delivery choice, track count, and the asset values collected so far, per track. |
-| `lastUpdateId`           | The most recently processed Telegram `update_id` — defense-in-depth against a duplicate webhook delivery.                                                                                         |
-| `createdAt`, `updatedAt` | `updatedAt` drives lazy TTL expiration.                                                                                                                                                           |
+| Field                    | Notes                                                                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `telegramUserId`         | `@unique`. The stable Telegram numeric user id.                                                                                                                                                        |
+| `userId`                 | `@unique`. The linked Studio User — at most one active conversation per User.                                                                                                                          |
+| `flow`                   | `SINGLE_TRACK` \| `ALBUM`.                                                                                                                                                                             |
+| `step`                   | `PICK_TEMPLATE` \| `ASK_TRACK_COUNT` \| `COLLECT_ASSETS` \| `CONFIRM` \| `CREATING` \| `COMPLETED`. **Revised, ADR-0041:** `ASK_DELIVERY` removed — Studio no longer asks a YouTube-delivery question. |
+| `payload`                | JSONB, validated on every read/write (`wizardPayloadSchema`): chosen template id + name, a snapshot of its slots, track count, and the asset values collected so far, per track.                       |
+| `lastUpdateId`           | The most recently processed Telegram `update_id` — defense-in-depth against a duplicate webhook delivery.                                                                                              |
+| `createdAt`, `updatedAt` | `updatedAt` drives lazy TTL expiration.                                                                                                                                                                |
 
 - Every inbound message/callback loads the row (or starts a fresh one), advances it, saves
   it. Nothing is remembered between requests except through this row.
@@ -164,12 +166,12 @@ Telegram → webhook Route Handler (authenticate the secret token)
 
 ### Flows (implemented)
 
-| Flow             | Studio behavior                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Single Track** | Pick an `ACTIVE`, non-deleted template in the user's department (`getTemplateForJobForm`, the _same_ use case the dashboard's Job form calls) → ask "deliver to YouTube?" → collect a value for every Template slot, one message at a time → confirm → `createJob` (one job).                                                                                                                                                                   |
-| **Album**        | Pick template → ask track count (1–20) → repeat Single Track's **exact same per-slot collection loop**, once per track (`advanceTrackCursor`) → confirm (shows the total job count) → `createJob` once per track, sequentially. No `albumGroupId` grouping entity (resolves OD-12: independent Jobs, matching legacy's actual N-`addJob` outcome). Never asks the delivery question (legacy behavior, kept — always `deliverToYouTube: false`). |
-| **List Jobs**    | `listDepartmentJobs` (unmodified, the same use case the dashboard list page calls), last 10, department-scoped; tap for detail; Retry / Cancel buttons call the same authorized use cases (`getJob`/`retryJob`/`cancelJob`).                                                                                                                                                                                                                    |
-| **Cancel All**   | `cancelAllJobsForTelegram` loops the unmodified single-Job `cancelJob` use case over every `QUEUED`/`CLAIMED`/`RENDERING` Job in the actor's own department (up to 100 per state per run) — **not** a new Jobs-feature bulk-cancel capability, just Telegram composing the existing one N times.                                                                                                                                                |
+| Flow             | Studio behavior                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Single Track** | Pick an `ACTIVE`, non-deleted template in the user's department (`getTemplateForJobForm`, the _same_ use case the dashboard's Job form calls) → collect a value for every Template slot, one message at a time → confirm → `createJob` (one job). **Revised, ADR-0041:** no longer asks "deliver to YouTube?" (Studio has no YouTube delivery at all) — goes straight from picking a template into slot collection, with `trackCount` fixed at 1. |
+| **Album**        | Pick template → ask track count (1–20) → repeat Single Track's **exact same per-slot collection loop**, once per track (`advanceTrackCursor`) → confirm (shows the total job count) → `createJob` once per track, sequentially. No `albumGroupId` grouping entity (resolves OD-12: independent Jobs, matching legacy's actual N-`addJob` outcome).                                                                                                |
+| **List Jobs**    | `listDepartmentJobs` (unmodified, the same use case the dashboard list page calls), last 10, department-scoped; tap for detail; Retry / Cancel buttons call the same authorized use cases (`getJob`/`retryJob`/`cancelJob`).                                                                                                                                                                                                                      |
+| **Cancel All**   | `cancelAllJobsForTelegram` loops the unmodified single-Job `cancelJob` use case over every `QUEUED`/`CLAIMED`/`RENDERING` Job in the actor's own department (up to 100 per state per run) — **not** a new Jobs-feature bulk-cancel capability, just Telegram composing the existing one N times.                                                                                                                                                  |
 
 **Not implemented, deliberately:** Template authoring/editing via Telegram (legacy never
 had this either — Templates were always managed elsewhere), aspect-ratio validation (see
@@ -205,7 +207,7 @@ had this either — Templates were always managed elsewhere), aspect-ratio valid
 ### Job creation confirmation & idempotency (ADR-0037)
 
 - Once every slot of every track is filled, the bot shows a summary (template name, job
-  count, delivery choice) with Confirm/Cancel buttons — a step legacy didn't have (it
+  count) with Confirm/Cancel buttons — a step legacy didn't have (it
   auto-created the Job the instant the last asset arrived); added because the brief
   explicitly asks for one before a batch of Jobs is created (§50).
 - **Duplicate-confirmation protection**: confirming atomically advances the wizard row
@@ -221,29 +223,29 @@ had this either — Templates were always managed elsewhere), aspect-ratio valid
 - The wizard row is deleted once this resolves (success or partial failure) — there is no
   partial-resume design; a failure past this point means starting over from the menu.
 
-### Outbound Job-lifecycle notifications — not implemented, deliberately
+### Outbound Job-lifecycle notifications — implemented, Phase 9 (revised ADR-0041)
 
 Legacy DM'd the Job's creator on `Rendered`/`Uploaded`/`Error`, with all delivery failures
-silently swallowed (logged only) — a real defect Phase 8 brief §31/§32 explicitly warns
-against reproducing. Studio does **not** implement this yet, for a structural reason
-rather than an oversight: nothing currently drives a Job into `RENDERED`/`DELIVERING`/
-`UPLOADED` in the first place (no real Worker/render pipeline is running against this
-codebase yet — see [../domain/jobs.md](../domain/jobs.md) "Completion & delivery — still
-not implemented"), and there is no durable delivery mechanism (OD-40 is still open) to
-hand a notification attempt to even if there were a trigger. Building notification
-delivery now would be unreachable code with no real caller. When a durable-work mechanism
-lands (OD-40) and a real completion/delivery pipeline exists, a notification adapter
-should be a consumer of that same mechanism — never a fire-and-forget call from inside
-`transitionJob` itself (ADR-0016's existing "delivery is durable, not fire-and-forget"
-decision already covers this).
+silently swallowed (logged only) — Studio's version keeps the "best-effort, never blocks
+the Job" behavior but simplifies the trigger: once a Worker's rendered result is accepted
+and the Job reaches `RENDERED` (its final, successful state — ADR-0041 removed the
+`Uploaded` concept entirely), `accept-job-result.ts` sends one DM via
+`sendJobNotification` (`features/delivery/infrastructure/telegram/
+telegram-delivery-adapter.ts`) if the Job's creator has a linked Telegram account. A
+failed send is logged only, never surfaced to the Worker or retried — matches legacy's
+"never fails the operation" behavior exactly. There is no `Rendered`/`Uploaded`/`Error`
+three-way split anymore: only `RENDERED` (success) and `ERROR` (failure) exist to notify
+about, and only the render-success path currently sends a notification (an `ERROR`
+notification is not wired up this phase).
 
 ### Callback routing (Phase 8 brief §19)
 
 - Short, stable action codes (`features/telegram/domain/callback-data.ts`) —
-  `tpl:s:<id>` / `tpl:a:<id>` (pick template), `dlv:y` / `dlv:n` (delivery choice),
-  `cfm:y` / `cfm:n` (confirm), `job:d:<id>` / `job:r:<id>` / `job:c:<id>` (job detail/
-  retry/cancel) — never coupled to button text or emoji (legacy's actual flaw: renaming a
-  button broke `@Action` regex dispatch).
+  `tpl:s:<id>` / `tpl:a:<id>` (pick template), `cfm:y` / `cfm:n` (confirm),
+  `job:d:<id>` / `job:r:<id>` / `job:c:<id>` (job detail/retry/cancel) — never coupled to
+  button text or emoji (legacy's actual flaw: renaming a button broke `@Action` regex
+  dispatch). **Revised, ADR-0041:** `dlv:y`/`dlv:n` (delivery choice) removed along with
+  the "deliver to YouTube?" question they answered.
 - **Every decoded id is re-validated server-side, every time** — a callback naming a
   Template or Job id is only ever acted on after the use case it reaches re-resolves that
   id through the actor's own department scope (`getTemplateForJobForm`, `getJob`,
@@ -275,23 +277,21 @@ decision already covers this).
 
 ## 4. Improvements over legacy (summary)
 
-| Legacy                                                        | Studio                                                                                                                                  |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| No permission enforcement on the bot surface                  | Full role + department authorization, identical to the dashboard, on every use case                                                     |
-| "Cancel All" = system-wide                                    | Scoped to the actor's own department + cancelable-state jobs only                                                                       |
-| In-memory wizard state (`{}` singletons)                      | Durable `TelegramWizardState` table, lazily TTL'd, atomic-conditional-update safe                                                       |
-| Not horizontally scalable                                     | Stateless adapter, webhook-friendly, safe across multiple instances                                                                     |
-| Emoji-coupled callback dispatch                               | Stable, short action codes, re-validated server-side on every use                                                                       |
-| Album: schema-less asset-map splicing                         | The same typed, validated per-slot collection loop as Single Track, repeated per track                                                  |
-| File inputs: URL-extension MIME guess, could corrupt records  | Real content-type sniffing via the unmodified File upload use case                                                                      |
-| No confirmation step; a duplicate message could double-submit | Explicit Confirm step; atomic conditional update prevents a duplicate confirm from double-creating                                      |
-| Swallowed notification errors (when notifications existed)    | Notifications not implemented yet (no trigger point exists); when built, must use a durable mechanism (ADR-0016), never fire-and-forget |
+| Legacy                                                        | Studio                                                                                                                                                            |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No permission enforcement on the bot surface                  | Full role + department authorization, identical to the dashboard, on every use case                                                                               |
+| "Cancel All" = system-wide                                    | Scoped to the actor's own department + cancelable-state jobs only                                                                                                 |
+| In-memory wizard state (`{}` singletons)                      | Durable `TelegramWizardState` table, lazily TTL'd, atomic-conditional-update safe                                                                                 |
+| Not horizontally scalable                                     | Stateless adapter, webhook-friendly, safe across multiple instances                                                                                               |
+| Emoji-coupled callback dispatch                               | Stable, short action codes, re-validated server-side on every use                                                                                                 |
+| Album: schema-less asset-map splicing                         | The same typed, validated per-slot collection loop as Single Track, repeated per track                                                                            |
+| File inputs: URL-extension MIME guess, could corrupt records  | Real content-type sniffing via the unmodified File upload use case                                                                                                |
+| No confirmation step; a duplicate message could double-submit | Explicit Confirm step; atomic conditional update prevents a duplicate confirm from double-creating                                                                |
+| Swallowed notification errors                                 | Implemented, Phase 9: best-effort, logged-only on failure — matches legacy's own "never blocks the operation" intent, minus the silent-swallow-with-no-log defect |
 
 ## 5. What's next (explicitly out of scope this phase)
 
-- Outbound Job-lifecycle notifications (see above) — needs OD-40 (durable-work mechanism)
-  and a real render/delivery pipeline first.
-- `deliverToTelegram` as a Job option (needs the notification mechanism above to mean
-  anything).
 - Self-service phone linking/editing UI (Users-feature scope, not built yet).
 - Any Template authoring/management surface via Telegram.
+- An `ERROR`-state Telegram notification (only the `RENDERED`-success path currently
+  notifies — see "Outbound Job-lifecycle notifications" above).

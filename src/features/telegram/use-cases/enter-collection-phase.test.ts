@@ -11,7 +11,6 @@ const { enterCollectionPhase } = await import("./enter-collection-phase");
 const basePayload = {
   templateId: "tpl-1",
   templateName: "T",
-  deliverToYouTube: false,
   trackCount: 1,
   slots: [{ key: "s1", kind: "DATA" as const }],
   tracks: [] as { slotKey: string }[][],
@@ -26,7 +25,7 @@ describe("enterCollectionPhase", () => {
     advanceWizardState.mockResolvedValue({});
     const result = await enterCollectionPhase(
       "tg-1",
-      "ASK_DELIVERY",
+      "ASK_TRACK_COUNT",
       1,
       basePayload,
     );
@@ -34,7 +33,7 @@ describe("enterCollectionPhase", () => {
     expect(result.payload.tracks).toEqual([[]]);
     expect(advanceWizardState).toHaveBeenCalledWith(
       "tg-1",
-      ["ASK_DELIVERY"],
+      ["ASK_TRACK_COUNT"],
       "COLLECT_ASSETS",
       expect.objectContaining({ tracks: [[]] }),
       1,
@@ -46,7 +45,7 @@ describe("enterCollectionPhase", () => {
     const zeroSlotPayload = { ...basePayload, slots: [] };
     const result = await enterCollectionPhase(
       "tg-1",
-      "ASK_DELIVERY",
+      "ASK_TRACK_COUNT",
       1,
       zeroSlotPayload,
     );
@@ -56,7 +55,7 @@ describe("enterCollectionPhase", () => {
   it("throws conflict when the step already moved on (duplicate update)", async () => {
     advanceWizardState.mockResolvedValue(null);
     await expect(
-      enterCollectionPhase("tg-1", "ASK_DELIVERY", 1, basePayload),
+      enterCollectionPhase("tg-1", "ASK_TRACK_COUNT", 1, basePayload),
     ).rejects.toMatchObject({ kind: "conflict" });
   });
 });

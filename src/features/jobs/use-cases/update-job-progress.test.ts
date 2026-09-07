@@ -59,7 +59,7 @@ describe("updateJobProgress", () => {
 
   it("rejects updating progress on a terminal job", async () => {
     findJobState.mockResolvedValue({
-      state: "UPLOADED",
+      state: "RENDERED",
       departmentId: "dept-a",
     });
     await expect(

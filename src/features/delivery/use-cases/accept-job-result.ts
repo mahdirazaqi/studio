@@ -16,7 +16,8 @@ import {
   generateRenderArtifacts,
   rollbackRenderArtifacts,
 } from "@/features/delivery/use-cases/generate-render-artifacts";
-import { deliverJobResult } from "@/features/delivery/use-cases/deliver-job-result";
+import { sendJobNotification } from "@/features/delivery/infrastructure/telegram/telegram-delivery-adapter";
+import { findTelegramUserIdForUser } from "@/features/telegram/repository/telegram-repository";
 
 const VIDEO_MAX_SIZE_BYTES =
   FILE_KIND_RULES.find((rule) => rule.kind === "VIDEO")?.maxSizeBytes ?? 0;
@@ -28,13 +29,19 @@ const VIDEO_MAX_SIZE_BYTES =
  * function itself takes no `Actor` (the Worker is never one,
  * docs/domain/jobs.md "Worker identity").
  *
+ * **`RENDERED` is now the Job's final, successful completion state**
+ * (ADR-0041 — Studio no longer uploads a rendered Job anywhere; there is no
+ * `DELIVERING`/`UPLOADED` step after this). Once the atomic `RENDERING ->
+ * RENDERED` transition below succeeds, this function's only remaining work
+ * is a best-effort "rendered" notification — never another state
+ * transition, and never an external delivery call.
+ *
  * **Idempotent and race-safe** (docs/integrations/worker-api.md §5's
- * "duplicate Worker request" contract, applied here for the first time to
- * the result-upload path):
+ * "duplicate Worker request" contract):
  *
  * 1. A Job not currently `RENDERING` that already has a `videoFileId` is a
  *    **duplicate** of an already-accepted result — returned as-is, no
- *    reprocessing, no second delivery run.
+ *    reprocessing.
  * 2. A Job not currently `RENDERING` with no `videoFileId` is a genuine
  *    error (wrong state to accept a result at all).
  * 3. Two concurrent requests that both observe `RENDERING` both do the
@@ -44,11 +51,6 @@ const VIDEO_MAX_SIZE_BYTES =
  *    result is now visible (`videoFileId` set), that is returned instead of
  *    erroring; a Job in a state neither of the two `Worker`s expected is a
  *    real conflict.
- *
- * Delivery (`deliverJobResult`) runs **synchronously, awaited** — never
- * fire-and-forget (docs/integrations/youtube.md "Delivery reliability") —
- * before this returns, so the Worker's own request only completes once the
- * Job has reached its true final state for this result.
  */
 export async function acceptJobResult(
   jobId: string,
@@ -107,5 +109,17 @@ export async function acceptJobResult(
     );
   }
 
-  return deliverJobResult(updated);
+  await notifyRendered(updated);
+  return updated;
+}
+
+/** Best-effort, never a Job-state failure (matches legacy — a failed
+ * Telegram DM was logged only, never surfaced or retried). */
+async function notifyRendered(job: SafeJobDetail): Promise<void> {
+  const telegramUserId = await findTelegramUserIdForUser(job.createdByUserId);
+  if (!telegramUserId) return;
+  await sendJobNotification(
+    telegramUserId,
+    `"${job.title}" rendered successfully.`,
+  );
 }

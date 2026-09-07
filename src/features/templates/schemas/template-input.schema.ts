@@ -24,12 +24,6 @@ export const templateInputSchema = z
     source: commonSchemas.shortText,
     scriptRef: commonSchemas.shortText,
     outputPattern: commonSchemas.shortText,
-    description: z.string().trim().max(2000).optional(),
-    tags: z.array(z.string().trim().min(1).max(60)).max(25).default([]),
-    /** A connected `YouTubeTarget` id — verified server-side against this
-     * Template's own department on every write, never trusted as-is
-     * (`features/templates/use-cases/verify-youtube-target.ts`, Phase 9). */
-    youtubeTargetId: commonSchemas.id.optional(),
     assets: z.array(templateAssetInputSchema).max(50).default([]),
   })
   .superRefine((data, ctx) => {

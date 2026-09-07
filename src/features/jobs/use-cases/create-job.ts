@@ -1,7 +1,6 @@
 import { authorize, type Actor } from "@/server/authz";
 import { businessRuleError, notFoundError } from "@/server/errors/app-error";
 import { findTemplateInScope } from "@/features/templates/repository/template-repository";
-import { findConnectedYoutubeTargetForDepartment } from "@/features/youtube/repository/youtube-target-repository";
 import { resolveJobAssets } from "@/features/jobs/use-cases/resolve-job-assets";
 import { createJobWithAssets } from "@/features/jobs/repository/job-repository";
 import type { JobSnapshot, SafeJobDetail } from "@/features/jobs/domain/job";
@@ -15,6 +14,10 @@ import type { CreateJobInput } from "@/features/jobs/schemas/create-job.schema";
  * actor's own department's Templates for USER/MANAGER (returning `null`,
  * folded into `not_found`, for a cross-department id) — reused directly from
  * the Templates feature rather than re-implemented here.
+ *
+ * **No YouTube delivery configuration** (ADR-0041) — a Job's lifecycle ends
+ * at `RENDERED`, the moment the Worker's rendered result is accepted; there
+ * is nothing here to resolve or validate beyond the render itself.
  */
 export async function createJob(
   actor: Actor,
@@ -36,33 +39,6 @@ export async function createJob(
     );
   }
 
-  // Legacy: "a Job is uploaded to YouTube only if upload===true AND the
-  // Template has a channel" (docs/integrations/youtube.md). Studio checks
-  // this once, here, at creation — never silently ignored, and never
-  // re-checked against the live Template later: the Target's identity is
-  // captured in the Job's own immutable `snapshot` below, so a later
-  // disconnect/reassignment can never change what an already-created Job
-  // believes it should deliver to.
-  const youtubeTarget = input.deliverToYouTube
-    ? await (async () => {
-        if (!template.youtubeTargetId) {
-          throw businessRuleError(
-            "This template has no connected YouTube channel, so a job created from it cannot deliver to YouTube.",
-          );
-        }
-        const target = await findConnectedYoutubeTargetForDepartment(
-          template.departmentId,
-          template.youtubeTargetId,
-        );
-        if (!target) {
-          throw businessRuleError(
-            "This template's YouTube channel is no longer connected, so a job created from it cannot deliver to YouTube.",
-          );
-        }
-        return target;
-      })()
-    : null;
-
   const { jobAssets, title } = await resolveJobAssets({
     departmentId: template.departmentId,
     templateAssets: template.assets,
@@ -77,15 +53,6 @@ export async function createJob(
     source: template.source,
     scriptRef: template.scriptRef,
     outputPattern: template.outputPattern,
-    description: template.description,
-    tags: template.tags,
-    youtubeTarget: youtubeTarget
-      ? {
-          id: youtubeTarget.id,
-          name: youtubeTarget.name,
-          youtubeChannelId: youtubeTarget.youtubeChannelId,
-        }
-      : null,
     assetSlotDefinitions: template.assets.map((asset) => ({
       key: asset.key,
       kind: asset.kind,
@@ -101,7 +68,6 @@ export async function createJob(
     templateId: template.id,
     snapshot,
     title,
-    deliverToYouTube: input.deliverToYouTube,
     assets: jobAssets,
   });
 }

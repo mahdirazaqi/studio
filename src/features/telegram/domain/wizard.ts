@@ -12,7 +12,6 @@ export type TelegramWizardFlow = (typeof TELEGRAM_WIZARD_FLOWS)[number];
 
 export const TELEGRAM_WIZARD_STEPS = [
   "PICK_TEMPLATE",
-  "ASK_DELIVERY",
   "ASK_TRACK_COUNT",
   "COLLECT_ASSETS",
   "CONFIRM",

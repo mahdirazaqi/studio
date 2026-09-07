@@ -38,9 +38,6 @@ export function pickTemplateMessage(kind: "single" | "album"): string {
     : "Choose a template for your album:";
 }
 
-export const askDeliveryMessage =
-  "Do you want this job delivered to YouTube when rendering completes?";
-
 export const askTrackCountMessage =
   "How many tracks are in this album? (send a number)";
 
@@ -51,12 +48,10 @@ export function askSlotMessage(slot: WizardSlot): string {
 export function confirmSummaryMessage(
   templateName: string,
   trackCount: number,
-  deliverToYouTube: boolean,
 ): string {
   const jobWord = trackCount === 1 ? "job" : "jobs";
   return (
-    `Ready to create ${trackCount} ${jobWord} from template "${templateName}"` +
-    `${deliverToYouTube ? " (will be delivered to YouTube)" : ""}.\n\n` +
+    `Ready to create ${trackCount} ${jobWord} from template "${templateName}".\n\n` +
     "Confirm?"
   );
 }

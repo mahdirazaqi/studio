@@ -626,7 +626,7 @@ breaking change when Job lands.
 - `assertNoActiveJobDependencies(file)` (`features/files/use-cases/
 authorize-file-management.ts`) is called on every delete, today as a documented no-op —
   there is no Job model to query. When Jobs exist, that function (not its caller) gains a
-  query for active-state (`QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING`) Jobs referencing the
+  query for active-state (`QUEUED`/`CLAIMED`/`RENDERING`) Jobs referencing the
   file and throws `conflictError()` if any exist.
 - A USER may delete only a file **they uploaded**; MANAGER/ADMIN may delete any file in
   scope (`assertCanDeleteFile`) — the conservative reading of
@@ -879,6 +879,12 @@ SKIP LOCKED LIMIT 1) RETURNING id` — one raw SQL statement (Prisma's query bui
 ---
 
 ## ADR-0030 — Daily upload quota: global cap, advisory-lock concurrency
+
+> **Superseded, ADR-0041.** The upload quota this ADR designed (`JOB_UPLOAD_DAILY_CAP`,
+> the advisory-lock logic, `Job.deliverToYouTube`) was removed entirely — YouTube upload
+> no longer exists, so there is nothing left to cap. The **advisory-lock pattern**
+> itself (`pg_advisory_xact_lock` for race-safe count-then-insert) remains documented
+> here as prior art if a future rate-limited resource ever needs the same technique.
 
 **Context.** Legacy hard-coded a global cap of 3 upload-enabled Jobs per UTC day,
 enforced by `count, then insert` with no concurrency protection — two simultaneous
@@ -1406,6 +1412,13 @@ uploaded directly to disk from the bot — a known defect (`docs/legacy/known-is
 
 ## ADR-0039 — Delivery pipeline: rendered-result acceptance, media processing, delivery orchestration, and YouTube connection model
 
+> **Superseded in part, ADR-0041.** The YouTube-delivery half of this ADR (the
+> `YouTubeTarget` model, `DeliveryAttempt`, the `RENDERED -> DELIVERING -> UPLOADED`
+> path, the daily upload quota) was removed — Studio no longer uploads rendered Jobs to
+> YouTube. The **media-processing** half (rendered-result acceptance, `ffmpeg`-based
+> screenshot/thumbnail generation, artifact File creation) remains fully in effect,
+> unchanged — see ADR-0041 for exactly what was kept versus removed.
+
 **Context.** Phase 9 completes the render pipeline `RENDERED -> Delivery -> UPLOADED`
 that Phases 6–7 deliberately left unbuilt (docs/domain/jobs.md "Completion & delivery").
 Legacy's version had five real defects this phase must not reproduce: fire-and-forget
@@ -1548,6 +1561,12 @@ sweep calls.
 identity move to ADMIN-only, many-to-many Department infrastructure; Template Department
 transfer
 
+> **Partially superseded, ADR-0041.** This ADR's YouTube-Target half (point 3 below —
+> `YouTubeTarget.departments` many-to-many, `youtube:manage` moving ADMIN-only) no longer
+> applies: `YouTubeTarget` and `youtube:manage` were removed entirely, since Studio no
+> longer uploads to YouTube. The Worker API Key half (points 1–2) and the Template
+> Department transfer half (point 4) are fully unaffected and remain in effect.
+
 **Context.** ADR-0032 accepted a single, shared, non-departmental `WORKER_API_KEY` as
 the simplest secure starting point, explicitly leaving the door open to "a new
 `WorkerCredential` table and a new ADR" if Studio ever needed multiple Workers with
@@ -1668,9 +1687,110 @@ workerApiKeyId, allowedDepartmentIds }` once, at authentication, which
 - Per-Worker rate limiting, per-Worker request idempotency keys beyond what ADR-0034
   already established (unaffected by moving from one shared key to many scoped ones).
 - A generic multi-tenant RBAC/permission-table system — Studio still has exactly three
-  fixed roles; `worker_key:manage`/`youtube:manage` are two more entries in the existing
-  fixed capability registry, not a new mechanism.
+  fixed roles; `worker_key:manage` (and, at the time, `youtube:manage` — since removed
+  along with the rest of YouTube delivery, ADR-0041) were entries in the existing fixed
+  capability registry, not a new mechanism.
 - Any Worker-initiated Department self-service (a Worker cannot request its own scope
   change) — Department scope is exclusively ADMIN-assigned.
+
+**Status:** DECIDED.
+
+---
+
+## ADR-0041 — Remove YouTube upload entirely; simplify the Job lifecycle to end at `RENDERED`
+
+**Context.** Product decision: Studio does **not** upload rendered Jobs to YouTube at
+this stage. ADR-0039 had built a real YouTube-delivery pipeline (channel connections,
+OAuth token exchange/encryption, a `DELIVERING`/`UPLOADED` post-render leg, a
+`DeliveryAttempt` durability ledger, a global daily upload quota) on top of Phase 6's
+render pipeline. None of that infrastructure has a remaining purpose — keeping it around
+unused (or worse, half-wired) would be dead weight and a standing security/maintenance
+liability (an unused OAuth client secret, an unused token-encryption key, an unused
+admin surface). The instruction was explicit: remove the _feature_ from the application
+architecture, database, services, API flow, dependencies, configuration, and
+documentation — not just hide it from the UI.
+
+**Decision.**
+
+1. **The Job lifecycle now ends at `RENDERED`.** `JobState.DELIVERING`/`UPLOADED` are
+   removed from both the Prisma enum and `features/jobs/domain/job.ts`'s `JOB_STATES`.
+   `RENDERED` is now itself terminal (`isTerminalState`) — the moment
+   `accept-job-result.ts` accepts the Worker's rendered result and the atomic
+   `RENDERING -> RENDERED` transition commits, the Job is done. No further transition is
+   attempted automatically.
+2. **`POST /api/worker/v1/jobs/:id/result` (legacy `POST /jobs/:id/upload`) is
+   unchanged in shape and stays mandatory** — this is still the Worker's only way to
+   hand Studio the rendered bytes, and Studio still generates a screenshot + thumbnail
+   from it (`generate-render-artifacts.ts`, `ffmpeg`-only, unchanged) for the dashboard's
+   own Job detail view. What changed is only what happens _after_ the atomic transition
+   commits: `accept-job-result.ts` no longer calls a delivery orchestrator — it sends one
+   best-effort "rendered" Telegram notification (if the creator is linked) and returns.
+   No YouTube API call, no external upload, ever, from this endpoint.
+3. **Legacy Worker state codes `6` (Uploading) and `7` (Uploaded) are no longer mapped**
+   (`legacy-state-mapping.ts`) — a Worker sending either now gets the same `422
+validation` error as any other unrecognized value, naming the supported values. This
+   is a genuine, intentional Worker-contract change: there is no Studio state for either
+   concept anymore.
+4. **Removed entirely, database included:** `YouTubeTarget` model (+
+   `YouTubeTargetStatus` enum), `DeliveryAttempt` model (+ `DeliveryProvider`/
+   `DeliveryStatus` enums — this model existed _only_ for YouTube's durable delivery
+   ledger; Telegram notification was always best-effort and never wrote a row here),
+   `Template.youtubeTargetId`/`description`/`tags` (their only purpose was configuring a
+   YouTube upload — description/tags had no other consumer), `Job.deliverToYouTube`/
+   `deliveredAt`/`uploadedAt`, the `Department ↔ YouTubeTarget` many-to-many join table,
+   the global daily upload quota (`JOB_UPLOAD_DAILY_CAP`, its advisory-lock logic in
+   `job-repository.ts`, ADR-0030 — its only purpose was capping YouTube-upload-enabled
+   Jobs), `TelegramWizardStep.ASK_DELIVERY` (Single Track's "deliver to YouTube?"
+   question — it now opens straight into asset collection, `trackCount` fixed at 1, using
+   the same track-cursor logic Album already used for its own first track), the entire
+   `features/youtube/` feature (domain, repository, use-cases, actions, schemas,
+   components), `src/server/adapters/youtube/` (token cipher, YouTube API client), the
+   `/youtube` nav item/page, `googleapis` (npm dependency — confirmed used nowhere else),
+   `YOUTUBE_CLIENT_ID`/`YOUTUBE_CLIENT_SECRET`/`YOUTUBE_TOKEN_ENCRYPTION_KEY` (env vars),
+   `youtube:manage` (authorization capability).
+5. **Verified empty before the migration** — `youtube_targets`, `delivery_attempts` had
+   zero rows; no `Job` had `deliverToYouTube = true`; no `Template` had a non-null
+   `youtubeTargetId`/non-null `description`/non-empty `tags` in every environment this
+   was checked against. The migration drops these tables/columns outright — a real
+   schema change, not `db push` — but carries **zero data-loss risk** given that state; a
+   deployment that somehow does carry such data must review it before applying this
+   migration, since (per point 4) it is unrecoverable afterward.
+6. **`Job.videoFileId`/`screenshotFileId`/`thumbnailFileId` and their `ffmpeg`-based
+   generation are kept, unchanged.** These are general "view the rendered result in the
+   dashboard" functionality (download/preview a Job's video and thumbnail), independent
+   of whether that result is _also_ pushed anywhere else — removing YouTube does not
+   remove them. `cleanup-job-artifacts.ts`'s eligibility check simply moved from
+   `UPLOADED` to `RENDERED` (the new terminal success state); its YouTube-specific
+   "delivery must have actually succeeded" guard is gone along with the model it
+   referenced.
+7. **`retryJobDelivery` (`ERROR -> DELIVERING`) and its Server Action/route are
+   removed** — there is no delivery to retry. Job Retry itself (`retryJob`,
+   `ERROR`/`CANCELED -> new QUEUED Job`, ADR-0031) is completely unaffected; it never was
+   the same operation.
+
+**Consequences.**
+
+- `docs/integrations/youtube.md` is deleted outright — there is no YouTube integration
+  to document. `docs/integrations/worker-api.md`/`docs/domain/jobs.md`/
+  `docs/domain/templates.md`/`docs/domain/authorization.md`/CLAUDE.md all updated to
+  describe the simplified lifecycle and state the removal explicitly, so a future reader
+  never has to guess whether "no YouTube" is an oversight or a decision.
+- OD-01 (upload cap model) and OD-37 (YouTube privacy configurability) are both closed
+  as **moot** — the feature they were about no longer exists.
+- A future "add YouTube (or any external) delivery back" requirement is a **new**
+  decision, not a revert of this one — it would need its own connection-security review
+  (OAuth client credentials, token storage) exactly as ADR-0039 originally did, not a
+  resurrection of the removed code verbatim.
+- No historical Job record was corrupted or deleted by this change (point 5) — Jobs
+  remain permanent, never-deleted records (ADR-0005), and the small number of columns
+  removed from `Job` (`deliverToYouTube`/`deliveredAt`/`uploadedAt`) carried no data in
+  any environment this was verified against.
+
+**Out of scope, deliberately** (do not build without a new decision):
+
+- Any replacement delivery destination (YouTube or otherwise) for a rendered Job.
+- A generic "delivery provider" abstraction sized for a future integration that doesn't
+  exist yet — speculative infrastructure CLAUDE.md §12 asks not to build ahead of a real
+  requirement.
 
 **Status:** DECIDED.

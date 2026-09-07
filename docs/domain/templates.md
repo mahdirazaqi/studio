@@ -1,9 +1,11 @@
 # Domain: Templates
 
 **Implemented, Phase 5.** This page is the business rules and permission matrix;
-[../architecture/decisions.md](../architecture/decisions.md) ADR-0006/ADR-0027 records the
-decisions behind the shape below, and [`prisma/schema.prisma`](../../prisma/schema.prisma)
-is the final schema.
+[../architecture/decisions.md](../architecture/decisions.md) ADR-0006/ADR-0027/ADR-0040/
+ADR-0041 records the decisions behind the shape below, and
+[`prisma/schema.prisma`](../../prisma/schema.prisma) is the final schema. Studio does not
+upload rendered Jobs to YouTube (ADR-0041) — a Template describes only the render itself,
+never a delivery destination.
 
 ## Purpose
 
@@ -84,20 +86,22 @@ columns**, never combined into one field (Phase 5 brief §7). `templateLifecycle
 
 [`prisma/schema.prisma`](../../prisma/schema.prisma))
 
-| Field                                                 | Notes                                                                                                                                                                                                                                                                                                                             |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                                  | Referenced by a future Job's snapshot forever — never reused, never removed.                                                                                                                                                                                                                                                      |
-| `departmentId`                                        | Required. Scopes ownership. Set at creation; **may be changed later, ADMIN-only** — see "Department transfer" below (ADR-0040, revises the earlier "immutable" design).                                                                                                                                                           |
-| `createdByUserId`                                     | Always set (Users are never deleted — ADR-0007 — so this FK is `onDelete: Restrict`, not nullable).                                                                                                                                                                                                                               |
-| `name`                                                | Unique per Department among non-deleted rows — **ADR-0027, resolves OD-09.**                                                                                                                                                                                                                                                      |
-| `status`                                              | `ACTIVE` \| `DISABLED`. Independent of `deletedAt` — see "Lifecycle" above.                                                                                                                                                                                                                                                       |
-| `composition`, `source`, `scriptRef`, `outputPattern` | Legacy `composition`/`src`/`script`/`output` — opaque strings passed through to a future Job/the Render Worker. Studio never interprets them.                                                                                                                                                                                     |
-| `description`                                         | Optional. Used as the YouTube description on delivery — **implemented, Phase 9.**                                                                                                                                                                                                                                                 |
-| `tags`                                                | String array. YouTube tag templates with `{{layer}}` placeholders — **Templates only store this**; substitution happens at delivery time (`features/delivery/domain/tag-substitution.ts`, Phase 9).                                                                                                                               |
-| `youtubeTargetId`                                     | **Implemented, Phase 9** (ADR-0039, resolves OD-36). Optional connected `YouTubeTarget` — verified server-side to belong to this Template's own Department and be `CONNECTED` on every write (`verify-youtube-target.ts`). `onDelete: SetNull`. See [../integrations/youtube.md](../integrations/youtube.md) "Template ↔ Target". |
-| `assets`                                              | Ordered `TemplateAsset[]` — see below. **Zero assets is valid** — ADR-0027, resolves OD-10 (a fully static render has no Job-supplied inputs).                                                                                                                                                                                    |
-| `createdAt`, `updatedAt`                              |                                                                                                                                                                                                                                                                                                                                   |
-| `deletedAt`, `deletedByUserId`                        | Soft-delete marker (ADR-0006). Both `null` until deleted; set together, never individually.                                                                                                                                                                                                                                       |
+| Field                                                 | Notes                                                                                                                                                                   |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                  | Referenced by a future Job's snapshot forever — never reused, never removed.                                                                                            |
+| `departmentId`                                        | Required. Scopes ownership. Set at creation; **may be changed later, ADMIN-only** — see "Department transfer" below (ADR-0040, revises the earlier "immutable" design). |
+| `createdByUserId`                                     | Always set (Users are never deleted — ADR-0007 — so this FK is `onDelete: Restrict`, not nullable).                                                                     |
+| `name`                                                | Unique per Department among non-deleted rows — **ADR-0027, resolves OD-09.**                                                                                            |
+| `status`                                              | `ACTIVE` \| `DISABLED`. Independent of `deletedAt` — see "Lifecycle" above.                                                                                             |
+| `composition`, `source`, `scriptRef`, `outputPattern` | Legacy `composition`/`src`/`script`/`output` — opaque strings passed through to a future Job/the Render Worker. Studio never interprets them.                           |
+| `assets`                                              | Ordered `TemplateAsset[]` — see below. **Zero assets is valid** — ADR-0027, resolves OD-10 (a fully static render has no Job-supplied inputs).                          |
+| `createdAt`, `updatedAt`                              |                                                                                                                                                                         |
+| `deletedAt`, `deletedByUserId`                        | Soft-delete marker (ADR-0006). Both `null` until deleted; set together, never individually.                                                                             |
+
+**Removed, ADR-0041 (Studio no longer uploads to YouTube):** `description` (YouTube
+description), `tags` (YouTube tag templates with `{{layer}}` substitution),
+`youtubeTargetId` (connected `YouTubeTarget`). None had any purpose beyond configuring a
+YouTube upload — a Template now describes only the render itself.
 
 ### Template Asset (slot definition)
 
@@ -107,7 +111,7 @@ columns**, never combined into one field (Phase 5 brief §7). `templateLifecycle
 | `key`           | Stable slot identifier a future Job fills in (legacy `name`) — also the only author-facing label for the slot. Unique within the Template (`@@unique([templateId, key])`).                                  |
 | `kind`          | `DATA` (literal text) \| `IMAGE` \| `AUDIO` \| `VIDEO`. Legacy's free-text `type` becomes a validated enum; legacy's server-injected `script` kind is not author-visible.                                   |
 | `composition`   | Passed through to the future Job asset. Opaque to Studio.                                                                                                                                                   |
-| `layer`         | Passed through; also the `{{layer}}` substitution token for tags.                                                                                                                                           |
+| `layer`         | Passed through to the future Job asset. Opaque to Studio.                                                                                                                                                   |
 | `imageRatio`    | `PORTRAIT_9_16` \| `LANDSCAPE_16_9` \| `SQUARE` \| `ANY` — **required for `kind: IMAGE`, forbidden for every other kind.** Enforced in `checkAssetKindConsistency` (domain) and mirrored in the Zod schema. |
 | `defaultFileId` | Optional Gallery File reference — **ADR-0027, resolves OD-11.** Allowed only for `IMAGE`/`AUDIO`/`VIDEO`; forbidden for `DATA`. See "File Gallery Integration" below.                                       |
 | `order`         | Explicit ordering. Rewritten in full on every Template update (see "Updating Template assets").                                                                                                             |
@@ -179,13 +183,13 @@ A transfer:
 1. Requires the target Department to actually exist (`departmentExists`) — a
    nonexistent target is rejected with a clean `business_rule` error.
 2. **Re-verifies every dependent reference against the _target_ Department, not the
-   original** — `verifyAssetFileReferences`/`verifyYoutubeTargetReference` (the same
-   functions a plain same-department edit already runs) are called with the target
-   Department id. An asset `defaultFileId` or `youtubeTargetId` that doesn't resolve in
-   the target Department is rejected with the same `business_rule` error a same-
-   department edit pointing at a nonexistent reference would get — the transfer is never
-   applied halfway, and nothing about the Template or its dependencies is silently
-   mutated to "fix" the mismatch.
+   original** — `verifyAssetFileReferences` (the same function a plain same-department
+   edit already runs) is called with the target Department id. An asset `defaultFileId`
+   that doesn't resolve in the target Department is rejected with the same
+   `business_rule` error a same-department edit pointing at a nonexistent reference
+   would get — the transfer is never applied halfway, and nothing about the Template or
+   its dependencies is silently mutated to "fix" the mismatch. (Before ADR-0041,
+   `youtubeTargetId` was re-verified here too — that field no longer exists.)
 3. Needs **no historical-integrity mechanism of its own**. `Job.departmentId` is copied
    onto the Job row once, at Job-creation time, from the Template's Department _at that
    moment_ — a plain stored column, never a live join through `Job.templateId →
@@ -211,8 +215,8 @@ department's Template still works exactly as before.
 - **Editing replaces the Template's full asset list wholesale**, not a per-asset diff —
   simple and safe, because a Template's live configuration never needs row-level
   continuity for a historical Job (a future Job holds its own immutable snapshot,
-  ADR-0010). Scalar fields (name, composition, tags, ...) are all resent on every edit
-  too — the create and edit forms/schemas are intentionally the same shape.
+  ADR-0010). Scalar fields (name, composition, ...) are all resent on every edit too —
+  the create and edit forms/schemas are intentionally the same shape.
 - **Editing a Template never changes an existing Job** — this is the key behavioral
   improvement enabling safe template evolution; see "Template / Job contract" below.
 - **Validation on save** (`features/templates/schemas/template-input.schema.ts`,
@@ -265,6 +269,6 @@ new, separate decision — not a byproduct of this feature.
 > enough" when a future feature actually compares an uploaded image against a Template
 > slot's `imageRatio`. Unaffected by this phase, since no such comparison exists yet.
 
-> **OD-36, YouTube target scoping — ✅ RESOLVED, Phase 9.** `youtubeTargetId` is now a
-> real field on Template — see "Fields" above and
-> [../integrations/youtube.md](../integrations/youtube.md).
+> **OD-36, YouTube target scoping — MOOT, ADR-0041.** `youtubeTargetId` briefly existed
+> on Template (Phase 9–11) and was removed entirely — Studio no longer uploads to
+> YouTube, so there is no target to scope.

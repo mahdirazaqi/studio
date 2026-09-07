@@ -56,7 +56,9 @@ conventions. If you are an AI agent, read [`../CLAUDE.md`](../CLAUDE.md) first.
 
 - [worker-api.md](integrations/worker-api.md) — Render Worker REST contract & compatibility
 - [telegram.md](integrations/telegram.md) — Telegram bot integration & durable wizard state
-- [youtube.md](integrations/youtube.md) — YouTube upload integration
+
+YouTube upload integration was removed (ADR-0041) — Studio does not upload rendered Jobs
+to YouTube. See `docs/architecture/decisions.md` ADR-0041.
 
 ### Security
 

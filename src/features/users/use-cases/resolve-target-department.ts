@@ -4,7 +4,7 @@ import { departmentExists } from "@/features/departments/repository/department-r
 
 /**
  * Mirrors `features/templates/use-cases/resolve-target-department.ts` and its
- * siblings in `files`/`youtube` — each feature keeps its own copy rather than
+ * sibling in `files` — each feature keeps its own copy rather than
  * importing another feature's use-case module
  * (docs/architecture/project-structure.md §3).
  */

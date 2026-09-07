@@ -8,7 +8,6 @@ const findTemplateInScope = vi.fn();
 const updateTemplateWithAssets = vi.fn();
 const findGalleryFileIdsInDepartment = vi.fn();
 const departmentExists = vi.fn();
-const findConnectedYoutubeTargetForDepartment = vi.fn();
 
 vi.mock("@/features/templates/repository/template-repository", () => ({
   findTemplateInScope: (...args: unknown[]) => findTemplateInScope(...args),
@@ -23,11 +22,6 @@ vi.mock("@/features/files/repository/file-repository", () => ({
 
 vi.mock("@/features/departments/repository/department-repository", () => ({
   departmentExists: (...args: unknown[]) => departmentExists(...args),
-}));
-
-vi.mock("@/features/youtube/repository/youtube-target-repository", () => ({
-  findConnectedYoutubeTargetForDepartment: (...args: unknown[]) =>
-    findConnectedYoutubeTargetForDepartment(...args),
 }));
 
 const { updateTemplate } = await import("./update-template");
@@ -56,9 +50,6 @@ const template = (
   source: "src://project",
   scriptRef: "script.js",
   outputPattern: "out/%s.mp4",
-  description: null,
-  tags: [],
-  youtubeTargetId: null,
   assets: [],
   ...overrides,
 });
@@ -72,9 +63,6 @@ const input = (
   source: "src://project",
   scriptRef: "script.js",
   outputPattern: "out/%s.mp4",
-  description: undefined,
-  tags: [],
-  youtubeTargetId: undefined,
   assets: [],
   ...overrides,
 });
@@ -83,7 +71,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   findGalleryFileIdsInDepartment.mockResolvedValue(new Set());
   departmentExists.mockResolvedValue(true);
-  findConnectedYoutubeTargetForDepartment.mockResolvedValue(null);
   updateTemplateWithAssets.mockResolvedValue(template());
 });
 
@@ -227,21 +214,6 @@ describe("updateTemplate — Department transfer (ADR-0040)", () => {
               defaultFileId: "file-only-in-dept-a",
             },
           ],
-        }),
-      ),
-    ).rejects.toMatchObject({ kind: "business_rule" });
-    expect(updateTemplateWithAssets).not.toHaveBeenCalled();
-  });
-
-  it("rejects a transfer that would orphan the youtubeTargetId in the target department", async () => {
-    findTemplateInScope.mockResolvedValue(template({ departmentId: "dept-a" }));
-    findConnectedYoutubeTargetForDepartment.mockResolvedValue(null); // not assigned to dept-b
-    await expect(
-      updateTemplate(
-        actor({ role: "ADMIN" }),
-        input({
-          departmentId: "dept-b",
-          youtubeTargetId: "target-only-in-dept-a",
         }),
       ),
     ).rejects.toMatchObject({ kind: "business_rule" });

@@ -18,8 +18,9 @@ video. It:
    the Telegram bot.
 3. Exposes an authenticated **Worker REST API** that an external **Render Worker** polls
    to claim jobs, report progress/state, and upload results.
-4. On completion, optionally delivers the video to **YouTube** and/or **Telegram**, and
-   notifies the operator in-app.
+4. On completion, notifies the operator via Telegram (best-effort). Studio does not
+   upload rendered Jobs to YouTube or anywhere else (ADR-0041) — a Job's lifecycle ends
+   at `RENDERED`.
 5. Manages a **File Gallery** of reusable media assets.
 
 The actual rendering engine and the queue between "queued" and "claimed" are **external**
@@ -48,8 +49,8 @@ Studio is one Next.js application (App Router). Internally it is strictly layere
 ┌───────────────▼──────────────────────────────────────────────────────┐
 │  Infrastructure                                                       │
 │  • Repositories (Prisma) — only place raw queries live               │
-│  • Adapters: YouTube API, Telegram Bot API, object/file storage,     │
-│    media tooling (ffmpeg/ImageMagick via execFile), clock, ids       │
+│  • Adapters: Telegram Bot API, object/file storage,                  │
+│    media tooling (ffmpeg via execFile), clock, ids                   │
 └───────────────┬──────────────────────────────────────────────────────┘
 ┌───────────────▼──────────────────────────────────────────────────────┐
 │  PostgreSQL (Prisma)   +   File/object storage   +   External APIs   │
@@ -70,13 +71,13 @@ Studio is one Next.js application (App Router). Internally it is strictly layere
 
 ## 3. Canonical flows
 
-| Trigger                              | Path                                                                           |
-| ------------------------------------ | ------------------------------------------------------------------------------ |
-| Operator does something in the panel | `UI → Server Action → Use Case → Repository → Prisma`                          |
-| Server-side read for a page          | `Server Component → Use Case (or read model) → Repository → Prisma`            |
-| Render Worker calls Studio           | `Worker → Route Handler (app/api/worker) → Use Case → Repository → Prisma`     |
-| Telegram user interacts              | `Telegram → Telegram Adapter → Use Case → Repository → Prisma`                 |
-| Job finished, deliver video          | `Use Case → YouTube Adapter / Telegram Adapter` (durably, not fire-and-forget) |
+| Trigger                              | Path                                                                       |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| Operator does something in the panel | `UI → Server Action → Use Case → Repository → Prisma`                      |
+| Server-side read for a page          | `Server Component → Use Case (or read model) → Repository → Prisma`        |
+| Render Worker calls Studio           | `Worker → Route Handler (app/api/worker) → Use Case → Repository → Prisma` |
+| Telegram user interacts              | `Telegram → Telegram Adapter → Use Case → Repository → Prisma`             |
+| Job finished, notify operator        | `Use Case → Telegram Adapter` (best-effort — never blocks the Job)         |
 
 Detailed sequences: [data-flow.md](data-flow.md).
 
@@ -106,9 +107,8 @@ See [tech-stack.md](tech-stack.md) and [integrations/](../integrations/). Summar
 | PostgreSQL            | All Studio persistence                                 | Studio                       |
 | File / object storage | Media bytes (gallery assets, job artifacts)            | Studio (storage impl TBD)    |
 | Render Worker         | Performs rendering                                     | External                     |
-| YouTube Data API      | Publishes finished videos                              | External                     |
 | Telegram Bot API      | Conversational UI + notifications                      | External                     |
-| ffmpeg / ImageMagick  | Screenshot & thumbnail generation, media normalization | Studio host (invoked safely) |
+| ffmpeg                | Screenshot & thumbnail generation, media normalization | Studio host (invoked safely) |
 
 ## 6. Key differences from legacy (at a glance)
 

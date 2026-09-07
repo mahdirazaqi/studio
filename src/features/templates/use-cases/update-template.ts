@@ -7,7 +7,6 @@ import {
 } from "@/features/templates/repository/template-repository";
 import { departmentExists } from "@/features/departments/repository/department-repository";
 import { verifyAssetFileReferences } from "@/features/templates/use-cases/verify-file-references";
-import { verifyYoutubeTargetReference } from "@/features/templates/use-cases/verify-youtube-target";
 import type { UpdateTemplateInput } from "@/features/templates/schemas/update-template.schema";
 
 /**
@@ -22,11 +21,10 @@ import type { UpdateTemplateInput } from "@/features/templates/schemas/update-te
  * client — `requireRole` gates the transfer branch itself, not just a
  * capability floor a crafted request could otherwise slip past). The target
  * department must actually exist. Every dependent reference — asset
- * `defaultFileId`s, `youtubeTargetId` — is **re-verified against the target
- * department**, not the original: `verifyAssetFileReferences`/
- * `verifyYoutubeTargetReference` already do exactly this check for a plain
- * edit, so a transfer that would leave the Template pointing at another
- * department's Files/Target is rejected with the same clean `business_rule`
+ * `defaultFileId`s — is **re-verified against the target department**, not
+ * the original: `verifyAssetFileReferences` already does exactly this check
+ * for a plain edit, so a transfer that would leave the Template pointing at
+ * another department's Files is rejected with the same clean `business_rule`
  * error a same-department edit would get, never silently transferred anyway.
  *
  * **Historical integrity is unaffected by a transfer** (docs/domain/jobs.md
@@ -65,10 +63,6 @@ export async function updateTemplate(
   }
 
   await verifyAssetFileReferences(targetDepartmentId, input.assets);
-  const youtubeTargetId = await verifyYoutubeTargetReference(
-    targetDepartmentId,
-    input.youtubeTargetId,
-  );
 
   return updateTemplateWithAssets({
     templateId: existing.id,
@@ -78,9 +72,6 @@ export async function updateTemplate(
     source: input.source,
     scriptRef: input.scriptRef,
     outputPattern: input.outputPattern,
-    description: input.description ?? null,
-    tags: input.tags,
-    youtubeTargetId,
     assets: input.assets.map((asset) => ({
       key: asset.key,
       kind: asset.kind,

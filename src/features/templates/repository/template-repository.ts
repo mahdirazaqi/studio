@@ -59,9 +59,6 @@ const SAFE_TEMPLATE_DETAIL_SELECT = {
   source: true,
   scriptRef: true,
   outputPattern: true,
-  description: true,
-  tags: true,
-  youtubeTargetId: true,
   assets: {
     select: {
       id: true,
@@ -88,9 +85,6 @@ function toSafeTemplateDetail(row: SafeTemplateDetailRow): SafeTemplateDetail {
     source: row.source,
     scriptRef: row.scriptRef,
     outputPattern: row.outputPattern,
-    description: row.description,
-    tags: row.tags,
-    youtubeTargetId: row.youtubeTargetId,
     assets: row.assets.map((asset): SafeTemplateAsset => ({
       id: asset.id,
       key: asset.key,
@@ -121,9 +115,6 @@ export interface CreateTemplateData {
   source: string;
   scriptRef: string;
   outputPattern: string;
-  description: string | null;
-  tags: string[];
-  youtubeTargetId: string | null;
   assets: TemplateAssetData[];
 }
 
@@ -151,9 +142,6 @@ export async function createTemplateWithAssets(
         source: data.source,
         scriptRef: data.scriptRef,
         outputPattern: data.outputPattern,
-        description: data.description,
-        tags: data.tags,
-        youtubeTargetId: data.youtubeTargetId,
         assets: {
           create: data.assets.map((asset, index) => ({
             key: asset.key,
@@ -199,9 +187,6 @@ export interface UpdateTemplateData {
   source: string;
   scriptRef: string;
   outputPattern: string;
-  description: string | null;
-  tags: string[];
-  youtubeTargetId: string | null;
   assets: TemplateAssetData[];
 }
 
@@ -229,9 +214,6 @@ export async function updateTemplateWithAssets(
           source: data.source,
           scriptRef: data.scriptRef,
           outputPattern: data.outputPattern,
-          description: data.description,
-          tags: data.tags,
-          youtubeTargetId: data.youtubeTargetId,
           assets: {
             create: data.assets.map((asset, index) => ({
               key: asset.key,

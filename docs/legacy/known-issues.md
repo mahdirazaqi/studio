@@ -157,8 +157,9 @@ Malformed ObjectId strings passed to `findById` produce unhandled 500s instead o
 the canonical module — ~20 other modules do the same, producing many independent
 instances. A NestJS-specific anti-pattern.
 
-- **Studio:** single adapter instance via `server/adapters/youtube`; no DI duplication
-  (different framework anyway).
+- **Studio:** moot — Studio doesn't upload to YouTube at all (ADR-0041), so there is no
+  such adapter to duplicate; DI duplication isn't a pattern that applies regardless
+  (different framework).
 
 ### K18 — Sequential `find` + `countDocuments` on every list
 

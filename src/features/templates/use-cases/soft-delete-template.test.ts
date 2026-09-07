@@ -37,9 +37,6 @@ const template = (
   source: "s",
   scriptRef: "sr",
   outputPattern: "op",
-  description: null,
-  tags: [],
-  youtubeTargetId: null,
   assets: [],
   ...overrides,
 });

@@ -9,7 +9,6 @@ import type { SafeJob, SafeJobDetail } from "@/features/jobs/domain/job";
 import type { SafeTemplate } from "@/features/templates/domain/template";
 import {
   encodeConfirmCreation,
-  encodeDeliveryChoice,
   encodeJobCancel,
   encodeJobDetail,
   encodeJobRetry,
@@ -67,15 +66,6 @@ export function templatePickerKeyboard(
     ),
   );
   return Markup.inlineKeyboard(chunk(buttons, 2));
-}
-
-export function deliveryChoiceKeyboard() {
-  return Markup.inlineKeyboard([
-    [
-      Markup.button.callback("Yes", encodeDeliveryChoice(true)),
-      Markup.button.callback("No", encodeDeliveryChoice(false)),
-    ],
-  ]);
 }
 
 export function confirmKeyboard() {

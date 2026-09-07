@@ -8,7 +8,6 @@ import { RotateCw, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cancelJobAction } from "@/features/jobs/actions/cancel-job.action";
 import { retryJobAction } from "@/features/jobs/actions/retry-job.action";
-import { retryJobDeliveryAction } from "@/features/delivery/actions/retry-job-delivery.action";
 import {
   canCancelFromState,
   canRetryFromState,
@@ -27,17 +26,11 @@ export function JobActions({
   jobId,
   jobTitle,
   state,
-  canRetryDelivery = false,
   size = "default",
 }: {
   jobId: string;
   jobTitle: string;
   state: JobState;
-  /** `true` only when the job errored with an already-rendered video still
-   * available and YouTube delivery configured (Phase 9,
-   * `features/delivery/use-cases/retry-job-delivery.ts` re-validates this
-   * independently regardless of what got rendered here). */
-  canRetryDelivery?: boolean;
   size?: "default" | "sm";
 }) {
   const router = useRouter();
@@ -70,41 +63,12 @@ export function JobActions({
     });
   }
 
-  function handleRetryDelivery() {
-    if (
-      !window.confirm(
-        `Retry YouTube delivery for "${jobTitle}"? This does not re-render the job.`,
-      )
-    )
-      return;
-    startTransition(async () => {
-      const result = await retryJobDeliveryAction({ jobId });
-      if (!result.ok) {
-        toast.error(result.error.message);
-        return;
-      }
-      toast.success(`Delivery retried for "${jobTitle}".`);
-      router.refresh();
-    });
-  }
-
   const canCancel = canCancelFromState(state);
   const canRetry = canRetryFromState(state);
-  if (!canCancel && !canRetry && !canRetryDelivery) return null;
+  if (!canCancel && !canRetry) return null;
 
   return (
     <div className="flex items-center gap-2">
-      {canRetryDelivery ? (
-        <Button
-          type="button"
-          variant="outline"
-          size={size}
-          disabled={isPending}
-          onClick={handleRetryDelivery}
-        >
-          <RotateCw /> Retry delivery
-        </Button>
-      ) : null}
       {canCancel ? (
         <Button
           type="button"

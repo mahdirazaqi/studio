@@ -2,23 +2,26 @@
 
 **Implemented, Phase 6** (this page's business rules); **the Worker REST API is
 implemented, Phase 7** (see [../integrations/worker-api.md](../integrations/worker-api.md),
-ADR-0032/0033/0034); **Telegram is implemented, Phase 8** (see
+ADR-0032/0033/0034/0040); **Telegram is implemented, Phase 8** (see
 [../integrations/telegram.md](../integrations/telegram.md), ADR-0035–0038) — it creates
 Jobs through the unmodified `createJob`/`cancelJob`/`retryJob` use cases below, adding no
-Job-domain logic of its own. **Completion & delivery (rendered-result acceptance, media
-processing, YouTube/Telegram delivery) implemented, Phase 9** (see
-[../integrations/youtube.md](../integrations/youtube.md), ADR-0039) — see "Completion &
-delivery" below; the pipeline this page describes is now real end-to-end.
-[../architecture/decisions.md](../architecture/decisions.md) ADR-0028/0029/0030/0031/0039
+Job-domain logic of its own. **Rendered-result acceptance and media processing
+implemented, Phase 9** (ADR-0039) — see "Rendered result" below.
+[../architecture/decisions.md](../architecture/decisions.md) ADR-0028/0029/0031/0039/0041
 records the decisions behind the shape below, and
 [`prisma/schema.prisma`](../../prisma/schema.prisma) is the final schema. **Still not
 implemented:** rendering itself (the external Render Worker's own job).
 
+**Studio does not upload rendered Jobs to YouTube (or anywhere else) — ADR-0041.** A
+Job's lifecycle ends at `RENDERED`, the moment the Worker's rendered result is accepted.
+This page and the rest of the schema were revised accordingly; see ADR-0041 for the full
+removal record if you're looking for what used to exist here.
+
 ## Purpose
 
 A **Job** is one concrete render request: a Template with every asset slot filled,
-tracked through a state machine from creation to delivery. **A Job is the permanent
-historical record of the pipeline.**
+tracked through a state machine from creation to a successful render (or a failure).
+**A Job is the permanent historical record of the pipeline.**
 
 ---
 
@@ -36,7 +39,8 @@ Rendered(5) Uploading(6) Uploaded(7) Error(8) Cancel(9)`. `Downloading`/`Started
   `changeStateJob` accepted **any integer** with no validation.
 - On `Rendered`: `renderedAt` set, Telegram DM + in-app system message. On `Uploaded`:
   `uploadedAt` set, Telegram DM only. On `Error`: Telegram DM only (reason logged
-  server-side only).
+  server-side only). Legacy's `Uploaded` meant "successfully delivered to YouTube (or no
+  delivery was needed)" — Studio has no equivalent concept, see ADR-0041.
 - `addJob`: if `upload:true`, checks a **global** daily cap of 3 upload-jobs across the
   entire system; loads template (does **not** check `disabled`); for each template asset,
   requires a value in `input.assets`; `data` → literal text, else → `File.findById`
@@ -73,30 +77,28 @@ Rendered(5) Uploading(6) Uploaded(7) Error(8) Cancel(9)`. `Downloading`/`Started
 3. **State transitions are explicit and validated** (ADR-0013, ADR-0029) — every write
    to `Job.state` is a single atomic conditional `UPDATE`, never a read-then-write.
 4. **Job claiming by the Worker is atomic** — `SELECT ... FOR UPDATE SKIP LOCKED`, one
-   raw SQL statement. Manually verified: two concurrent claims never return the same Job.
+   raw SQL statement, filtered by the Worker's own authenticated Department scope
+   (ADR-0040). Manually verified: two concurrent claims never return the same Job.
 5. **Retry never destroys the original** — it creates a new linked Job, copying the
    original's snapshot and assets verbatim (ADR-0031).
 6. **Every Job belongs to a Department**, resolved from its Template — never a separate,
    client-supplied field — and is authorized accordingly.
-
-**Not yet built:** delivery (`DELIVERING`/`UPLOADED` are real, reachable states, but no
-adapter drives a Job into `DELIVERING` yet — see "Completion & delivery" below).
+7. **A Job's lifecycle ends at `RENDERED`** (ADR-0041) — there is no delivery step after
+   a successful render. `RENDERED` is a terminal state, exactly like `ERROR`/`CANCELED`.
 
 ### State machine
 
 Implemented in `features/jobs/domain/job-state-machine.ts`. Legacy mapping in
 [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).
 
-| State        | Meaning                                                                       | Set by                              |
-| ------------ | ----------------------------------------------------------------------------- | ----------------------------------- |
-| `QUEUED`     | Created, waiting for a Worker.                                                | `createJob` / `retryJob`            |
-| `CLAIMED`    | An atomic claim assigned it to a Worker.                                      | `claimNextJob`                      |
-| `RENDERING`  | Worker is actively rendering (covers legacy Downloading/Started/InProgress).  | Worker (via `transitionJob`)        |
-| `RENDERED`   | Render finished; result file uploaded/attached.                               | Worker (via `transitionJob`)        |
-| `DELIVERING` | Post-render delivery (YouTube/Telegram) in progress.                          | Studio (future delivery module)     |
-| `UPLOADED`   | All required delivery succeeded (or none was needed). **Terminal (success).** | Worker/Studio (via `transitionJob`) |
-| `ERROR`      | Render or delivery failed; carries `errorReason`.                             | Worker/Studio (via `transitionJob`) |
-| `CANCELED`   | Canceled by an operator. **Terminal.**                                        | `cancelJob`                         |
+| State       | Meaning                                                                      | Set by                              |
+| ----------- | ---------------------------------------------------------------------------- | ----------------------------------- |
+| `QUEUED`    | Created, waiting for a Worker.                                               | `createJob` / `retryJob`            |
+| `CLAIMED`   | An atomic claim assigned it to a Worker.                                     | `claimNextJob`                      |
+| `RENDERING` | Worker is actively rendering (covers legacy Downloading/Started/InProgress). | Worker (via `transitionJob`)        |
+| `RENDERED`  | Render finished; result file accepted. **Terminal (success).**               | Worker (via `transitionJob`)        |
+| `ERROR`     | Render failed; carries `errorReason`.                                        | Worker/Studio (via `transitionJob`) |
+| `CANCELED`  | Canceled by an operator. **Terminal.**                                       | `cancelJob`                         |
 
 Allowed transitions (implemented, `job-state-machine.ts`):
 
@@ -104,10 +106,12 @@ Allowed transitions (implemented, `job-state-machine.ts`):
 QUEUED    → CLAIMED, CANCELED
 CLAIMED   → RENDERING, QUEUED (requeue on worker timeout — not yet swept), ERROR, CANCELED
 RENDERING → RENDERED, ERROR, CANCELED
-RENDERED  → DELIVERING, UPLOADED (no delivery needed), ERROR
-DELIVERING→ UPLOADED, ERROR
-ERROR, UPLOADED, CANCELED → (terminal — no outgoing transitions)
+RENDERED, ERROR, CANCELED → (terminal — no outgoing transitions)
 ```
+
+**Revised, ADR-0041: `DELIVERING`/`UPLOADED` removed.** Studio no longer uploads a
+rendered Job anywhere — `RENDERED` is now the terminal, successful completion state
+itself, reached directly from `RENDERING`.
 
 - Any transition not in the map is **rejected** — `transitionJob` checks it before
   attempting the write, and the write itself (`transitionJobRow`'s conditional `UPDATE
@@ -128,31 +132,30 @@ QUEUED` edge exists in the graph for it, but no sweep exists yet — OD-31 (Work
 
 ### Fields (implemented; final schema in [`prisma/schema.prisma`](../../prisma/schema.prisma))
 
-| Field                                                               | Notes                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                                                | Permanent.                                                                                                                                                                                                                                                                                                                        |
-| `departmentId`                                                      | Required. **Derived from the chosen Template's department** — never a separate, client-supplied field (Phase 6 brief §4).                                                                                                                                                                                                         |
-| `createdByUserId`                                                   | Permanent reference. On a retry, this stays the **original creator** (legacy behavior, kept) — see `retriedByUserId`.                                                                                                                                                                                                             |
-| `templateId`                                                        | FK to the Template (kept resolvable forever — Template is soft-deleted only). Convenience/active-dependency only — never the source of truth for a historical Job's meaning.                                                                                                                                                      |
-| `snapshot`                                                          | **Immutable JSONB.** Template render fields + ordered asset-slot definitions at creation. See "Job assets" below for the _resolved values_, which are **not** in this column (ADR-0028).                                                                                                                                          |
-| `title`                                                             | Derived from `DATA` asset values at creation, joined `"                                                                                                                                                                                                                                                                           | "` (legacy rule kept). Stored, never recomputed. |
-| `state`                                                             | From the state machine. Written only via `transitionJobRow`'s atomic conditional update.                                                                                                                                                                                                                                          |
-| `progress`                                                          | 0–100, nullable until the Worker's first report. Rejected once the Job is terminal.                                                                                                                                                                                                                                               |
-| `durationSeconds`                                                   | Nullable until reported. Rejected once the Job is terminal.                                                                                                                                                                                                                                                                       |
-| `deliverToYouTube`                                                  | Whether to publish to YouTube on completion (legacy `upload`). Part of the Job's immutable configuration — counted by the daily upload quota (ADR-0030) when `true`.                                                                                                                                                              |
-| `retryOfJobId`, `attemptNumber`                                     | Non-destructive retry lineage (ADR-0031). `attemptNumber` is 1 for an original, `original.attemptNumber + 1` for a retry.                                                                                                                                                                                                         |
-| `retriedByUserId`, `retryReason`                                    | Who triggered a retry-created Job, and why (optional).                                                                                                                                                                                                                                                                            |
-| `canceledByUserId`, `canceledAt`, `cancelReason`                    | Set once, by `cancelJob`. Never resets `progress`/`durationSeconds` (resolves OD-26).                                                                                                                                                                                                                                             |
-| `errorReason`                                                       | Human-readable failure reason. Surfaced in the UI; never a stack trace.                                                                                                                                                                                                                                                           |
-| `claimedAt`, `startedAt`, `renderedAt`, `deliveredAt`, `uploadedAt` | Timeline — each set once, the first time `transitionJob` reaches the corresponding state. Never reset.                                                                                                                                                                                                                            |
-| `videoFileId`, `screenshotFileId`, `thumbnailFileId`                | **Implemented, Phase 9.** The rendered result and its derived images (`JOB_ARTIFACT` Files), set atomically together with the `RENDERING -> RENDERED` transition. `null` until a Worker successfully posts a result. `onDelete: SetNull` — `cleanupJobArtifacts` may hard-delete the video File once delivery no longer needs it. |
-| `deliveryAttempts`                                                  | **Implemented, Phase 9.** One `DeliveryAttempt` row per delivery attempt per provider (`TELEGRAM`/`YOUTUBE`) — see [../integrations/youtube.md](../integrations/youtube.md) "Idempotency & concurrency".                                                                                                                          |
-| `createdAt`, `updatedAt`                                            |                                                                                                                                                                                                                                                                                                                                   |
+| Field                                                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                                                 | Permanent.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `departmentId`                                       | Required. **Derived from the chosen Template's department** — never a separate, client-supplied field (Phase 6 brief §4).                                                                                                                                                                                                                                                                                                                                                      |
+| `createdByUserId`                                    | Permanent reference. On a retry, this stays the **original creator** (legacy behavior, kept) — see `retriedByUserId`.                                                                                                                                                                                                                                                                                                                                                          |
+| `templateId`                                         | FK to the Template (kept resolvable forever — Template is soft-deleted only). Convenience/active-dependency only — never the source of truth for a historical Job's meaning.                                                                                                                                                                                                                                                                                                   |
+| `snapshot`                                           | **Immutable JSONB.** Template render fields + ordered asset-slot definitions at creation. See "Job assets" below for the _resolved values_, which are **not** in this column (ADR-0028).                                                                                                                                                                                                                                                                                       |
+| `title`                                              | Derived from `DATA` asset values at creation, joined `" \| "` (legacy rule kept). Stored, never recomputed.                                                                                                                                                                                                                                                                                                                                                                    |
+| `state`                                              | From the state machine. Written only via `transitionJobRow`'s atomic conditional update.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `progress`                                           | 0–100, nullable until the Worker's first report. Rejected once the Job is terminal.                                                                                                                                                                                                                                                                                                                                                                                            |
+| `durationSeconds`                                    | Nullable until reported. Rejected once the Job is terminal.                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `retryOfJobId`, `attemptNumber`                      | Non-destructive retry lineage (ADR-0031). `attemptNumber` is 1 for an original, `original.attemptNumber + 1` for a retry.                                                                                                                                                                                                                                                                                                                                                      |
+| `retriedByUserId`, `retryReason`                     | Who triggered a retry-created Job, and why (optional).                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `canceledByUserId`, `canceledAt`, `cancelReason`     | Set once, by `cancelJob`. Never resets `progress`/`durationSeconds` (resolves OD-26).                                                                                                                                                                                                                                                                                                                                                                                          |
+| `errorReason`                                        | Human-readable failure reason. Surfaced in the UI; never a stack trace.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `claimedAt`, `startedAt`, `renderedAt`               | Timeline — each set once, the first time `transitionJob` reaches the corresponding state. Never reset.                                                                                                                                                                                                                                                                                                                                                                         |
+| `videoFileId`, `screenshotFileId`, `thumbnailFileId` | **Implemented, Phase 9.** The rendered result and its derived images (`JOB_ARTIFACT` Files), set atomically together with the `RENDERING -> RENDERED` transition — the Job's final, successful completion (ADR-0041). `null` until a Worker successfully posts a result. `onDelete: SetNull` — `cleanupJobArtifacts` may hard-delete the video File once it's no longer needed. Independent of any delivery destination — these exist for the dashboard's own Job detail view. |
+| `createdAt`, `updatedAt`                             |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
-**Not present, deliberately:** `deliverToTelegram` — resolved, Phase 9 (OD-15): Telegram
-notification is automatic and best-effort for any linked creator, with no per-Job flag,
-matching legacy's own unconditional `sendTelegramMessage` calls exactly — see
-[../integrations/youtube.md](../integrations/youtube.md) "Delivery".
+**Removed, ADR-0041:** `deliverToYouTube`, `deliveredAt`, `uploadedAt` — Studio has no
+YouTube (or any other external) delivery step, so there was nothing left for these to
+describe. **Not present, deliberately:** `deliverToTelegram` — Telegram notification is
+automatic and best-effort for any linked creator, with no per-Job flag, matching
+legacy's own unconditional `sendTelegramMessage` calls.
 
 ### Job assets
 
@@ -198,9 +201,10 @@ Implemented in `features/jobs/use-cases/create-job.ts` +
 5. Inject the `SCRIPT` asset from the Template's `scriptRef`.
 6. Build the immutable `snapshot` (Template render fields + ordered slot definitions,
    as they were).
-7. If `deliverToYouTube`: enforce the upload cap (ADR-0030) **inside the same
-   transaction** as the insert.
-8. Create the Job `state = QUEUED` with its `JobAsset` rows, atomically.
+7. Create the Job `state = QUEUED` with its `JobAsset` rows.
+
+**No upload cap, no delivery configuration** (ADR-0041) — there is nothing left in Job
+creation that needs an upload quota or a delivery-destination check.
 
 **Aspect-ratio validation is not implemented.** A Template slot's `imageRatio` is
 recorded on the slot definition and copied into the snapshot, but Job creation does not
@@ -209,28 +213,28 @@ yet compare an uploaded image's actual dimensions against it — no feature does
 
 ### Worker claim (atomic)
 
-`claimNextJob()` (`features/jobs/use-cases/claim-next-job.ts`, no `Actor` — see
-"Worker identity vs User identity" below) selects the oldest `QUEUED` Job and moves it to
-`CLAIMED` in one atomic raw SQL statement: `UPDATE jobs SET state = 'CLAIMED', ... WHERE
-id = (SELECT id FROM jobs WHERE state = 'QUEUED' ORDER BY "createdAt" FOR UPDATE SKIP
-LOCKED LIMIT 1) RETURNING id`. Two concurrent Workers can never receive the same Job —
-manually verified against the real database with two genuinely concurrent calls, and
-again at the HTTP layer once Phase 7 exposed it. Legacy's non-atomic `fetch` is exactly
-what this fixes. **Exposed over REST, Phase 7**: `POST /api/worker/v1/jobs/next` calls
-this directly, after its own Worker-credential authentication — see
-[../integrations/worker-api.md](../integrations/worker-api.md).
+`claimNextJob(allowedDepartmentIds)` (`features/jobs/use-cases/claim-next-job.ts`, no
+`Actor` — see "Worker identity vs User identity" below) selects the oldest `QUEUED` Job
+**within the authenticated Worker's Department scope** and moves it to `CLAIMED` in one
+atomic raw SQL statement: `UPDATE jobs SET state = 'CLAIMED', ... WHERE id = (SELECT id
+FROM jobs WHERE state = 'QUEUED' AND "departmentId" = ANY(allowedDepartmentIds) ORDER BY
+"createdAt" FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id`. Two concurrent Workers can
+never receive the same Job — manually verified against the real database with two
+genuinely concurrent calls, and again at the HTTP layer once Phase 7 exposed it.
+Legacy's non-atomic `fetch` is exactly what this fixes. **Exposed over REST, Phase 7**:
+`POST /api/worker/v1/jobs/next` calls this directly, after its own Worker-credential
+authentication — see [../integrations/worker-api.md](../integrations/worker-api.md).
 
-Global, not Department-scoped, FIFO by `createdAt` — matches legacy's single shared
-queue. Priority/fairness/capability filtering are not planned (unchanged OPEN DECISION,
-[../integrations/worker-api.md](../integrations/worker-api.md)).
+FIFO by `createdAt` within scope — matches legacy's single shared queue, narrowed by
+Department since Phase 11 (ADR-0040). Priority/fairness/capability filtering are not
+planned (unchanged OPEN DECISION, [../integrations/worker-api.md](../integrations/worker-api.md)).
 
 ### Cancellation
 
 Implemented in `features/jobs/use-cases/cancel-job.ts`:
 
 - Allowed from `QUEUED`, `CLAIMED`, `RENDERING` (`CANCELABLE_STATES`) — not from
-  `RENDERED`, `DELIVERING`, `UPLOADED`, `ERROR`, `CANCELED`. Matches legacy intent,
-  enforced by the state machine.
+  `RENDERED`, `ERROR`, `CANCELED`. Matches legacy intent, enforced by the state machine.
 - **Idempotent**: canceling an already-canceled Job returns it unchanged, no error.
 - Sets `state = CANCELED`, records `canceledByUserId`/`canceledAt`/`cancelReason`.
   **Never resets `progress`/`durationSeconds`/the timeline** (resolves OD-26 — historical
@@ -259,65 +263,31 @@ Implemented in `features/jobs/use-cases/retry-job.ts` (ADR-0031):
   `retryReason` (optional).
 - The original Job is **never modified and never deleted** — verified end-to-end: after
   a retry, the original's state/timeline are untouched.
-- If `deliverToYouTube`: the upload cap is re-checked inside the same transaction,
-  exactly like a fresh creation.
 - Concurrency: `SELECT ... FOR UPDATE` on the original Job row serializes concurrent
-  retry attempts of the _same_ Job (docs/domain/jobs.md §46's "Retry Idempotency" — not
-  a generic idempotency-key framework; see ADR-0031).
+  retry attempts of the _same_ Job ("Retry Idempotency" — not a generic idempotency-key
+  framework; see ADR-0031).
 - Retry lineage is fully traceable via `retryOfJobId` + `attemptNumber` — a simple,
   bounded chain, not a general graph.
 
-### Job Retry vs Delivery Retry — implemented, Phase 9 (resolves OD-13, ADR-0039)
+**Removed, ADR-0041: "Job Retry vs Delivery Retry."** Delivery Retry
+(`retryJobDelivery`) no longer exists — there is no delivery to retry. Job Retry itself
+is completely unaffected by that removal; it never was the same operation.
 
-Two different operations that must never be confused:
+### Rendered result — implemented, Phase 9 (ADR-0039, revised ADR-0041)
 
-- **Job Retry** (`retryJob`, above) re-runs the Job/render lifecycle: a brand-new Job row,
-  `state: QUEUED`, picked up by a Worker from scratch.
-- **Delivery Retry** (`retryJobDelivery`,
-  `features/delivery/use-cases/retry-job-delivery.ts`) retries delivery of an
-  **already-rendered** result — it never re-renders and never creates a new Job. Only
-  legal from `ERROR`, only when the Job still has a rendered video
-  (`videoFileId`) and was configured for YouTube delivery, and only when no
-  `DeliveryAttempt` for that provider has already `SUCCEEDED`. It calls `transitionJobRow`
-  directly for the one-off `ERROR -> DELIVERING` edge — deliberately **not** added to
-  `job-state-machine.ts`'s general transition graph, because `ERROR` must stay reported as
-  terminal for `updateJobProgress`/`updateJobDuration`'s own use of `isTerminalState`; see
-  ADR-0039 point 4 for the full reasoning. A Job whose _render_ failed (no video exists)
-  cannot use Delivery Retry — retry the Job itself instead.
-
-### Completion & delivery — implemented, Phase 9 (ADR-0039)
-
-The `RENDERED`/`DELIVERING`/`UPLOADED` states and their timeline timestamps
-(`renderedAt`/`deliveredAt`/`uploadedAt`) are now driven by a real, tested pipeline:
+`RENDERED` and its timeline timestamp (`renderedAt`) are driven by a real, tested path:
 
 - `POST /api/worker/v1/jobs/:id/result` accepts the rendered result (Studio's equivalent
   of legacy's `POST /jobs/:id/upload`) — `features/delivery/use-cases/
-accept-job-result.ts`.
+accept-job-result.ts`. Department-scoped like every other Worker Job operation
+  (ADR-0040) and idempotent against a duplicate/racing request.
 - `features/delivery/use-cases/generate-render-artifacts.ts` (`MediaProcessingService`)
   generates a screenshot + thumbnail via `ffmpeg` and creates all three `JOB_ARTIFACT`
   File rows, set atomically together with the `RENDERING -> RENDERED` transition.
-- `features/delivery/use-cases/deliver-job-result.ts` (the Delivery Orchestrator) drives
-  `RENDERED -> DELIVERING -> UPLOADED`/`ERROR`, records `DeliveryAttempt` rows, and sends
-  best-effort Telegram notifications.
-
-Full detail, including idempotency/concurrency guarantees and the "no delivery needed"
-fast path, lives in [../integrations/youtube.md](../integrations/youtube.md) — this
-page's own state-machine diagram above did not change: Phase 9 is entirely a new set of
-callers into the existing `transitionJob`/`transitionJobRow` primitives, not a second Job
-lifecycle.
-
-### Upload cap
-
-Implemented (ADR-0030, resolves OD-01's scope/concurrency questions for now): global,
-UTC-day, count-based — `JOB_UPLOAD_DAILY_CAP` (default 3, matching legacy, configurable
-via env). Enforced with a Postgres advisory transaction lock keyed by the UTC date,
-taken before the count-then-insert inside the same transaction as Job creation — see
-ADR-0030 for the full concurrency reasoning. Manually verified: 3 upload-enabled Jobs
-succeed, a 4th is rejected with a clear message, a non-upload Job is unaffected, and two
-concurrent creations never both slip past the cap.
-
-**Still open:** whether a future per-YouTube-target cap should replace the global one —
-no `YouTubeTarget` model exists yet to scope against.
+- Once that atomic transition commits, `accept-job-result.ts` sends one best-effort
+  "rendered" Telegram notification (if the Job's creator has a linked Telegram account)
+  and returns. **No further state transition is attempted, and no external delivery
+  call is ever made** — `RENDERED` is the Job's final state.
 
 ### Historical integrity for Jobs
 
@@ -336,10 +306,12 @@ The Render Worker is **never** a `User` and never becomes an `Actor` (Phase 6 br
 docs/architecture/authorization.md "Non-user principals"). `claimNextJob`,
 `updateJobProgress`, `updateJobDuration`, and the underlying `transitionJob` primitive
 take **no `Actor` parameter at all** — they are system/Worker-level operations, not
-gated by the human capability registry. This kept the application-service boundary ready
-for three distinct callers (User, Worker, a future system/scheduled caller) without
-inventing a fake User account for the Worker. **Implemented, Phase 7**: the Worker Route
-Handlers under `src/app/api/worker/v1/**` authenticate the Worker's service credential
-(`authenticateWorker`, ADR-0032) first, then call these same functions directly — no
+gated by the human capability registry. `claimNextJob`/`getJobForWorker`/
+`transitionJobForWorker`/`updateJobProgress`/`updateJobDuration`/`acceptJobResult` all
+take an `allowedDepartmentIds: string[]` (from the authenticated `WorkerApiKey`,
+ADR-0040) instead — that is not an `Actor` and must not be treated like one.
+**Implemented, Phase 7 (Department scoping, Phase 11)**: the Worker Route Handlers
+under `src/app/api/worker/v1/**` authenticate the Worker's service credential
+(`authenticateWorker`, ADR-0040) first, then call these same functions directly — no
 logic duplicated, exactly as planned. See
 [../integrations/worker-api.md](../integrations/worker-api.md).

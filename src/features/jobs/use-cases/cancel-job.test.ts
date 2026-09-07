@@ -29,7 +29,6 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   state: "QUEUED",
   progress: null,
   durationSeconds: null,
-  deliverToYouTube: false,
   retryOfJobId: null,
   attemptNumber: 1,
   createdByUserId: "user-1",
@@ -44,10 +43,7 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
     source: "s",
     scriptRef: "s.js",
     outputPattern: "op",
-    description: null,
-    tags: [],
     assetSlotDefinitions: [],
-    youtubeTarget: null,
   },
   assets: [],
   retriedByUserId: null,
@@ -60,12 +56,9 @@ const job = (overrides: Partial<SafeJobDetail> = {}): SafeJobDetail => ({
   claimedAt: null,
   startedAt: null,
   renderedAt: null,
-  deliveredAt: null,
-  uploadedAt: null,
   videoFileId: null,
   screenshotFileId: null,
   thumbnailFileId: null,
-  deliveryAttempts: [],
   ...overrides,
 });
 
@@ -118,13 +111,6 @@ describe("cancelJob", () => {
       kind: "business_rule",
     });
     expect(transitionJobRow).not.toHaveBeenCalled();
-  });
-
-  it("rejects canceling a job already in UPLOADED", async () => {
-    findJobInScope.mockResolvedValue(job({ state: "UPLOADED" }));
-    await expect(cancelJob(actor(), "job-1")).rejects.toMatchObject({
-      kind: "business_rule",
-    });
   });
 
   it("throws conflict when the job's state changes concurrently", async () => {

@@ -507,6 +507,52 @@ many-to-many and ADMIN-only management; let ADMIN transfer a Template's Departme
 idempotency guarantees; a generic multi-tenant RBAC system (still exactly three fixed
 roles); any Worker-initiated Department self-service.
 
+### Phase 12 — Remove YouTube upload entirely; simplify the Job lifecycle _(complete, ADR-0041)_
+
+**Goal:** an explicit product decision — Studio does not upload rendered Jobs to
+YouTube at this stage — removed from the actual architecture, database, services, API
+flow, dependencies, configuration, and documentation, not just hidden from the UI.
+Simplify the Job lifecycle so it ends at `RENDERED`.
+
+**Removed:** the `YouTubeTarget` model (+ `YouTubeTargetStatus` enum), `DeliveryAttempt`
+model (+ `DeliveryProvider`/`DeliveryStatus` enums), `Template.youtubeTargetId`/
+`description`/`tags`, `Job.deliverToYouTube`/`deliveredAt`/`uploadedAt`,
+`JobState.DELIVERING`/`UPLOADED`, the global daily upload quota
+(`JOB_UPLOAD_DAILY_CAP` and its advisory-lock logic), `TelegramWizardStep.ASK_DELIVERY`
+(Single Track now opens straight into asset collection, `trackCount` fixed at 1), the
+entire `features/youtube/` feature, `server/adapters/youtube/`, the `/youtube` nav
+item/page, the `googleapis` npm dependency, `YOUTUBE_CLIENT_ID`/`YOUTUBE_CLIENT_SECRET`/
+`YOUTUBE_TOKEN_ENCRYPTION_KEY`, and the `youtube:manage` authorization capability. A
+real Prisma migration dropped the corresponding tables/columns/enum values — verified
+empty (zero `YouTubeTarget`/`DeliveryAttempt` rows, no `Job.deliverToYouTube = true`, no
+non-null `Template.youtubeTargetId`/`description`/non-empty `tags`) in every environment
+checked beforehand, so the migration carries zero data-loss risk despite being a real
+schema change (not `db push`).
+
+**Kept, unchanged:** `POST /api/worker/v1/jobs/:id/result` (still mandatory — the
+Worker's only way to hand Studio the rendered bytes), `ffmpeg`-based screenshot/
+thumbnail generation and the three `JOB_ARTIFACT` Files it creates (general "view the
+result in the dashboard" functionality, independent of any delivery destination), Job
+Retry (`retryJob`, unrelated to the removed Delivery Retry), Worker authentication/
+Department scoping/atomic claiming (ADR-0040, entirely independent of YouTube).
+
+**Simplified:** the Job state machine now ends at `RENDERED` (terminal) —
+`accept-job-result.ts` no longer calls a delivery orchestrator, it sends one best-effort
+"rendered" Telegram notification and returns. Legacy Worker state codes `6` (Uploading)/
+`7` (Uploaded) are no longer mapped — a Worker sending either now gets a `422
+validation` error naming the supported values.
+
+Real end-to-end HTTP verification against Postgres confirmed the full Worker flow
+(authenticate → claim → state/progress/duration → `POST .../result` with a genuine
+`ffmpeg`-generated test video) reaches `RENDERED` directly, with no YouTube API call,
+external upload, or further state transition of any kind; a duplicate result submission
+remained idempotent; legacy codes `6`/`7` were confirmed rejected. `npm run check`/
+`npm run build` both pass; `npm install` succeeds cleanly after the `googleapis`
+removal.
+
+**Explicitly not in Phase 12:** any replacement delivery destination; a generic
+"delivery provider" abstraction sized for a future integration that doesn't exist yet.
+
 ## Working on a task (any phase)
 
 1. Read `CLAUDE.md` → the relevant `docs/` pages.

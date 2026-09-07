@@ -6,8 +6,6 @@ const STATE_LABEL: Record<JobState, string> = {
   CLAIMED: "Claimed",
   RENDERING: "Rendering",
   RENDERED: "Rendered",
-  DELIVERING: "Delivering",
-  UPLOADED: "Uploaded",
   ERROR: "Error",
   CANCELED: "Canceled",
 };
@@ -19,9 +17,7 @@ const STATE_VARIANT: Record<
   QUEUED: "outline",
   CLAIMED: "outline",
   RENDERING: "secondary",
-  RENDERED: "secondary",
-  DELIVERING: "secondary",
-  UPLOADED: "default",
+  RENDERED: "default",
   ERROR: "destructive",
   CANCELED: "outline",
 };

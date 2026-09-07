@@ -3,11 +3,16 @@
 // Phase 2: Department, User, Session. Phase 4: File. Phase 5: Template,
 // TemplateAsset. Phase 6: Job, JobAsset. Phase 8: User.phone/telegramUserId,
 // TelegramWizardState. Phase 9: Job.videoFileId/screenshotFileId/
-// thumbnailFileId, DeliveryAttempt, YouTubeTarget, Template.youtubeTargetId.
+// thumbnailFileId. Phase 11: WorkerApiKey. Phase 12 (ADR-0041): removed
+// DeliveryAttempt, YouTubeTarget, Template.youtubeTargetId/description/tags,
+// Job.deliverToYouTube/deliveredAt/uploadedAt, JobState.DELIVERING/UPLOADED,
+// TelegramWizardStep.ASK_DELIVERY — YouTube upload is no longer part of
+// Studio.
 // See docs/data/database.md and docs/architecture/decisions.md (ADR-0002,
 // ADR-0005, ADR-0006, ADR-0007, ADR-0008, ADR-0010, ADR-0011, ADR-0013,
 // ADR-0014, ADR-0020, ADR-0024, ADR-0025, ADR-0027, ADR-0028, ADR-0029,
-// ADR-0030, ADR-0031, ADR-0035, ADR-0036, ADR-0037, ADR-0038, ADR-0039) for
+// ADR-0030, ADR-0031, ADR-0035, ADR-0036, ADR-0037, ADR-0038, ADR-0040,
+// ADR-0041) for
 // the decisions behind this shape. Do not add speculative models here.
 
 generator client {
@@ -45,12 +50,11 @@ model Department {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users          User[]
-  files          File[]
-  templates      Template[]
-  jobs           Job[]
-  youtubeTargets YouTubeTarget[]
-  workerApiKeys  WorkerApiKey[]
+  users         User[]
+  files         File[]
+  templates     Template[]
+  jobs          Job[]
+  workerApiKeys WorkerApiKey[]
 
   @@map("departments")
 }
@@ -104,8 +108,7 @@ model User {
   canceledJobs Job[] @relation("JobCanceledBy")
   retriedJobs  Job[] @relation("JobRetriedBy")
 
-  createdYoutubeTargets YouTubeTarget[] @relation("YoutubeTargetCreatedBy")
-  createdWorkerApiKeys  WorkerApiKey[]  @relation("WorkerApiKeyCreatedBy")
+  createdWorkerApiKeys WorkerApiKey[] @relation("WorkerApiKeyCreatedBy")
 
   /// Ephemeral Telegram conversation state (ADR-0014/ADR-0035) — not a
   /// historical record, unlike everything else this User relates to; see
@@ -224,8 +227,8 @@ model File {
   /// it is the output of, and the screenshot/thumbnail derived from it
   /// (Phase 9, ADR-0039). `onDelete: SetNull` on each Job FK — deleting an
   /// artifact File (`cleanupJobArtifacts`) never breaks the historical Job
-  /// row; the Job's timeline/state/`DeliveryAttempt` rows already carry
-  /// everything the record needs (docs/data/historical-integrity.md).
+  /// row; the Job's own timeline/state already carries everything the record
+  /// needs (docs/data/historical-integrity.md).
   videoForJobs      Job[] @relation("JobVideoFile")
   screenshotForJobs Job[] @relation("JobScreenshotFile")
   thumbnailForJobs  Job[] @relation("JobThumbnailFile")
@@ -284,12 +287,11 @@ enum TemplateImageRatio {
 /// readable, not this row surviving unchanged. Editing a Template never
 /// touches an existing Job for the same reason.
 ///
-/// No `youtubeTargetId` field yet: legacy's `_channel` maps to a
-/// `YouTubeTarget` concept that has no Prisma model at all (OD-36 is still
-/// open, and YouTube delivery is explicitly out of scope for this phase per
-/// the Phase 5 brief §16/§35). Adding a column that references a table that
-/// doesn't exist would be exactly the speculative schema CLAUDE.md asks to
-/// avoid; it is added, as a proper nullable FK, when YouTubeTarget lands.
+/// **No YouTube-delivery fields** (`description`, `tags`, `youtubeTargetId`
+/// existed briefly, Phases 9–11, and were removed — ADR-0041): Studio does
+/// not upload rendered Jobs to YouTube, so a Template has nothing to
+/// configure for that. `composition`/`source`/`scriptRef`/`outputPattern`
+/// remain — they describe the render itself, not any delivery destination.
 model Template {
   id String @id @default(cuid())
 
@@ -322,28 +324,6 @@ model Template {
   /// Legacy `output` — output naming/dir pattern, copied into a Job at
   /// creation.
   outputPattern String
-
-  /// Used as the YouTube description on delivery (not implemented yet).
-  description String?
-  /// YouTube tag templates, with `{{layer}}` placeholders substituted by the
-  /// delivery module (Phase 9, `features/delivery/domain/tag-substitution.ts`)
-  /// — Templates only store the configuration, never perform substitution
-  /// themselves.
-  tags        String[] @default([])
-
-  /// Optional connected YouTube channel a Job from this Template may deliver
-  /// to (legacy `_channel`, Phase 9, ADR-0039/OD-36 resolved: department-
-  /// scoped). Verified server-side to belong to this Template's own
-  /// Department on every write (`features/templates/use-cases/
-  /// verify-youtube-target.ts`) — never trusted from the client. `onDelete:
-  /// SetNull` — disconnecting/removing a Target must not block editing or
-  /// viewing this Template; it only means a Job created afterward with
-  /// `deliverToYouTube: true` has nothing to deliver to (rejected at creation,
-  /// not silently ignored). A Job already created captures the Target's
-  /// identity in its own immutable `snapshot`, so this column changing later
-  /// never rewrites history.
-  youtubeTargetId String?
-  youtubeTarget   YouTubeTarget? @relation(fields: [youtubeTargetId], references: [id], onDelete: SetNull)
 
   assets TemplateAsset[]
   jobs   Job[]
@@ -423,25 +403,29 @@ model TemplateAsset {
   @@map("template_assets")
 }
 
-/// Job lifecycle (docs/domain/jobs.md, ADR-0013, ADR-0029). Every transition is
-/// validated against the fixed graph in `features/jobs/domain/job-state-machine.ts` —
-/// nothing outside that module ever writes `Job.state` directly.
+/// Job lifecycle (docs/domain/jobs.md, ADR-0013, ADR-0029, ADR-0041). Every
+/// transition is validated against the fixed graph in
+/// `features/jobs/domain/job-state-machine.ts` — nothing outside that module
+/// ever writes `Job.state` directly.
 ///
 /// ```
 /// QUEUED    → CLAIMED, CANCELED
 /// CLAIMED   → RENDERING, QUEUED, ERROR, CANCELED
 /// RENDERING → RENDERED, ERROR, CANCELED
-/// RENDERED  → DELIVERING, UPLOADED, ERROR
-/// DELIVERING→ UPLOADED, ERROR
-/// ERROR, UPLOADED, CANCELED → (terminal — no outgoing transitions)
+/// RENDERED, ERROR, CANCELED → (terminal — no outgoing transitions)
 /// ```
+///
+/// **Revised, ADR-0041: `DELIVERING`/`UPLOADED` removed.** Studio no longer
+/// uploads a rendered Job to YouTube (or any other external destination) —
+/// `RENDERED` is now the successful completion state itself, reached the
+/// moment the Worker's rendered result is accepted
+/// (`features/delivery/use-cases/accept-job-result.ts`). See ADR-0041 for
+/// the full removal.
 enum JobState {
   QUEUED
   CLAIMED
   RENDERING
   RENDERED
-  DELIVERING
-  UPLOADED
   ERROR
   CANCELED
 }
@@ -488,8 +472,8 @@ model Job {
 
   /// Immutable Template-level snapshot, captured once at creation
   /// (ADR-0028): `{ templateName, composition, source, scriptRef,
-  /// outputPattern, description, tags, assetSlotDefinitions[] }`. See
-  /// `features/jobs/domain/job-snapshot.ts` for the exact shape. Never
+  /// outputPattern, assetSlotDefinitions[] }`. See
+  /// `features/jobs/domain/job.ts`'s `JobSnapshot` for the exact shape. Never
   /// updated after creation — there is no code path that writes this field a
   /// second time.
   snapshot Json
@@ -507,12 +491,6 @@ model Job {
   /// Rendered output duration in seconds, reported by the Worker. `null`
   /// until reported.
   durationSeconds Int?
-
-  /// Whether this Job's output should be delivered to YouTube on completion
-  /// (legacy `upload`). Part of the Job's immutable historical configuration
-  /// — an unrelated later Template edit can never change whether an existing
-  /// Job uploads. Counted by the daily upload quota (ADR-0030) when `true`.
-  deliverToYouTube Boolean @default(false)
 
   /// Non-destructive retry lineage (ADR-0005, ADR-0031): a retry is a new
   /// Job row; the original is never touched. `onDelete: Restrict` because a
@@ -534,7 +512,7 @@ model Job {
   canceledAt       DateTime?
   cancelReason     String?
 
-  /// Human-readable failure reason (render or delivery). Surfaced in the UI —
+  /// Human-readable failure reason (render failure). Surfaced in the UI —
   /// never a stack trace or internal detail (docs/security/security.md).
   errorReason String?
 
@@ -542,22 +520,22 @@ model Job {
   /// the corresponding state is reached; never reset (Studio improvement over
   /// legacy, which zeroed timing fields on cancel — historical integrity
   /// favors keeping the record, resolves part of OD-26).
-  claimedAt   DateTime?
-  startedAt   DateTime?
-  renderedAt  DateTime?
-  deliveredAt DateTime?
-  uploadedAt  DateTime?
+  claimedAt  DateTime?
+  startedAt  DateTime?
+  renderedAt DateTime?
 
   /// The rendered result and its derived images (Phase 9, ADR-0039) —
   /// `null` until a Worker successfully posts a result
   /// (`POST /api/worker/v1/jobs/:id/result`). All three are `JOB_ARTIFACT`
   /// Files, set atomically together with the `RENDERING -> RENDERED`
-  /// transition (`features/delivery/use-cases/accept-job-result.ts`).
-  /// `onDelete: SetNull` — `cleanupJobArtifacts` may hard-delete the video
-  /// File once delivery no longer needs it (docs/data/lifecycle-rules.md
-  /// "Job Artifact retention", OD-18 — trigger/grace period still open);
-  /// screenshot/thumbnail are small and kept. Never re-read from a live File
-  /// row for anything historical — same ADR-0025 contract as `JobAsset`.
+  /// transition (`features/delivery/use-cases/accept-job-result.ts`), which
+  /// is also the Job's final, successful completion state (ADR-0041 — there
+  /// is no upload/delivery step after this). `onDelete: SetNull` —
+  /// `cleanupJobArtifacts` may hard-delete the video File once it's no
+  /// longer needed (docs/data/lifecycle-rules.md "Job Artifact retention",
+  /// OD-18 — trigger/grace period still open); screenshot/thumbnail are
+  /// small and kept. Never re-read from a live File row for anything
+  /// historical — same ADR-0025 contract as `JobAsset`.
   videoFileId String?
   videoFile   File?   @relation("JobVideoFile", fields: [videoFileId], references: [id], onDelete: SetNull)
 
@@ -567,10 +545,7 @@ model Job {
   thumbnailFileId String?
   thumbnailFile   File?   @relation("JobThumbnailFile", fields: [thumbnailFileId], references: [id], onDelete: SetNull)
 
-  assets           JobAsset[]
-  /// One row per delivery attempt per provider (Phase 9, ADR-0039) — see
-  /// `DeliveryAttempt`'s own doc comment.
-  deliveryAttempts DeliveryAttempt[]
+  assets JobAsset[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -639,21 +614,20 @@ model JobAsset {
 }
 
 /// The Telegram conversation flow a wizard row is progressing through
-/// (docs/integrations/telegram.md, ADR-0035). `ALBUM` never asks the
-/// delivery question (legacy behavior, kept — `docs/domain/jobs.md`'s
-/// `deliverToYouTube` defaults to `false` for the whole flow).
+/// (docs/integrations/telegram.md, ADR-0035).
 enum TelegramWizardFlow {
   SINGLE_TRACK
   ALBUM
 }
 
 /// Explicit conversation steps (Phase 8 brief §16) — never an arbitrary
-/// string scattered through handlers. `ASK_DELIVERY`/`ASK_TRACK_COUNT` are
-/// flow-specific (only `SINGLE_TRACK` uses the former, only `ALBUM` the
-/// latter); the rest are shared by both flows.
+/// string scattered through handlers. `ASK_TRACK_COUNT` is flow-specific
+/// (only `ALBUM` uses it — `SINGLE_TRACK` goes straight from
+/// `PICK_TEMPLATE` to `COLLECT_ASSETS`, ADR-0041 removed the YouTube-
+/// delivery question that used to sit between them); the rest are shared by
+/// both flows.
 enum TelegramWizardStep {
   PICK_TEMPLATE
-  ASK_DELIVERY
   ASK_TRACK_COUNT
   COLLECT_ASSETS
   CONFIRM
@@ -691,9 +665,9 @@ model TelegramWizardState {
   /// opaque JSON past that boundary (Phase 8 brief §46). Holds only what's
   /// needed to resume the conversation: the chosen Template's id and a
   /// snapshot of its slot definitions (so a mid-conversation Template edit
-  /// can't shift the slots being collected), the delivery choice, the track
-  /// count, and the asset values collected so far, per track. Never an
-  /// arbitrary/unvalidated Telegram update payload.
+  /// can't shift the slots being collected), the track count, and the asset
+  /// values collected so far, per track. Never an arbitrary/unvalidated
+  /// Telegram update payload.
   payload Json
 
   /// The most recently processed Telegram update id for this conversation —
@@ -709,136 +683,6 @@ model TelegramWizardState {
   updatedAt DateTime @updatedAt
 
   @@map("telegram_wizard_states")
-}
-
-/// A connected YouTube channel, manageable **only by ADMIN** (revised) and
-/// assignable to **any number of Departments** (many-to-many, revised from
-/// Phase 9's single `departmentId` — a real-world channel is not owned by one
-/// Department's namespace; the same channel may legitimately publish for
-/// several). A Template may only pick a Target that is assigned to the
-/// Template's own Department (`verify-youtube-target.ts`); ADMIN may
-/// see/manage every Target regardless of assignment.
-///
-/// **Connection model is deliberately simplified from a full OAuth
-/// consent-screen flow** (ADR-0039): an operator obtains a refresh token for
-/// the target channel out-of-band (Google OAuth Playground or an equivalent
-/// one-time flow) and registers it here — the same "credential obtained
-/// elsewhere, entered once" trust model Worker API Keys use. Studio
-/// exchanges it for access tokens itself from then on
-/// (`features/youtube/infrastructure/youtube-client.ts`). A self-service
-/// "Connect with Google" consent screen is a real product feature, not a
-/// delivery-pipeline requirement — left as a documented future enhancement,
-/// not built this phase (see docs/integrations/youtube.md).
-enum YouTubeTargetStatus {
-  CONNECTED
-  DISCONNECTED
-  ERROR
-}
-
-model YouTubeTarget {
-  id String @id @default(cuid())
-
-  /// Many-to-many (ADR-0040) — replaces Phase 9's single `departmentId` FK.
-  /// A channel with zero Departments assigned is valid (just not selectable
-  /// by any Template yet) but every write path that matters
-  /// (`connect-youtube-target.ts`) requires at least one at creation.
-  departments Department[]
-
-  /// Display name only (e.g. "Main Channel") — never used to build a request.
-  name String
-
-  /// Globally unique now that a channel is not scoped to one Department's
-  /// namespace — reconnecting the same real-world channel updates the
-  /// existing row rather than creating a duplicate, regardless of which
-  /// Departments it's assigned to.
-  youtubeChannelId String @unique
-
-  /// AES-256-GCM ciphertext (`iv:authTag:ciphertext`, base64 — see
-  /// `@/server/adapters/youtube/token-cipher.ts`), keyed by
-  /// `YOUTUBE_TOKEN_ENCRYPTION_KEY`. Never plaintext at rest, never logged,
-  /// never returned to any client — the one field this whole model exists to
-  /// protect (docs/security/security.md).
-  encryptedRefreshToken String
-
-  /// Short-lived access token cache, refreshed on demand
-  /// (`getValidAccessToken`) — also encrypted; both are `null` until first
-  /// used. Caching this only saves a round trip to Google; the refresh token
-  /// above is the actual credential of record.
-  encryptedAccessToken String?
-  accessTokenExpiresAt DateTime?
-
-  status         YouTubeTargetStatus @default(CONNECTED)
-  /// Human-readable, safe-to-display reason the last refresh/upload failed
-  /// (e.g. "refresh token was revoked") — never a raw Google API error body.
-  lastErrorReason String?
-
-  createdByUserId String
-  createdBy       User   @relation("YoutubeTargetCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-
-  templates Template[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("youtube_targets")
-}
-
-/// One provider's outcome for one Job (Phase 9, ADR-0039, resolves the
-/// delivery-outcome half of OD-22). Durable delivery *intent*: a `PENDING`
-/// row is committed **before** the external API call runs, so a process
-/// crash mid-delivery leaves an accurate, retryable record rather than
-/// silently losing the attempt (docs/integrations/youtube.md "Delivery
-/// reliability"). Never updated in place across attempts — a retry inserts a
-/// new row with the next `attemptNumber`, so the full delivery history for a
-/// Job/provider pair is always reconstructable, mirroring how `Job` itself
-/// never overwrites its own history.
-enum DeliveryProvider {
-  TELEGRAM
-  YOUTUBE
-}
-
-enum DeliveryStatus {
-  PENDING
-  SUCCEEDED
-  FAILED
-}
-
-model DeliveryAttempt {
-  id String @id @default(cuid())
-
-  jobId String
-  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
-  provider DeliveryProvider
-  status   DeliveryStatus   @default(PENDING)
-
-  /// 1 for the first attempt at this provider for this Job; incremented by
-  /// `retryJobDelivery`. The `(jobId, provider, attemptNumber)` unique
-  /// constraint is what makes a concurrent duplicate retry click fail with a
-  /// clean conflict instead of creating two rows for the same attempt
-  /// (docs/integrations/youtube.md "Delivery idempotency").
-  attemptNumber Int @default(1)
-
-  /// The provider's own identifier for a succeeded delivery (a YouTube video
-  /// id, a Telegram message id) — the durable evidence a retry checks before
-  /// ever calling the provider again (never re-upload an
-  /// already-`SUCCEEDED` delivery).
-  providerRef String?
-
-  /// Short, safe, human-readable failure summary — never a raw provider error
-  /// body/stack trace (docs/security/security.md).
-  failureReason String?
-
-  /// `null` for the automatic attempt Studio makes right after `RENDERED`;
-  /// set to the actor who triggered a manual "retry delivery" action.
-  triggeredByUserId String?
-
-  startedAt   DateTime  @default(now())
-  completedAt DateTime?
-
-  @@unique([jobId, provider, attemptNumber])
-  @@index([jobId, provider])
-  @@map("delivery_attempts")
 }
 
 /// An external Render Worker's machine identity, department-scoped

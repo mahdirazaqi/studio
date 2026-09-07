@@ -72,14 +72,10 @@ export const env = createEnv({
      */
     JOB_RETRY_WINDOW_DAYS: z.coerce.number().int().min(1).max(365).default(3),
 
-    /**
-     * Global daily cap on upload-enabled (`deliverToYouTube: true`) Jobs,
-     * reset at UTC midnight (docs/domain/jobs.md "Upload cap", ADR-0030).
-     * Legacy hard-coded 3. Kept global for Phase 6 — no `YouTubeTarget` model
-     * exists yet to scope a per-target cap against (OD-01 stays open on that
-     * count).
-     */
-    JOB_UPLOAD_DAILY_CAP: z.coerce.number().int().min(0).default(3),
+    // `JOB_UPLOAD_DAILY_CAP` (the global daily cap on upload-enabled Jobs,
+    // ADR-0030) is **removed** — YouTube upload no longer exists (ADR-0041),
+    // so the quota it gated has no remaining purpose. See
+    // docs/domain/jobs.md "Upload cap" for the removal note.
 
     // `WORKER_API_KEY` (a single shared, non-departmental static credential,
     // ADR-0032/OD-27) is **removed** — superseded by ADR-0040's
@@ -134,39 +130,21 @@ export const env = createEnv({
     SEED_ADMIN_PHONE: z.string().min(1).optional(),
 
     /**
-     * `ffmpeg` binary path (docs/integrations/youtube.md "Media processing",
-     * Phase 9, ADR-0039). Always invoked via `execFile`/`spawn` with an
-     * argument array (`shell: false`) — never string-interpolated
-     * (docs/security/security.md §6). Deploy-time configuration, not
-     * user/request-controlled input, so trusting this path is safe. Defaults
-     * to the binary already on `PATH`.
+     * `ffmpeg` binary path (docs/domain/jobs.md "Rendered result", Phase 9,
+     * ADR-0039). Always invoked via `execFile`/`spawn` with an argument array
+     * (`shell: false`) — never string-interpolated (docs/security/security.md
+     * §6). Deploy-time configuration, not user/request-controlled input, so
+     * trusting this path is safe. Defaults to the binary already on `PATH`.
+     * Used to generate a Job's screenshot/thumbnail from its rendered video —
+     * independent of any external delivery destination, which Studio no
+     * longer has (ADR-0041).
      */
     FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
 
-    /**
-     * Google OAuth client credentials for exchanging a `YouTubeTarget`'s
-     * stored refresh token for a short-lived access token
-     * (`features/youtube/infrastructure/youtube-client.ts`). Optional — like
-     * Telegram, YouTube delivery is an optional deployment feature; Studio
-     * runs fully without it (connecting a Target fails with a clear
-     * `dependency` error instead of crashing the process at startup).
-     */
-    YOUTUBE_CLIENT_ID: z.string().min(1).optional(),
-    YOUTUBE_CLIENT_SECRET: z.string().min(1).optional(),
-
-    /**
-     * Symmetric key (32 raw bytes, base64-encoded) used to encrypt every
-     * `YouTubeTarget` refresh/access token at rest with AES-256-GCM
-     * (`@/server/adapters/youtube/token-cipher.ts`, ADR-0039) — the tokens are
-     * the actual credential of record and must never be stored in plaintext
-     * (docs/security/security.md). Optional for the same reason as the client
-     * credentials above; required in practice before a Target can be
-     * connected, checked at that boundary rather than at process startup.
-     * Generate with `openssl rand -base64 32`. Rotating this value makes every
-     * previously-connected Target's stored tokens unreadable — reconnect them
-     * after rotating, there is no re-encryption migration.
-     */
-    YOUTUBE_TOKEN_ENCRYPTION_KEY: z.string().min(1).optional(),
+    // `YOUTUBE_CLIENT_ID`/`YOUTUBE_CLIENT_SECRET`/`YOUTUBE_TOKEN_ENCRYPTION_KEY`
+    // are **removed** — Studio no longer uploads rendered Jobs to YouTube
+    // (ADR-0041); the `YouTubeTarget` model, the Google OAuth client, and the
+    // token-encryption boundary they configured are all gone.
   },
 
   client: {
@@ -191,15 +169,11 @@ export const env = createEnv({
     SEED_ADMIN_PASSWORD: process.env.SEED_ADMIN_PASSWORD,
     SEED_ADMIN_NAME: process.env.SEED_ADMIN_NAME,
     JOB_RETRY_WINDOW_DAYS: process.env.JOB_RETRY_WINDOW_DAYS,
-    JOB_UPLOAD_DAILY_CAP: process.env.JOB_UPLOAD_DAILY_CAP,
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
     TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
     TELEGRAM_WIZARD_TTL_MINUTES: process.env.TELEGRAM_WIZARD_TTL_MINUTES,
     SEED_ADMIN_PHONE: process.env.SEED_ADMIN_PHONE,
     FFMPEG_PATH: process.env.FFMPEG_PATH,
-    YOUTUBE_CLIENT_ID: process.env.YOUTUBE_CLIENT_ID,
-    YOUTUBE_CLIENT_SECRET: process.env.YOUTUBE_CLIENT_SECRET,
-    YOUTUBE_TOKEN_ENCRYPTION_KEY: process.env.YOUTUBE_TOKEN_ENCRYPTION_KEY,
   },
 
   /** Treat empty strings as undefined so blank .env lines don't pass validation. */

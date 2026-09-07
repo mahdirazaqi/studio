@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   ListVideo,
   Users,
-  Youtube,
   type LucideIcon,
 } from "lucide-react";
 
@@ -78,26 +77,15 @@ export const navigation: NavGroup[] = [
         minRole: "MANAGER",
       },
       // ADMIN-only (revised): Department *management* is a system-wide
-      // operation now that Worker API Keys and YouTube Channels are also
-      // Department-scoped from the same admin surface. USER/MANAGER see
-      // their own Department name in the sidebar footer instead
-      // (docs/domain/departments.md "Profile display") — enforced
-      // server-side on the route itself, not just hidden here.
+      // operation now that Worker API Keys are also Department-scoped from
+      // the same admin surface. USER/MANAGER see their own Department name
+      // in the sidebar footer instead (docs/domain/departments.md "Profile
+      // display") — enforced server-side on the route itself, not just
+      // hidden here.
       {
         label: "Departments",
         href: "/departments",
         icon: Building2,
-        minRole: "ADMIN",
-      },
-      // ADMIN-only (revised) — connecting/managing a YouTube channel and its
-      // Department scope is system-wide infrastructure configuration;
-      // non-admins only *pick* an already-connected, already-scoped channel
-      // from a Template, they never manage the connection itself
-      // (docs/integrations/youtube.md).
-      {
-        label: "YouTube",
-        href: "/youtube",
-        icon: Youtube,
         minRole: "ADMIN",
       },
       // New — ADMIN-only management of Worker API Keys and their Department

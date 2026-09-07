@@ -1,27 +1,29 @@
 import type { JobState } from "@/features/jobs/domain/job";
 
 /**
- * The Job state machine (docs/domain/jobs.md "State machine", ADR-0029). The
- * single source of truth for every valid transition — nothing outside this
- * module decides whether `from -> to` is allowed.
+ * The Job state machine (docs/domain/jobs.md "State machine", ADR-0029,
+ * ADR-0041). The single source of truth for every valid transition —
+ * nothing outside this module decides whether `from -> to` is allowed.
  *
  * ```
  * QUEUED    → CLAIMED, CANCELED
  * CLAIMED   → RENDERING, QUEUED (requeue on worker timeout), ERROR, CANCELED
  * RENDERING → RENDERED, ERROR, CANCELED
- * RENDERED  → DELIVERING, UPLOADED (no delivery needed), ERROR
- * DELIVERING→ UPLOADED, ERROR
- * ERROR, UPLOADED, CANCELED → (terminal — no outgoing transitions)
+ * RENDERED, ERROR, CANCELED → (terminal — no outgoing transitions)
  * ```
+ *
+ * **Revised, ADR-0041: `DELIVERING`/`UPLOADED` removed.** Studio no longer
+ * uploads a rendered Job anywhere — `RENDERED` is now the terminal,
+ * successful completion state itself, reached directly from `RENDERING`
+ * when the Worker's result is accepted (`features/delivery/use-cases/
+ * accept-job-result.ts`).
  */
 const TRANSITIONS: Record<JobState, readonly JobState[]> = {
   QUEUED: ["CLAIMED", "CANCELED"],
   CLAIMED: ["RENDERING", "QUEUED", "ERROR", "CANCELED"],
   RENDERING: ["RENDERED", "ERROR", "CANCELED"],
-  RENDERED: ["DELIVERING", "UPLOADED", "ERROR"],
-  DELIVERING: ["UPLOADED", "ERROR"],
+  RENDERED: [],
   ERROR: [],
-  UPLOADED: [],
   CANCELED: [],
 };
 
@@ -36,9 +38,9 @@ export function isTerminalState(state: JobState): boolean {
 
 /**
  * Cancelable states (docs/domain/jobs.md "Cancellation") — not `RENDERED`,
- * `DELIVERING`, `UPLOADED`, `ERROR`, or `CANCELED`. Matches legacy intent
- * (`$nin: [Rendered, Uploading, Uploaded, Cancel]`), enforced here instead of
- * left to a hand-rolled query.
+ * `ERROR`, or `CANCELED`. Matches legacy intent (`$nin: [Rendered,
+ * Uploading, Uploaded, Cancel]`, minus the now-removed Uploading/Uploaded
+ * states), enforced here instead of left to a hand-rolled query.
  */
 export const CANCELABLE_STATES: readonly JobState[] = [
   "QUEUED",

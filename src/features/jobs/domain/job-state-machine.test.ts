@@ -19,11 +19,6 @@ describe("isValidTransition", () => {
     ["RENDERING", "RENDERED"],
     ["RENDERING", "ERROR"],
     ["RENDERING", "CANCELED"],
-    ["RENDERED", "DELIVERING"],
-    ["RENDERED", "UPLOADED"],
-    ["RENDERED", "ERROR"],
-    ["DELIVERING", "UPLOADED"],
-    ["DELIVERING", "ERROR"],
   ];
 
   it.each(valid)("allows %s -> %s", (from, to) => {
@@ -31,15 +26,16 @@ describe("isValidTransition", () => {
   });
 
   const invalid: [JobState, JobState][] = [
-    ["UPLOADED", "QUEUED"],
-    ["UPLOADED", "RENDERING"],
+    ["RENDERED", "QUEUED"],
+    ["RENDERED", "RENDERING"],
+    ["RENDERED", "ERROR"],
     ["RENDERED", "DOWNLOADING" as JobState],
     ["CANCELED", "RENDERING"],
     ["QUEUED", "RENDERING"],
     ["QUEUED", "RENDERED"],
     ["ERROR", "QUEUED"],
     ["ERROR", "CANCELED"],
-    ["CANCELED", "UPLOADED"],
+    ["CANCELED", "RENDERED"],
   ];
 
   it.each(invalid)("rejects %s -> %s", (from, to) => {
@@ -54,8 +50,8 @@ describe("isValidTransition", () => {
 });
 
 describe("isTerminalState", () => {
-  it("treats UPLOADED, ERROR, and CANCELED as terminal", () => {
-    expect(isTerminalState("UPLOADED")).toBe(true);
+  it("treats RENDERED, ERROR, and CANCELED as terminal", () => {
+    expect(isTerminalState("RENDERED")).toBe(true);
     expect(isTerminalState("ERROR")).toBe(true);
     expect(isTerminalState("CANCELED")).toBe(true);
   });
@@ -64,8 +60,6 @@ describe("isTerminalState", () => {
     expect(isTerminalState("QUEUED")).toBe(false);
     expect(isTerminalState("CLAIMED")).toBe(false);
     expect(isTerminalState("RENDERING")).toBe(false);
-    expect(isTerminalState("RENDERED")).toBe(false);
-    expect(isTerminalState("DELIVERING")).toBe(false);
   });
 });
 
@@ -76,10 +70,8 @@ describe("canCancelFromState", () => {
     expect(canCancelFromState("RENDERING")).toBe(true);
   });
 
-  it("forbids canceling once RENDERED or beyond, or already terminal", () => {
+  it("forbids canceling once RENDERED, or already terminal", () => {
     expect(canCancelFromState("RENDERED")).toBe(false);
-    expect(canCancelFromState("DELIVERING")).toBe(false);
-    expect(canCancelFromState("UPLOADED")).toBe(false);
     expect(canCancelFromState("ERROR")).toBe(false);
     expect(canCancelFromState("CANCELED")).toBe(false);
   });
@@ -96,7 +88,5 @@ describe("canRetryFromState", () => {
     expect(canRetryFromState("CLAIMED")).toBe(false);
     expect(canRetryFromState("RENDERING")).toBe(false);
     expect(canRetryFromState("RENDERED")).toBe(false);
-    expect(canRetryFromState("DELIVERING")).toBe(false);
-    expect(canRetryFromState("UPLOADED")).toBe(false);
   });
 });

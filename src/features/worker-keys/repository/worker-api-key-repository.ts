@@ -102,7 +102,8 @@ export async function setWorkerApiKeyStatus(
   await db.workerApiKey.update({ where: { id }, data: { status } });
 }
 
-/** Full replace, mirroring `setYoutubeTargetDepartments` — takes effect
+/** Full replace, matching the department-scope-edit pattern used elsewhere
+ * (a full replace on every edit, never diffed) — takes effect
  * immediately, since `@/server/worker-auth` re-resolves this relation fresh
  * on every single authenticated request (never cached). */
 export async function setWorkerApiKeyDepartments(

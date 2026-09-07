@@ -24,7 +24,7 @@ describe("transitionJob", () => {
   });
 
   it("rejects an invalid transition before attempting the write", async () => {
-    findJobState.mockResolvedValue({ state: "UPLOADED" });
+    findJobState.mockResolvedValue({ state: "RENDERED" });
     await expect(transitionJob("job-1", "RENDERING")).rejects.toMatchObject({
       kind: "business_rule",
     });

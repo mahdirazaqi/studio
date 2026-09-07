@@ -98,7 +98,7 @@ reject early, and nothing is written anywhere until validation fully passes.
    delete only their own upload; MANAGER/ADMIN may delete any file in scope.
 3. `assertNoActiveJobDependencies` (Phase 6, ADR-0028) — a **real** check: counts every
    `JobAsset` row referencing this File whose `Job` is in an active state
-   (`QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING`), and throws `conflict` if any exist. A
+   (`QUEUED`/`CLAIMED`/`RENDERING`), and throws `conflict` if any exist. A
    Job that has already reached a terminal state never blocks deletion — its `JobAsset`
    rows already carry the copied metadata a historical view needs.
 4. `assertNoActiveTemplateDependencies` (Phase 5, ADR-0027) — a **real** check: counts

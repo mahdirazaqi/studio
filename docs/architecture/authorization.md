@@ -85,14 +85,9 @@ to design this registry from scratch. All three have now landed:
   `assertCanDeleteFile`'s own finer "own upload vs. any in department" rule for
   deletion — the one capability among the three where OD-03's "own resource" reading was
   actually chosen, deliberately different from Jobs' whole-department resolution.
-- **YouTube (Phase 9)**: a new `youtube:manage` capability, registered at the same
-  `MANAGER` floor as `template:manage` — connecting/disconnecting/listing
-  `YouTubeTarget`s is department-level infrastructure configuration, not a per-Job
-  operation. Picking an existing, already-`CONNECTED` Target for a Template is gated by
-  `template:manage` instead (authoring a Template is the operation that matters there,
-  not managing Targets) — see
-  `features/templates/use-cases/list-youtube-targets-for-template-form.ts`. Delivery-only
-  retry (`retryJobDelivery`) reuses the existing `job:manage` capability, unchanged.
+- **YouTube — removed, ADR-0041.** `youtube:manage` (and the `YouTubeTarget`
+  concept/delivery-only retry it gated) existed Phases 9–11 and no longer exists —
+  Studio does not upload rendered Jobs to YouTube. See ADR-0041 for the full removal.
 
 ## Department scope: three tools, three situations
 
@@ -319,9 +314,8 @@ Re-verified again for Phase 6 (Jobs), same real-server setup:
 | ADMIN             | `/jobs` (no department filter)                                            | Jobs from every department rendered                                             |
 | Any role          | `deleteFile` on a File an **active** Job references                       | `conflict`, file not deleted; released once that Job leaves an active state     |
 | MANAGER           | Cancel an already-canceled job                                            | No-op, no error (idempotent)                                                    |
-| MANAGER           | Cancel a `RENDERED`/`UPLOADED` job                                        | `business_rule`                                                                 |
+| MANAGER           | Cancel a `RENDERED` job                                                   | `business_rule`                                                                 |
 | MANAGER           | Retry a `QUEUED`/`RENDERING` job                                          | `business_rule` (not yet eligible)                                              |
 | MANAGER           | Retry a job past `JOB_RETRY_WINDOW_DAYS`                                  | `business_rule`                                                                 |
 | MANAGER           | Retry an `ERROR`/`CANCELED` job                                           | New linked Job created; original untouched                                      |
 | System (no Actor) | `claimNextJob()` called twice concurrently                                | Two different Jobs claimed, never the same one (real-database concurrency test) |
-| System (no Actor) | `createJob`/`retryJob` with `deliverToYouTube: true`, 4th of the UTC day  | `conflict` (daily quota, real-database concurrency test also passed)            |

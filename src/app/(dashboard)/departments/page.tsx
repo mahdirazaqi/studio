@@ -12,8 +12,8 @@ export const metadata: Metadata = { title: "Departments" };
 /**
  * `/departments` is **ADMIN-only** (revised — docs/domain/departments.md
  * "Profile display"): Department management now sits alongside Worker API
- * Key and YouTube Channel scoping as system-wide admin configuration, not a
- * resource any USER/MANAGER views directly. A USER/MANAGER instead sees
+ * Key scoping as system-wide admin configuration, not a resource any
+ * USER/MANAGER views directly. A USER/MANAGER instead sees
  * their own Department's name in the sidebar footer
  * (`components/layout/app-sidebar.tsx`) — resolved from their own session,
  * no separate page or query. Direct URL access is checked here server-side;

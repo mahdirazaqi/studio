@@ -36,8 +36,6 @@ const input = (overrides: Partial<TemplateInput> = {}): TemplateInput => ({
   source: "src://project",
   scriptRef: "script.js",
   outputPattern: "out/%s.mp4",
-  description: undefined,
-  tags: [],
   assets: [],
   ...overrides,
 });

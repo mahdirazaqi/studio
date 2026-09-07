@@ -12,7 +12,6 @@ const baseJob: SafeJobDetail = {
   state: "QUEUED",
   progress: null,
   durationSeconds: null,
-  deliverToYouTube: false,
   retryOfJobId: null,
   attemptNumber: 1,
   createdByUserId: "u1",
@@ -27,10 +26,7 @@ const baseJob: SafeJobDetail = {
     source: "src://project",
     scriptRef: "script.js",
     outputPattern: "out/%s.mp4",
-    description: null,
-    tags: [],
     assetSlotDefinitions: [],
-    youtubeTarget: null,
   },
   assets: [
     {
@@ -89,12 +85,9 @@ const baseJob: SafeJobDetail = {
   cancelReason: null,
   startedAt: null,
   renderedAt: null,
-  deliveredAt: null,
-  uploadedAt: null,
   videoFileId: null,
   screenshotFileId: null,
   thumbnailFileId: null,
-  deliveryAttempts: [],
 };
 
 const buildFileUrl = (fileId: string) =>

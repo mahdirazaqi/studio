@@ -37,10 +37,10 @@ export async function departmentExists(departmentId: string): Promise<boolean> {
 }
 
 /** Bulk existence check — used wherever a client submits a *set* of
- * Department ids to validate at once (Worker API Key / YouTube Target
- * scoping, ADR-0040) rather than one at a time. `true` only if every id in
- * `departmentIds` resolves to a real row — a single bogus id fails the
- * whole check, never silently drops it. */
+ * Department ids to validate at once (Worker API Key scoping, ADR-0040)
+ * rather than one at a time. `true` only if every id in `departmentIds`
+ * resolves to a real row — a single bogus id fails the whole check, never
+ * silently drops it. */
 export async function departmentsExist(
   departmentIds: readonly string[],
 ): Promise<boolean> {

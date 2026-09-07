@@ -45,5 +45,6 @@ directly (this feature's own repository) to resolve a Template, validate its
 `status`/`deletedAt`, and read its `assets` — the exact contract this README anticipated.
 
 **Not built yet, deliberately:** a Template version-history/restore mechanism,
-`youtubeTargetId` (no `YouTubeTarget` table exists), aspect-ratio tolerance comparison
-against an actual uploaded image (OD-14 stays open).
+aspect-ratio tolerance comparison against an actual uploaded image (OD-14 stays open).
+(`youtubeTargetId` briefly existed, Phases 9–11, then was removed along with the rest of
+YouTube upload — ADR-0041.)

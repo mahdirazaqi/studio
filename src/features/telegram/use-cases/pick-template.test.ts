@@ -40,7 +40,7 @@ describe("pickTemplate", () => {
     expect(startWizardState).not.toHaveBeenCalled();
   });
 
-  it("starts an ASK_DELIVERY wizard row for Single Track, snapshotting the slots", async () => {
+  it("Single Track opens COLLECT_ASSETS immediately (no delivery question, ADR-0041), snapshotting the slots", async () => {
     getTemplateForJobForm.mockResolvedValue(template);
     const result = await pickTemplate(
       actor,
@@ -52,26 +52,42 @@ describe("pickTemplate", () => {
 
     expect(result).toEqual({
       templateName: "Podcast Intro",
-      step: "ASK_DELIVERY",
-    });
-    expect(startWizardState).toHaveBeenCalledWith({
-      telegramUserId: "tg-1",
-      userId: "user-1",
-      flow: "SINGLE_TRACK",
-      step: "ASK_DELIVERY",
+      step: "COLLECT_ASSETS",
       payload: {
         templateId: "tpl-1",
         templateName: "Podcast Intro",
-        deliverToYouTube: false,
         trackCount: 1,
         slots: [
           { key: "title", kind: "DATA" },
           { key: "cover", kind: "IMAGE" },
         ],
-        tracks: [],
+        tracks: [[]],
       },
+    });
+    expect(startWizardState).toHaveBeenCalledWith({
+      telegramUserId: "tg-1",
+      userId: "user-1",
+      flow: "SINGLE_TRACK",
+      step: "COLLECT_ASSETS",
+      payload: expect.objectContaining({ tracks: [[]] }),
       lastUpdateId: 7,
     });
+  });
+
+  it("Single Track skips straight to CONFIRM for a zero-asset template", async () => {
+    getTemplateForJobForm.mockResolvedValue({ ...template, assets: [] });
+    const result = await pickTemplate(
+      actor,
+      "tg-1",
+      7,
+      "SINGLE_TRACK",
+      "tpl-1",
+    );
+
+    expect(result.step).toBe("CONFIRM");
+    expect(startWizardState).toHaveBeenCalledWith(
+      expect.objectContaining({ step: "CONFIRM" }),
+    );
   });
 
   it("starts an ASK_TRACK_COUNT wizard row for Album", async () => {

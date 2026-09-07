@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { createTemplateAction } from "@/features/templates/actions/create-template.action";
 import { updateTemplateAction } from "@/features/templates/actions/update-template.action";
 import {
@@ -18,7 +17,6 @@ import {
   type GalleryFileOption,
 } from "@/features/templates/components/template-asset-editor";
 import type { SafeTemplateDetail } from "@/features/templates/domain/template";
-import type { SafeYouTubeTarget } from "@/features/youtube/domain/youtube-target";
 
 export interface DepartmentChoice {
   id: string;
@@ -46,13 +44,16 @@ function toAssetRows(
  * (docs/domain/templates.md "Creation & editing"). Not a visual/canvas
  * editor: composition/source/script/output are opaque strings passed through
  * to the Render Worker, edited as plain text (Phase 5 brief §21).
+ *
+ * **No YouTube configuration section** (ADR-0041) — a Template describes a
+ * render recipe only; it has nothing to say about where a Job's output goes
+ * afterward, since Studio has no delivery step after `RENDERED`.
  */
 export function TemplateForm({
   mode,
   template,
   departmentChoices,
   galleryFiles,
-  youtubeTargets,
   readOnly = false,
 }: {
   mode: "create" | "edit";
@@ -67,9 +68,6 @@ export function TemplateForm({
   /** Already scoped by the page: the actor's own department for USER/MANAGER,
    * or every department for ADMIN. */
   galleryFiles: GalleryFileOption[];
-  /** `CONNECTED` YouTube Targets available to pick from — same scoping as
-   * `galleryFiles` (docs/domain/templates.md "Template ↔ Target"). */
-  youtubeTargets: SafeYouTubeTarget[];
   /** USER can view a Template (`template:view`) but not author it
    * (docs/domain/authorization.md) — renders every field disabled and drops
    * the Save action rather than letting a submit round-trip to a 403. */
@@ -89,11 +87,6 @@ export function TemplateForm({
   const [outputPattern, setOutputPattern] = useState(
     template?.outputPattern ?? "",
   );
-  const [description, setDescription] = useState(template?.description ?? "");
-  const [tagsText, setTagsText] = useState((template?.tags ?? []).join(", "));
-  const [youtubeTargetId, setYoutubeTargetId] = useState(
-    template?.youtubeTargetId ?? "",
-  );
   const [departmentId, setDepartmentId] = useState(
     template?.departmentId ?? departmentChoices?.[0]?.id ?? "",
   );
@@ -102,28 +95,17 @@ export function TemplateForm({
   );
 
   // ADMIN picking/changing a department (create, or a transfer in edit mode)
-  // narrows the file/channel pickers to that department; every other case
-  // (a non-ADMIN actor, who never sees the selector) uses the Template's own
+  // narrows the file picker to that department; every other case (a
+  // non-ADMIN actor, who never sees the selector) uses the Template's own
   // fixed department.
   const effectiveDepartmentId = departmentChoices
     ? departmentId
     : template?.departmentId;
 
-  const youtubeTargetOptions = effectiveDepartmentId
-    ? youtubeTargets.filter((target) =>
-        target.departmentIds.includes(effectiveDepartmentId),
-      )
-    : youtubeTargets;
-
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
     setFieldErrors({});
-
-    const tags = tagsText
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.length > 0);
 
     const body = {
       ...(departmentChoices ? { departmentId } : {}),
@@ -132,9 +114,6 @@ export function TemplateForm({
       source,
       scriptRef,
       outputPattern,
-      description: description.trim() === "" ? undefined : description,
-      tags,
-      youtubeTargetId: youtubeTargetId === "" ? undefined : youtubeTargetId,
       assets: assets.map((asset) => ({
         key: asset.key,
         kind: asset.kind,
@@ -217,9 +196,9 @@ export function TemplateForm({
                 </select>
                 {mode === "edit" && departmentId !== template?.departmentId ? (
                   <p className="text-muted-foreground text-xs">
-                    Transferring this template — its asset/channel selections
-                    below must remain valid for the new department, or saving
-                    will be rejected.
+                    Transferring this template — its asset selections below must
+                    remain valid for the new department, or saving will be
+                    rejected.
                   </p>
                 ) : null}
                 {fieldErrors.departmentId?.map((m) => (
@@ -292,67 +271,6 @@ export function TemplateForm({
                 required
               />
               {fieldErrors.outputPattern?.map((m) => (
-                <p key={m} className="text-destructive text-sm">
-                  {m}
-                </p>
-              ))}
-            </div>
-
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor={`${formId}-description`}>
-                Description (YouTube description on delivery)
-              </Label>
-              <Textarea
-                id={`${formId}-description`}
-                value={description}
-                disabled={fieldsDisabled}
-                rows={3}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-              {fieldErrors.description?.map((m) => (
-                <p key={m} className="text-destructive text-sm">
-                  {m}
-                </p>
-              ))}
-            </div>
-
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor={`${formId}-tags`}>
-                Tags (comma-separated; {"{{layer}}"} is substituted on delivery)
-              </Label>
-              <Input
-                id={`${formId}-tags`}
-                value={tagsText}
-                disabled={fieldsDisabled}
-                placeholder="e.g. highlights, {{layer}}, weekly"
-                onChange={(e) => setTagsText(e.target.value)}
-              />
-              {fieldErrors.tags?.map((m) => (
-                <p key={m} className="text-destructive text-sm">
-                  {m}
-                </p>
-              ))}
-            </div>
-
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor={`${formId}-youtube-target`}>
-                YouTube channel (optional)
-              </Label>
-              <select
-                id={`${formId}-youtube-target`}
-                value={youtubeTargetId}
-                disabled={fieldsDisabled}
-                className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs"
-                onChange={(e) => setYoutubeTargetId(e.target.value)}
-              >
-                <option value="">None — jobs cannot deliver to YouTube</option>
-                {youtubeTargetOptions.map((target) => (
-                  <option key={target.id} value={target.id}>
-                    {target.name}
-                  </option>
-                ))}
-              </select>
-              {fieldErrors.youtubeTargetId?.map((m) => (
                 <p key={m} className="text-destructive text-sm">
                   {m}
                 </p>

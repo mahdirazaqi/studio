@@ -22,7 +22,6 @@ const actor: Actor = { userId: "user-1", role: "USER", departmentId: "dept-a" };
 const payload = {
   templateId: "tpl-1",
   templateName: "T",
-  deliverToYouTube: false,
   trackCount: 2,
   slots: [{ key: "title", kind: "DATA" as const }],
   tracks: [
@@ -61,12 +60,10 @@ describe("confirmWizard", () => {
 
     expect(createJob).toHaveBeenNthCalledWith(1, actor, {
       templateId: "tpl-1",
-      deliverToYouTube: false,
       assets: [{ slotKey: "title", text: "Track 1" }],
     });
     expect(createJob).toHaveBeenNthCalledWith(2, actor, {
       templateId: "tpl-1",
-      deliverToYouTube: false,
       assets: [{ slotKey: "title", text: "Track 2" }],
     });
     expect(result).toEqual({

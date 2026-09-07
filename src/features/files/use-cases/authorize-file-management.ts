@@ -59,7 +59,7 @@ export function canDeleteFile(actor: Actor, file: SafeFile): boolean {
 
 /**
  * A File must not be deleted while an **active** Job
- * (`QUEUED`/`CLAIMED`/`RENDERING`/`DELIVERING`) depends on it as an input —
+ * (`QUEUED`/`CLAIMED`/`RENDERING`) depends on it as an input —
  * historical (terminal-state) Jobs never depend on this row, because their
  * `JobAsset` rows already carry a copy of everything they need
  * (`fileOriginalName`/`fileMimeType`/`fileSizeBytes`/`fileWidth`/`fileHeight`,

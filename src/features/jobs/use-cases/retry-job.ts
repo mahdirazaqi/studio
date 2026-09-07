@@ -70,7 +70,6 @@ export async function retryJob(
     templateId: original.templateId,
     snapshot: original.snapshot,
     title: original.title,
-    deliverToYouTube: original.deliverToYouTube,
     attemptNumber: original.attemptNumber + 1,
     retriedByUserId: actor.userId,
     retryReason: reason ?? null,

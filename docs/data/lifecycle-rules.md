@@ -56,7 +56,7 @@ The single reference for what can be deleted, when, and how. These rules are **b
 
 A File may be physically deleted (row + bytes) only when **all** hold:
 
-1. No Job in an **active** state (`QUEUED`, `CLAIMED`, `RENDERING`, `DELIVERING`)
+1. No Job in an **active** state (`QUEUED`, `CLAIMED`, `RENDERING`)
    references it as an input asset.
 2. It is not currently being written / processed.
 3. Deleting it does not remove information a **historical** Job needs — and it never
@@ -91,32 +91,31 @@ If (1) or (2) fails, deletion is **blocked** with a clear reason.
 ### Job Artifacts
 
 - Eligible for **automatic** physical deletion after the owning Job reaches a completed
-  state (`UPLOADED`; possibly `CANCELED`/`ERROR` after a grace period).
+  state (`RENDERED`; possibly `CANCELED`/`ERROR` after a grace period).
 - The Job row keeps `videoFileId`/`screenshotFileId`/`thumbnailFileId` — these become
   `null` after cleanup; the Job stays coherent.
 
 > **Phase 9 status: implemented, but not auto-triggered.** `Job.videoFileId`/
 > `screenshotFileId`/`thumbnailFileId` are real columns (ADR-0039), set atomically with
 > the `RENDERING -> RENDERED` transition
-> (`features/delivery/use-cases/accept-job-result.ts`). `cleanupJobArtifacts`
+> (`features/delivery/use-cases/accept-job-result.ts`) — `RENDERED` is the Job's final,
+> successful state (ADR-0041; there is no delivery step after it). `cleanupJobArtifacts`
 > (`features/delivery/use-cases/cleanup-job-artifacts.ts`) is the safe, idempotent,
 > reference-aware deletion function this section describes — it deletes only the video
-> (never screenshot/thumbnail), only from `UPLOADED`, only after a required YouTube
-> delivery actually succeeded, and clears `videoFileId` to `null` on success. **Nothing
-> calls it automatically yet** — see the still-open retention question immediately below.
+> (never screenshot/thumbnail), only from `RENDERED`, and clears `videoFileId` to `null`
+> on success. **Nothing calls it automatically yet** — see the still-open retention
+> question immediately below.
 
 > **`OPEN DECISION` — Job Artifact retention specifics (OD-18).**
 >
-> - Delete the full rendered video immediately after successful required delivery, or
->   after N days?
+> - Delete the full rendered video immediately after reaching `RENDERED`, or after N days?
 > - Keep screenshot/thumbnail longer than the video (cheap, useful for the UI)?
-> - Does successful YouTube delivery make the local copy redundant enough to purge?
 > - Grace period for `ERROR`/`CANCELED` jobs before purging their artifacts (to allow
 >   debugging / retry)?
->   _Consequence of aggressive:_ minimal storage, but no re-delivery and harder debugging.
+>   _Consequence of aggressive:_ minimal storage, but harder debugging.
 >   _Consequence of conservative:_ storage grows with every render.
->   Recommended starting point: **video purged after successful required delivery + 7-day
->   grace; screenshot + thumbnail kept 90 days; all windows configurable.**
+>   Recommended starting point: **video purged 7 days after reaching `RENDERED`;
+>   screenshot + thumbnail kept 90 days; all windows configurable.**
 
 > **`OPEN DECISION` — one-off Telegram/upload inputs.** An input file uploaded solely for
 > one Job (e.g. a Telegram-downloaded image) — is it a `JOB_ARTIFACT` (purgeable) or does

@@ -3,17 +3,12 @@ import "server-only";
 import { type Prisma } from "@prisma/client";
 
 import { db } from "@/server/db";
-import { env } from "@/server/env";
-import { conflictError } from "@/server/errors/app-error";
 import { departmentScopeFilter, type Actor } from "@/server/authz";
 import type { Paginated } from "@/types";
 import type {
-  DeliveryProvider,
-  DeliveryStatus,
   JobAssetKind,
   JobSnapshot,
   JobState,
-  SafeDeliveryAttempt,
   SafeJob,
   SafeJobAsset,
   SafeJobDetail,
@@ -42,7 +37,6 @@ const SAFE_JOB_SELECT = {
   state: true,
   progress: true,
   durationSeconds: true,
-  deliverToYouTube: true,
   retryOfJobId: true,
   attemptNumber: true,
   createdByUserId: true,
@@ -64,7 +58,6 @@ function toSafeJob(row: SafeJobRow): SafeJob {
     state: row.state,
     progress: row.progress,
     durationSeconds: row.durationSeconds,
-    deliverToYouTube: row.deliverToYouTube,
     retryOfJobId: row.retryOfJobId,
     attemptNumber: row.attemptNumber,
     createdByUserId: row.createdByUserId,
@@ -88,25 +81,9 @@ const SAFE_JOB_DETAIL_SELECT = {
   claimedAt: true,
   startedAt: true,
   renderedAt: true,
-  deliveredAt: true,
-  uploadedAt: true,
   videoFileId: true,
   screenshotFileId: true,
   thumbnailFileId: true,
-  deliveryAttempts: {
-    select: {
-      id: true,
-      provider: true,
-      status: true,
-      attemptNumber: true,
-      providerRef: true,
-      failureReason: true,
-      triggeredByUserId: true,
-      startedAt: true,
-      completedAt: true,
-    },
-    orderBy: [{ provider: "asc" }, { attemptNumber: "desc" }],
-  },
   assets: {
     select: {
       id: true,
@@ -160,24 +137,9 @@ function toSafeJobDetail(row: SafeJobDetailRow): SafeJobDetail {
     claimedAt: row.claimedAt,
     startedAt: row.startedAt,
     renderedAt: row.renderedAt,
-    deliveredAt: row.deliveredAt,
-    uploadedAt: row.uploadedAt,
     videoFileId: row.videoFileId,
     screenshotFileId: row.screenshotFileId,
     thumbnailFileId: row.thumbnailFileId,
-    deliveryAttempts: row.deliveryAttempts.map(
-      (attempt): SafeDeliveryAttempt => ({
-        id: attempt.id,
-        provider: attempt.provider as DeliveryProvider,
-        status: attempt.status as DeliveryStatus,
-        attemptNumber: attempt.attemptNumber,
-        providerRef: attempt.providerRef,
-        failureReason: attempt.failureReason,
-        triggeredByUserId: attempt.triggeredByUserId,
-        startedAt: attempt.startedAt,
-        completedAt: attempt.completedAt,
-      }),
-    ),
   };
 }
 
@@ -201,96 +163,27 @@ export interface CreateJobData {
   templateId: string;
   snapshot: JobSnapshot;
   title: string;
-  deliverToYouTube: boolean;
   assets: JobAssetData[];
-}
-
-/**
- * Postgres advisory-lock namespace for the daily upload quota (ADR-0030).
- * Arbitrary but fixed and unique within the app — namespaces this lock apart
- * from any other advisory lock Studio might use later. Combined with a
- * per-UTC-day key (`hashtext(...)`) via the two-int `pg_advisory_xact_lock`
- * overload, so the lock is automatically released at transaction end
- * regardless of commit/rollback — no manual unlock call needed.
- */
-const UPLOAD_QUOTA_LOCK_NAMESPACE = 823_641;
-
-function utcDateKey(now: Date): string {
-  return now.toISOString().slice(0, 10); // "YYYY-MM-DD", UTC by construction
-}
-
-/**
- * Race-safe: every concurrent Job creation with `deliverToYouTube: true`
- * takes this advisory lock (keyed by the current UTC day) before counting
- * today's usage, serializing all such creations for that day into a queue.
- * Once inside the lock, the count-then-insert below can never race — the
- * next waiter only proceeds after this transaction commits or rolls back
- * (ADR-0030). A plain "count, then insert" without this lock is exactly the
- * race the Phase 6 brief §28 forbids.
- *
- * This throws a business-facing `conflict` error directly from the
- * repository, which is otherwise not this layer's job
- * (docs/architecture/project-structure.md's layer table lists "business/
- * authorization decisions" under repository's "Must NOT"). The exception is
- * deliberate: "atomic ops" *is* a repository responsibility per that same
- * table, and the lock + count + insert only work as a single atomic unit
- * inside one `$transaction` callback — splitting the quota check out to the
- * use-case layer would mean opening a second transaction (or none), losing
- * the very atomicity this function exists to provide. See ADR-0030.
- */
-async function assertUploadQuotaAvailable(
-  tx: Prisma.TransactionClient,
-  now: Date,
-): Promise<void> {
-  // Both arguments to the two-int `pg_advisory_xact_lock` overload must be
-  // `int4` — Prisma sends a bare numeric literal as `int8`/`numeric` by
-  // default, which matches no overload (`42883: function ... does not
-  // exist`), so both are cast explicitly.
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${UPLOAD_QUOTA_LOCK_NAMESPACE}::int, hashtext(${utcDateKey(now)})::int)`;
-
-  const startOfUtcDay = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-  const usedCapacity = await tx.job.count({
-    where: {
-      deliverToYouTube: true,
-      state: { notIn: ["ERROR", "CANCELED"] },
-      createdAt: { gte: startOfUtcDay },
-    },
-  });
-
-  if (usedCapacity >= env.JOB_UPLOAD_DAILY_CAP) {
-    throw conflictError(
-      `The daily limit of ${env.JOB_UPLOAD_DAILY_CAP} upload-enabled jobs has been reached. Try again after midnight UTC, or create this job without YouTube delivery.`,
-      { code: "job.upload_quota_exceeded" },
-    );
-  }
 }
 
 export async function createJobWithAssets(
   data: CreateJobData,
 ): Promise<SafeJobDetail> {
-  const row = await db.$transaction(async (tx) => {
-    if (data.deliverToYouTube) {
-      await assertUploadQuotaAvailable(tx, new Date());
-    }
-    return tx.job.create({
-      data: {
-        departmentId: data.departmentId,
-        createdByUserId: data.createdByUserId,
-        templateId: data.templateId,
-        snapshot: data.snapshot as unknown as Prisma.InputJsonValue,
-        title: data.title,
-        deliverToYouTube: data.deliverToYouTube,
-        assets: {
-          create: data.assets.map((asset, index) => ({
-            ...asset,
-            order: index,
-          })),
-        },
+  const row = await db.job.create({
+    data: {
+      departmentId: data.departmentId,
+      createdByUserId: data.createdByUserId,
+      templateId: data.templateId,
+      snapshot: data.snapshot as unknown as Prisma.InputJsonValue,
+      title: data.title,
+      assets: {
+        create: data.assets.map((asset, index) => ({
+          ...asset,
+          order: index,
+        })),
       },
-      select: SAFE_JOB_DETAIL_SELECT,
-    });
+    },
+    select: SAFE_JOB_DETAIL_SELECT,
   });
   return toSafeJobDetail(row);
 }
@@ -434,8 +327,6 @@ export interface TransitionExtraData {
   claimedAt?: Date;
   startedAt?: Date;
   renderedAt?: Date;
-  deliveredAt?: Date;
-  uploadedAt?: Date;
   errorReason?: string;
   canceledByUserId?: string;
   canceledAt?: Date;
@@ -488,7 +379,7 @@ export async function setProgress(
   progress: number,
 ): Promise<SafeJobDetail | null> {
   const result = await db.job.updateMany({
-    where: { id: jobId, state: { notIn: ["UPLOADED", "ERROR", "CANCELED"] } },
+    where: { id: jobId, state: { notIn: ["RENDERED", "ERROR", "CANCELED"] } },
     data: { progress },
   });
   if (result.count === 0) return null;
@@ -506,7 +397,7 @@ export async function setDuration(
   durationSeconds: number,
 ): Promise<SafeJobDetail | null> {
   const result = await db.job.updateMany({
-    where: { id: jobId, state: { notIn: ["UPLOADED", "ERROR", "CANCELED"] } },
+    where: { id: jobId, state: { notIn: ["RENDERED", "ERROR", "CANCELED"] } },
     data: { durationSeconds },
   });
   if (result.count === 0) return null;
@@ -525,7 +416,6 @@ export interface CreateRetryData {
   templateId: string;
   snapshot: JobSnapshot;
   title: string;
-  deliverToYouTube: boolean;
   attemptNumber: number;
   retriedByUserId: string;
   retryReason: string | null;
@@ -540,8 +430,8 @@ export interface CreateRetryData {
  * the *same* original (docs/domain/jobs.md §46 "Retry Idempotency") without
  * needing a generic idempotency-key framework: a second, simultaneous retry
  * of the same Job waits for the first to commit, then re-runs its own
- * eligibility/quota checks against the now-current state. Two *genuinely
- * simultaneous, duplicate* retry clicks can still each pass those checks and
+ * eligibility check against the now-current state. Two *genuinely
+ * simultaneous, duplicate* retry clicks can still each pass that check and
  * produce two sibling retry Jobs — a client-side double-submit guard, not a
  * server invariant, is the intended defense against that (see ADR-0031).
  */
@@ -551,10 +441,6 @@ export async function createRetryJob(
   const row = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "jobs" WHERE id = ${data.originalJobId} FOR UPDATE`;
 
-    if (data.deliverToYouTube) {
-      await assertUploadQuotaAvailable(tx, new Date());
-    }
-
     return tx.job.create({
       data: {
         departmentId: data.departmentId,
@@ -562,7 +448,6 @@ export async function createRetryJob(
         templateId: data.templateId,
         snapshot: data.snapshot as unknown as Prisma.InputJsonValue,
         title: data.title,
-        deliverToYouTube: data.deliverToYouTube,
         retryOfJobId: data.originalJobId,
         attemptNumber: data.attemptNumber,
         retriedByUserId: data.retriedByUserId,
@@ -612,7 +497,7 @@ export async function countActiveJobAssetReferencesToFile(
   return db.jobAsset.count({
     where: {
       fileId,
-      job: { state: { in: ["QUEUED", "CLAIMED", "RENDERING", "DELIVERING"] } },
+      job: { state: { in: ["QUEUED", "CLAIMED", "RENDERING"] } },
     },
   });
 }

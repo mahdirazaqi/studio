@@ -23,7 +23,6 @@ import {
   resolveTelegramIdentity,
   type TelegramIdentity,
 } from "@/features/telegram/use-cases/resolve-telegram-identity";
-import { setDeliveryChoice } from "@/features/telegram/use-cases/set-delivery-choice";
 import { setTrackCount } from "@/features/telegram/use-cases/set-track-count";
 import type { WizardPayload } from "@/features/telegram/schemas/wizard-payload.schema";
 import { extractIncomingAssetValue } from "@/features/telegram/bot/incoming";
@@ -85,11 +84,7 @@ async function sendConfirmSummary(
   payload: WizardPayload,
 ): Promise<void> {
   await ctx.reply(
-    msg.confirmSummaryMessage(
-      payload.templateName,
-      payload.trackCount,
-      payload.deliverToYouTube,
-    ),
+    msg.confirmSummaryMessage(payload.templateName, payload.trackCount),
     kb.confirmKeyboard(),
   );
 }
@@ -269,36 +264,9 @@ telegramComposer.on("callback_query", async (ctx) => {
           action.templateId,
         );
         await ctx.answerCbQuery();
-        if (result.step === "ASK_DELIVERY") {
-          await ctx.reply(msg.askDeliveryMessage, kb.deliveryChoiceKeyboard());
-        } else {
+        if (result.step === "ASK_TRACK_COUNT") {
           await ctx.reply(msg.askTrackCountMessage);
-        }
-        return;
-      }
-
-      case "delivery_choice": {
-        const identity = await resolveTelegramIdentity(telegramUserId);
-        if (!identity) {
-          await ctx.answerCbQuery(msg.unlinkedActionMessage, {
-            show_alert: true,
-          });
-          return;
-        }
-        const state = await loadActiveWizardState(telegramUserId);
-        if (!state || state.step !== "ASK_DELIVERY") {
-          await ctx.answerCbQuery();
-          await ctx.reply(msg.sessionExpiredMessage, kb.mainMenuKeyboard());
-          return;
-        }
-        const result = await setDeliveryChoice(
-          telegramUserId,
-          ctx.update.update_id,
-          state.payload,
-          action.deliver,
-        );
-        await ctx.answerCbQuery();
-        if (result.step === "CONFIRM") {
+        } else if (result.step === "CONFIRM") {
           await sendConfirmSummary(ctx, result.payload);
         } else {
           const nextSlot = result.payload.slots[0];
@@ -446,9 +414,9 @@ telegramComposer.on(
         return;
       }
 
-      // PICK_TEMPLATE / ASK_DELIVERY / CONFIRM expect a button tap, not a
-      // plain message; CREATING/COMPLETED are transient/terminal. A stray
-      // message in any of these just gets nudged back, never silently eaten.
+      // PICK_TEMPLATE / CONFIRM expect a button tap, not a plain message;
+      // CREATING/COMPLETED are transient/terminal. A stray message in any of
+      // these just gets nudged back, never silently eaten.
       await ctx.reply(msg.unknownInputMessage);
     } catch (error) {
       await replyError(ctx, error);

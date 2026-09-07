@@ -62,16 +62,7 @@ export default async function JobDetailPage({
         title={job.title || "(untitled)"}
         description={`Template: ${job.snapshot.templateName}`}
         actions={
-          <JobActions
-            jobId={job.id}
-            jobTitle={job.title}
-            state={job.state}
-            canRetryDelivery={
-              job.state === "ERROR" &&
-              job.deliverToYouTube &&
-              job.videoFileId !== null
-            }
-          />
+          <JobActions jobId={job.id} jobTitle={job.title} state={job.state} />
         }
       />
 
@@ -97,12 +88,6 @@ export default async function JobDetailPage({
             <div>
               <span className="text-muted-foreground">Created by: </span>
               {job.createdByName ?? "—"}
-            </div>
-            <div>
-              <span className="text-muted-foreground">
-                Deliver to YouTube:{" "}
-              </span>
-              {job.deliverToYouTube ? "Yes" : "No"}
             </div>
             {job.retryOfJobId ? (
               <div className="sm:col-span-2">
@@ -154,70 +139,35 @@ export default async function JobDetailPage({
               <span className="text-muted-foreground">Rendered: </span>
               {formatDate(job.renderedAt)}
             </div>
-            <div>
-              <span className="text-muted-foreground">Delivered: </span>
-              {formatDate(job.deliveredAt)}
-            </div>
-            <div>
-              <span className="text-muted-foreground">Uploaded: </span>
-              {formatDate(job.uploadedAt)}
-            </div>
           </CardContent>
         </Card>
 
-        {job.videoFileId || job.deliveryAttempts.length > 0 ? (
+        {job.videoFileId ? (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Delivery</CardTitle>
+              <CardTitle className="text-base">Rendered result</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              {job.videoFileId ? (
-                <p>
-                  <span className="text-muted-foreground">
-                    Rendered video:{" "}
-                  </span>
-                  <a
-                    href={`/api/files/${job.videoFileId}`}
-                    className="hover:underline"
-                  >
-                    Download
-                  </a>
-                  {job.thumbnailFileId ? (
-                    <>
-                      {" · "}
-                      <a
-                        href={`/api/files/${job.thumbnailFileId}`}
-                        className="hover:underline"
-                      >
-                        Thumbnail
-                      </a>
-                    </>
-                  ) : null}
-                </p>
-              ) : null}
-              {job.snapshot.youtubeTarget ? (
-                <p>
-                  <span className="text-muted-foreground">
-                    YouTube channel:{" "}
-                  </span>
-                  {job.snapshot.youtubeTarget.name}
-                </p>
-              ) : null}
-              {job.deliveryAttempts.map((attempt) => (
-                <div
-                  key={attempt.id}
-                  className="flex flex-col gap-0.5 border-b pb-2 last:border-b-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
+              <p>
+                <span className="text-muted-foreground">Video: </span>
+                <a
+                  href={`/api/files/${job.videoFileId}`}
+                  className="hover:underline"
                 >
-                  <span className="text-muted-foreground">
-                    {attempt.provider} · attempt {attempt.attemptNumber}
-                  </span>
-                  <span>
-                    {attempt.status}
-                    {attempt.providerRef ? ` — ${attempt.providerRef}` : ""}
-                    {attempt.failureReason ? ` — ${attempt.failureReason}` : ""}
-                  </span>
-                </div>
-              ))}
+                  Download
+                </a>
+                {job.thumbnailFileId ? (
+                  <>
+                    {" · "}
+                    <a
+                      href={`/api/files/${job.thumbnailFileId}`}
+                      className="hover:underline"
+                    >
+                      Thumbnail
+                    </a>
+                  </>
+                ) : null}
+              </p>
             </CardContent>
           </Card>
         ) : null}
@@ -241,15 +191,6 @@ export default async function JobDetailPage({
               <span className="text-muted-foreground">Output pattern: </span>
               {job.snapshot.outputPattern}
             </p>
-            {job.snapshot.tags.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {job.snapshot.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
           </CardContent>
         </Card>
 

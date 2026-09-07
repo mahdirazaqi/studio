@@ -28,7 +28,6 @@ export const wizardPayloadSchema = z.object({
    * creation always re-validates against the live Template anyway
    * (`create-job.ts`). */
   templateName: z.string().min(1).max(255),
-  deliverToYouTube: z.boolean(),
   trackCount: z.number().int().min(1).max(MAX_ALBUM_TRACKS),
   /** Snapshotted from the Template at `PICK_TEMPLATE` time — see `WizardSlot`. */
   slots: z.array(wizardSlotSchema).max(50),

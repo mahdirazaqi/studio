@@ -1,10 +1,12 @@
 # Render Worker REST API
 
-**Implemented, Phase 7** (claim/get/state/progress/duration). **Result delivery
+**Implemented, Phase 7** (claim/get/state/progress/duration). **Result acceptance
 implemented, Phase 9** (§2, ADR-0039). **Per-Worker, Department-scoped API keys
 implemented, Phase 11** (§3/§4, ADR-0040 — supersedes ADR-0032's single shared static
-key). ADR-0004 (surface & auth requirement), ADR-0033 (API surface & versioning),
-ADR-0034 (trust model & idempotency, revised by ADR-0040).
+key). **YouTube delivery removed, Phase 12** (ADR-0041) — `POST .../result` now simply
+registers the rendered result and marks the Job `RENDERED`, its final state; no
+external upload of any kind happens. ADR-0004 (surface & auth requirement), ADR-0033
+(API surface & versioning), ADR-0034 (trust model & idempotency, revised by ADR-0040).
 
 The **Render Worker** is an external service (not in this repo) that performs the actual
 video rendering. It is the **only** first-class REST client of Studio. Studio must keep it
@@ -67,21 +69,24 @@ authenticate: authenticateWorker, params/body, handler })` — authenticate, val
 | `POST`  | `/api/worker/v1/jobs/:id/result`   | `POST /jobs/:id/upload`    | `acceptJobResult(id, videoBuffer)` (Phase 9, ADR-0039).                  |
 | `GET`   | `/api/files/:fileId`               | n/a (new)                  | Worker-authenticated branch of the existing Phase 4 route — see §5.      |
 
-**`POST /api/worker/v1/jobs/:id/result` — implemented, Phase 9.** Delivers the finished
-render (docs/integrations/youtube.md "Rendered result flow"). **Not multipart** — the
-request body is the raw video bytes, any `Content-Type` (the real type is sniffed from
-the bytes, never trusted from the header); this mirrors `/api/files/[fileId]`'s own
-raw-bytes response in the other direction and needed no new body-parsing capability in
+**`POST /api/worker/v1/jobs/:id/result` — implemented, Phase 9, revised ADR-0041.**
+Accepts the finished render and registers it as the Job's completion
+(docs/domain/jobs.md "Rendered result"). **Not multipart** — the request body is the
+raw video bytes, any `Content-Type` (the real type is sniffed from the bytes, never
+trusted from the header); this mirrors `/api/files/[fileId]`'s own raw-bytes response
+in the other direction and needed no new body-parsing capability in
 `defineRouteHandler`. The handler is still thin: it reads `request.arrayBuffer()` and
-calls `acceptJobResult` — media processing, artifact creation, and delivery orchestration
-all live in `features/delivery/use-cases/*`, not in the route.
+calls `acceptJobResult` — media processing and artifact creation live in
+`features/delivery/use-cases/*`, not in the route. **It does not upload anywhere** —
+there is no YouTube API call, no external delivery of any kind, ever, from this
+endpoint (ADR-0041).
 
 - Legal only from a Job in `RENDERING`. A duplicate Worker request (the Job already has a
-  `videoFileId`) is recognized and returned as-is — no reprocessing, no second delivery
-  run (docs/integrations/youtube.md "Idempotency & concurrency").
-- Success response: `{ id, state, videoFileId }` — `state` reflects the Job's state
-  _after_ delivery has already run synchronously (`RENDERED`/`DELIVERING` are never
-  visible in this response; a Worker sees `UPLOADED` or `ERROR` directly).
+  `videoFileId`) is recognized and returned as-is — no reprocessing.
+- Success response: `{ id, state, videoFileId }` — `state` is `RENDERED` (the Job's
+  final, successful completion state) or `ERROR` if something about the result was
+  rejected. There is no `DELIVERING`/`UPLOADED` to report — those states were removed
+  (ADR-0041).
 - `POST /api/worker/v1/files` (a Worker uploading an input file) remains **not
   implemented** — see §6.
 
@@ -96,9 +101,9 @@ all live in `features/delivery/use-cases/*`, not in the route.
 | 2          | Downloading | `RENDERING` (substate not tracked internally — unchanged OPEN DECISION) |
 | 3          | Started     | `RENDERING`                                                             |
 | 4          | InProgress  | `RENDERING`                                                             |
-| 5          | Rendered    | `RENDERED`                                                              |
-| 6          | Uploading   | `DELIVERING`                                                            |
-| 7          | Uploaded    | `UPLOADED`                                                              |
+| 5          | Rendered    | `RENDERED` (the Job's final, successful state — ADR-0041)               |
+| 6          | Uploading   | **no longer mapped** — rejected `422 validation` (ADR-0041)             |
+| 7          | Uploaded    | **no longer mapped** — rejected `422 validation` (ADR-0041)             |
 | 8          | Error       | `ERROR`                                                                 |
 | 9          | Cancel      | `CANCELED`                                                              |
 
@@ -282,8 +287,7 @@ correctly regardless of how the Worker reaches Studio.
 
 ## 6. Deferred — not implemented
 
-- **`POST /api/worker/v1/jobs/:id/result`** — implemented, Phase 9. See §2 above and
-  docs/integrations/youtube.md for the full delivery pipeline it triggers.
+- **`POST /api/worker/v1/jobs/:id/result`** — implemented, Phase 9. See §2 above.
 - **`POST /api/worker/v1/files`** — a Worker uploading an input file directly. No
   concrete requirement calls for this yet (input files come from the Gallery, resolved
   at Job creation) — deferred until the result-upload endpoint above needs it, if ever.
@@ -296,14 +300,14 @@ correctly regardless of how the Worker reaches Studio.
 
 ## 6a. Worker compatibility matrix (five required operations)
 
-| Legacy route               | Legacy method | Studio route                       | Studio method | Request                                                                  | Response                                                          | Auth                                                                        | Notes                                                                                                                                                                                            |
-| -------------------------- | ------------- | ---------------------------------- | ------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /jobs/fetch`          | `GET`         | `/api/worker/v1/jobs/next`         | `POST`        | none                                                                     | `200` claim payload (see §2) or `204 No Content` if none eligible | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Method intentionally changed: a side-effecting `GET` is forbidden (Security Requirements §11); atomic claim (`SELECT ... FOR UPDATE SKIP LOCKED`), never a find-then-update race.                |
-| `POST /jobs/:id/upload`    | `POST`        | `/api/worker/v1/jobs/:id/result`   | `POST`        | Raw video bytes (any `Content-Type`; sniffed server-side), not multipart | `200 { id, state, videoFileId }`                                  | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Renamed `upload` → `result` (delivering the render output, not uploading an input file); synchronous, not fire-and-forget; idempotent on a duplicate submission.                                 |
-| `PATCH /jobs/:id/state`    | `PATCH`       | `/api/worker/v1/jobs/:id/state`    | `PATCH`       | `{ state }` — legacy integer 0–9 **or** a Studio state name              | `200 { id, state }`                                               | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Legacy accepted **any** integer with no validation; Studio validates against the state machine (`422`/`409` for an illegal/raced transition). `errorReason` required when the target is `ERROR`. |
-| `PATCH /jobs/:id/progress` | `PATCH`       | `/api/worker/v1/jobs/:id/progress` | `PATCH`       | `{ progress: 0..100 }`                                                   | `200 { id, progress }`                                            | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Legacy `{progress}` was unvalidated; Studio validates the range and rejects once the Job is terminal.                                                                                            |
-| `PATCH /jobs/:id/duration` | `PATCH`       | `/api/worker/v1/jobs/:id/duration` | `PATCH`       | `{ durationSeconds: >=0 }`                                               | `200 { id, durationSeconds }`                                     | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Legacy key was `duration`; Studio renamed to `durationSeconds` (resolves OD-33) and validates non-negative.                                                                                      |
-| n/a (Worker had none)      | —             | `GET /api/worker/v1/jobs/:id`      | `GET`         | none                                                                     | `200` same payload shape as claim                                 | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | New — lets a Worker that crashed mid-render re-fetch the Job it was working on, by id, instead of losing its place.                                                                              |
+| Legacy route               | Legacy method | Studio route                       | Studio method | Request                                                                  | Response                                                          | Auth                                                                        | Notes                                                                                                                                                                                                    |
+| -------------------------- | ------------- | ---------------------------------- | ------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /jobs/fetch`          | `GET`         | `/api/worker/v1/jobs/next`         | `POST`        | none                                                                     | `200` claim payload (see §2) or `204 No Content` if none eligible | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Method intentionally changed: a side-effecting `GET` is forbidden (Security Requirements §11); atomic claim (`SELECT ... FOR UPDATE SKIP LOCKED`), never a find-then-update race.                        |
+| `POST /jobs/:id/upload`    | `POST`        | `/api/worker/v1/jobs/:id/result`   | `POST`        | Raw video bytes (any `Content-Type`; sniffed server-side), not multipart | `200 { id, state, videoFileId }`                                  | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Renamed `upload` → `result`; registers the render as the Job's completion (state becomes `RENDERED`, terminal — ADR-0041). No YouTube/external upload of any kind. Idempotent on a duplicate submission. |
+| `PATCH /jobs/:id/state`    | `PATCH`       | `/api/worker/v1/jobs/:id/state`    | `PATCH`       | `{ state }` — legacy integer 0–9 **or** a Studio state name              | `200 { id, state }`                                               | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Legacy accepted **any** integer with no validation; Studio validates against the state machine (`422`/`409` for an illegal/raced transition). `errorReason` required when the target is `ERROR`.         |
+| `PATCH /jobs/:id/progress` | `PATCH`       | `/api/worker/v1/jobs/:id/progress` | `PATCH`       | `{ progress: 0..100 }`                                                   | `200 { id, progress }`                                            | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Legacy `{progress}` was unvalidated; Studio validates the range and rejects once the Job is terminal.                                                                                                    |
+| `PATCH /jobs/:id/duration` | `PATCH`       | `/api/worker/v1/jobs/:id/duration` | `PATCH`       | `{ durationSeconds: >=0 }`                                               | `200 { id, durationSeconds }`                                     | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | Legacy key was `duration`; Studio renamed to `durationSeconds` (resolves OD-33) and validates non-negative.                                                                                              |
+| n/a (Worker had none)      | —             | `GET /api/worker/v1/jobs/:id`      | `GET`         | none                                                                     | `200` same payload shape as claim                                 | `Authorization: Bearer <WorkerApiKey secret>` (Department-scoped, ADR-0040) | New — lets a Worker that crashed mid-render re-fetch the Job it was working on, by id, instead of losing its place.                                                                                      |
 
 All five required routes plus the new GET-by-id were re-verified with real HTTP requests
 against a running dev server (not just unit tests) during the most recent Worker-API
@@ -311,9 +315,11 @@ review: unauthenticated/wrong-credential requests correctly `401`; the atomic cl
 correctly picked the oldest `QUEUED` Job; state/progress/duration validation and
 transition-legality errors matched exactly (`422` for both bad input and an illegal
 transition, `404` for a nonexistent Job id); the result endpoint accepted a real,
-`ffmpeg`-generated test video, transitioned the Job straight through to `UPLOADED`, and
-returned the identical response (same `videoFileId`, no reprocessing) on a duplicate
-submission; an oversized `Content-Length` was rejected before the body was read.
+`ffmpeg`-generated test video, transitioned the Job straight to `RENDERED` (its final,
+terminal state — ADR-0041, no YouTube/delivery step of any kind), and returned the
+identical response (same `videoFileId`, no reprocessing) on a duplicate submission; an
+oversized `Content-Length` was rejected before the body was read; legacy state codes `6`
+(Uploading) and `7` (Uploaded) were confirmed rejected with a clear `422`.
 
 ## 7. Compatibility notes / risks
 

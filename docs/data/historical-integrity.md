@@ -45,13 +45,16 @@ response will be built from.
 | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `templateId` + `templateName` (as-was)                | For each slot: `slotKey`, `kind`, `composition`, `layer`                                                                                                         |
 | `composition`, `source`, `outputPattern`, `scriptRef` | `DATA` (and the injected `SCRIPT` row): the literal `textValue`                                                                                                  |
-| `description`, `tags` (as-was, pre-substitution)      | file slots: `fileId` (live FK, `SetNull` on delete) **plus** `fileOriginalName`, `fileMimeType`, `fileSizeBytes`, `fileWidth`/`fileHeight` — copied, not re-read |
-| the ordered asset-slot definitions (as-was)           | —                                                                                                                                                                |
+| the ordered asset-slot definitions (as-was)           | file slots: `fileId` (live FK, `SetNull` on delete) **plus** `fileOriginalName`, `fileMimeType`, `fileSizeBytes`, `fileWidth`/`fileHeight` — copied, not re-read |
 
-**Not present:** `youtubeTargetId`/target identity (Template has no such field yet —
-OD-36 is open) and `duration` for file slots (needs `ffprobe`, not introduced — same gap
+**Not present:** `duration` for file slots (needs `ffprobe`, not introduced — same gap
 `File.durationSeconds` has). `title` is a plain top-level `Job` column, not part of
 either half, since it's the one derived value that needs no further Worker context.
+**Removed, ADR-0041**: `description`/`tags` (as-was, pre-substitution) — Templates no
+longer have these fields (they existed only to configure a YouTube upload), and
+`youtubeTargetId`/target identity was never added to this snapshot either (it briefly
+existed on Template, Phases 9–11, then was removed along with the rest of YouTube
+delivery).
 
 ### Resolved questions on snapshot shape
 

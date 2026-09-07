@@ -10,8 +10,6 @@ describe("mapWorkerState", () => {
     [3, "RENDERING"],
     [4, "RENDERING"],
     [5, "RENDERED"],
-    [6, "DELIVERING"],
-    [7, "UPLOADED"],
     [8, "ERROR"],
     [9, "CANCELED"],
   ] as const)("maps legacy int %i to %s", (input, expected) => {
@@ -21,6 +19,11 @@ describe("mapWorkerState", () => {
   it("rejects an out-of-range integer", () => {
     expect(mapWorkerState(10)).toBeNull();
     expect(mapWorkerState(-1)).toBeNull();
+  });
+
+  it("rejects the removed YouTube-upload legacy codes (6 Uploading, 7 Uploaded)", () => {
+    expect(mapWorkerState(6)).toBeNull();
+    expect(mapWorkerState(7)).toBeNull();
   });
 
   it("accepts a canonical Studio name", () => {

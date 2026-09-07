@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import type { Actor } from "@/server/authz";
 import { getTemplateForJobForm } from "@/features/jobs/use-cases/get-template-for-job-form";
 import { startWizardState } from "@/features/telegram/repository/telegram-repository";
+import { advanceTrackCursor } from "@/features/telegram/domain/wizard";
 import type {
   TelegramWizardFlow,
   WizardSlot,
@@ -11,8 +12,11 @@ import type { WizardPayload } from "@/features/telegram/schemas/wizard-payload.s
 
 export interface PickTemplateResult {
   templateName: string;
-  /** `ASK_DELIVERY` for Single Track, `ASK_TRACK_COUNT` for Album. */
-  step: "ASK_DELIVERY" | "ASK_TRACK_COUNT";
+  /** `ASK_TRACK_COUNT` for Album; `COLLECT_ASSETS`/`CONFIRM` for Single
+   * Track, which — since it has exactly one track and no longer asks a
+   * delivery question (ADR-0041) — opens straight into asset collection. */
+  step: "ASK_TRACK_COUNT" | "COLLECT_ASSETS" | "CONFIRM";
+  payload: WizardPayload;
 }
 
 /**
@@ -29,6 +33,11 @@ export interface PickTemplateResult {
  * Starts a **fresh** wizard row, replacing any prior in-progress
  * conversation for this Telegram user (matches legacy: picking a template is
  * always a deliberate restart).
+ *
+ * **Revised, ADR-0041**: Single Track no longer asks "deliver to YouTube?"
+ * (Studio has no YouTube delivery at all) — with `trackCount` fixed at 1, it
+ * opens the first track immediately, using the same cursor logic
+ * `enterCollectionPhase` uses for every subsequent step.
  */
 export async function pickTemplate(
   actor: Actor,
@@ -44,15 +53,37 @@ export async function pickTemplate(
     kind: asset.kind,
   }));
 
-  const step = flow === "SINGLE_TRACK" ? "ASK_DELIVERY" : "ASK_TRACK_COUNT";
-  const payload: WizardPayload = {
+  const basePayload: WizardPayload = {
     templateId: template.id,
     templateName: template.name,
-    deliverToYouTube: false,
     trackCount: 1,
     slots,
     tracks: [],
   };
+
+  if (flow === "ALBUM") {
+    await startWizardState({
+      telegramUserId,
+      userId: actor.userId,
+      flow,
+      step: "ASK_TRACK_COUNT",
+      payload: basePayload as unknown as Prisma.InputJsonValue,
+      lastUpdateId: updateId,
+    });
+    return {
+      templateName: template.name,
+      step: "ASK_TRACK_COUNT",
+      payload: basePayload,
+    };
+  }
+
+  const { tracks, allTracksDone } = advanceTrackCursor(
+    basePayload.tracks,
+    basePayload.slots.length,
+    basePayload.trackCount,
+  );
+  const step = allTracksDone ? "CONFIRM" : "COLLECT_ASSETS";
+  const payload: WizardPayload = { ...basePayload, tracks };
 
   await startWizardState({
     telegramUserId,
@@ -63,5 +94,5 @@ export async function pickTemplate(
     lastUpdateId: updateId,
   });
 
-  return { templateName: template.name, step };
+  return { templateName: template.name, step, payload };
 }
