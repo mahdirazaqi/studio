@@ -26,8 +26,8 @@ export const GET = defineRouteHandler({
   params: z.object({ jobId: commonSchemas.id }),
   handler: async ({ params, request, auth }) => {
     const job = await getJobForWorker(params.jobId, auth.allowedDepartmentIds);
-    return buildWorkerJobPayload(job, (fileId) =>
-      buildFileUrlFromRequest(request, fileId),
+    return buildWorkerJobPayload(job, (fileId, filenameHint) =>
+      buildFileUrlFromRequest(request, fileId, filenameHint),
     );
   },
 });

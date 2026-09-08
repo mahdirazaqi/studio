@@ -36,7 +36,7 @@ export interface WorkerJobPayload {
 
 function toWorkerAsset(
   asset: SafeJobAsset,
-  buildFileUrl: (fileId: string) => string,
+  buildFileUrl: (fileId: string, filenameHint?: string | null) => string,
 ): WorkerJobAsset {
   const type = asset.kind.toLowerCase();
 
@@ -72,13 +72,19 @@ function toWorkerAsset(
   // `/api/files/[fileId]` accommodates that (ADR-0043; see its own doc
   // comment). `null` when the source File has since been deleted; the
   // Worker cannot download it, but every other field here still reflects
-  // what the Job was created with.
+  // what the Job was created with. `fileOriginalName` is passed through as a
+  // filename hint (ADR-0044) so the URL's last path segment carries a real
+  // extension — the Worker's downloader saves the local copy under that
+  // exact segment, and an extension-less local file broke anything
+  // downstream that infers type from it.
   return {
     key: asset.slotKey,
     composition: asset.composition,
     layer: asset.layer,
     type,
-    src: asset.fileId ? buildFileUrl(asset.fileId) : null,
+    src: asset.fileId
+      ? buildFileUrl(asset.fileId, asset.fileOriginalName)
+      : null,
     text: null,
   };
 }
@@ -88,11 +94,13 @@ function toWorkerAsset(
  *   File id (`/api/files/[fileId]` — see `docs/architecture/files.md`
  *   "Access & preview: Worker access"). Deliberately relative, not absolute
  *   (ADR-0043) — the actual Worker's downloader only resolves correctly
- *   against a path joined onto its own configured base URL.
+ *   against a path joined onto its own configured base URL. Accepts an
+ *   optional filename hint (ADR-0044) appended as an extra, lookup-irrelevant
+ *   path segment so the Worker's locally saved copy keeps a real extension.
  */
 export function buildWorkerJobPayload(
   job: SafeJobDetail,
-  buildFileUrl: (fileId: string) => string,
+  buildFileUrl: (fileId: string, filenameHint?: string | null) => string,
 ): WorkerJobPayload {
   return {
     id: job.id,

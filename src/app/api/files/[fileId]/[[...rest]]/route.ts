@@ -47,10 +47,26 @@ import type { FileForServing } from "@/features/files/repository/file-repository
  * succeed; see that function's doc comment for the bounded scope this
  * fallback is restricted to (only a File that is a genuine input to a
  * currently-active Job).
+ *
+ * **Optional trailing filename segment (`/api/files/[fileId]/[[...rest]]`) —
+ * ADR-0044.** The real Worker's downloader
+ * (`navaak-ae-renderer/renderer/operator/downloader.go`'s `download()`)
+ * saves a downloaded URL locally under `filepath.Base(addr)` — the URL's
+ * **last path segment**. A bare `/api/files/{fileId}` has no extension, so
+ * the Worker's local temp copy of every downloaded asset/Template had none
+ * either — breaking anything downstream that infers file type from the
+ * extension (Adobe's `ImportOptions`/`replaceFootage` included). The claim
+ * payload now appends the File's own original filename as an extra,
+ * ignored path segment (`buildFileUrlFromRequest`,
+ * `worker-job-payload.ts`), giving the Worker's local copy a real
+ * extension. `rest` is **never used for lookup** — `fileId` alone still
+ * resolves the File, exactly as before; a request with no trailing segment
+ * (every existing caller — the dashboard, `FileCard`, etc.) is completely
+ * unaffected.
  */
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ fileId: string }> },
+  { params }: { params: Promise<{ fileId: string; rest?: string[] }> },
 ): Promise<Response> {
   const { fileId } = await params;
 

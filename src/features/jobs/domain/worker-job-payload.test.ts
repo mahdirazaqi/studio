@@ -133,6 +133,15 @@ describe("buildWorkerJobPayload", () => {
     });
   });
 
+  it("forwards the File's original filename as a hint to buildFileUrl (ADR-0044)", () => {
+    const calls: Array<[string, string | null | undefined]> = [];
+    buildWorkerJobPayload(baseJob, (fileId, filenameHint) => {
+      calls.push([fileId, filenameHint]);
+      return `https://studio.example/api/files/${fileId}`;
+    });
+    expect(calls).toContainEqual(["file-1", "cover.png"]);
+  });
+
   it("returns a null src for a file-kind asset whose File was deleted", () => {
     const jobWithDeletedFile: SafeJobDetail = {
       ...baseJob,

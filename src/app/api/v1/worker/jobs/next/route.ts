@@ -39,8 +39,8 @@ export const POST = defineRouteHandler({
   handler: async ({ request, auth }) => {
     const job = await claimNextJob(auth.allowedDepartmentIds);
     if (!job) throw notFoundError("Not Found");
-    return buildWorkerJobPayload(job, (fileId) =>
-      buildFileUrlFromRequest(request, fileId),
+    return buildWorkerJobPayload(job, (fileId, filenameHint) =>
+      buildFileUrlFromRequest(request, fileId, filenameHint),
     );
   },
 });

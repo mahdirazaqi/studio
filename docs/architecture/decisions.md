@@ -2016,3 +2016,48 @@ Found` response, never updated. A `204` has no body, so the Worker's own
   precedent for moving other logic into middleware.
 
 **Status:** DECIDED.
+
+## ADR-0044 — Give the Worker's downloaded files a real extension via a trailing, lookup-irrelevant filename segment
+
+**Context.** After ADR-0043 fixed the Worker's asset/Template download URLs to be
+relative paths, a user report surfaced a further real defect: `/api/files/{fileId}`
+downloads (e.g. `http://192.168.100.141:3002/api/files/cmtsbmyqk0003mlhwf1xguuu2`) have
+no file extension. The actual Worker's downloader
+(`navaak-ae-renderer/renderer/operator/downloader.go`'s `download()`) saves a
+downloaded URL's bytes to a local temp file named after `filepath.Base(addr)` — the
+URL's **last path segment**, used verbatim. A bare `/api/files/{id}` URL has no
+extension, so every asset/Template the Worker downloaded was saved locally with none —
+breaking anything downstream that infers file type from the extension (Adobe's
+`ImportOptions`/`replaceFootage`, used by the Worker's generated `.jsx` script, included).
+
+**Decision.**
+
+1. `/api/files/[fileId]/route.ts` moved to `/api/files/[fileId]/[[...rest]]/route.ts` —
+   an **optional catch-all** trailing segment. `fileId` alone still resolves the File
+   (identical behavior to before for every existing caller — the dashboard, `FileCard`,
+   etc., none of which send a trailing segment); `rest` is read but **never used for
+   lookup or authorization**, only present so a URL can carry a filename after the id.
+2. `buildFileUrlFromRequest` (`src/app/api/v1/worker/_lib/build-file-url.ts`) gained an
+   optional `filenameHint` parameter, appended (URL-encoded) as that extra segment when
+   given: `/api/files/{id}/{filename}`.
+3. `buildWorkerJobPayload`/`toWorkerAsset`
+   (`features/jobs/domain/worker-job-payload.ts`) now pass the `JobAsset`'s own
+   `fileOriginalName` — already captured at Job-creation time (ADR-0028), already
+   validated at upload time to agree with the File's actually-sniffed content type
+   (`resolveFileKind`, `features/files/domain/file-types.ts`) — as that hint. The
+   extension in the resulting URL is therefore trustworthy, not an unverified
+   client-supplied value used for anything security-sensitive: the route still serves
+   bytes and `Content-Type` from the File's own stored `mimeType`/`storageKey`,
+   completely independent of whatever the URL's trailing segment says.
+
+**Consequences.**
+
+- Every Worker-downloaded asset/Template now has a real, correct extension locally,
+  matching its actual content.
+- No existing caller of `/api/files/[fileId]` is affected — the route's URL shape for
+  every non-Worker use is unchanged (no trailing segment sent, `rest` is `undefined`).
+- The filename segment is cosmetic/functional for the Worker's local temp filename
+  only; it carries no authorization weight and is never trusted for content-type
+  determination — `Content-Type` still comes from the File's own server-side record.
+
+**Status:** DECIDED.

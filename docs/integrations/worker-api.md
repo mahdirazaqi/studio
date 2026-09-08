@@ -201,7 +201,7 @@ log dump).
       "composition": "c2",
       "layer": "l2",
       "type": "image",
-      "src": "/api/files/file_...",
+      "src": "/api/files/file_.../cover.png",
       "text": null
     }
   ]
@@ -226,6 +226,15 @@ URL, Go's `path.Join`/`path.Clean` collapses the `"://"` inside it, producing a
 mangled, unreachable request (verified by hand — see `build-file-url.ts`'s doc
 comment for the exact garbled result). Every Template/asset download the Worker made
 was silently broken until this fix.
+
+**`src` now carries a trailing filename hint — ADR-0044.** The real Worker's
+downloader saves a downloaded URL's bytes locally under `filepath.Base(addr)` — the
+URL's **last path segment**, used verbatim as the local filename. A bare
+`/api/files/{id}` has no extension, so every downloaded asset was saved locally with
+none — breaking anything downstream that infers file type from the extension. `src`
+now looks like `/api/files/{id}/{originalFilename}` — the extra segment is a pure
+filename hint, never used for lookup (`/api/files/[fileId]/[[...rest]]`, see
+`docs/architecture/files.md` "Access & preview").
 
 **Per-asset `src`/`text` mapping** (`type` is always the lowercase `JobAssetKind`):
 

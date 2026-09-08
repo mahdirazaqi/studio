@@ -41,7 +41,9 @@ src/features/files/
 
 src/server/adapters/storage/   StorageAdapter interface + LocalStorageAdapter (ADR-0024)
 src/server/media/probe.ts       sniffContentType, probeImageDimensions, hashContent
-src/app/api/files/[fileId]/route.ts   authenticated binary content delivery
+src/app/api/files/[fileId]/[[...rest]]/route.ts   authenticated binary content delivery
+                                                    (trailing [[...rest]] is an ignored
+                                                    filename hint, ADR-0044 — see below)
 ```
 
 ## Storage abstraction
@@ -129,6 +131,17 @@ never its storage key. That route:
   both resolve to `404`, and no session resolves to `401`.
 - **Supports a single `Range: bytes=start-end` request** (`206 Partial Content` /
   `416 Range Not Satisfiable`), enough for audio/video seeking. No multi-range support.
+- **Accepts an optional trailing filename segment, ignored for lookup — ADR-0044.**
+  `/api/files/[fileId]/[[...rest]]`: `fileId` alone always resolves the File; `rest`
+  (present or not) never affects it. Exists because the real Render Worker's
+  downloader (`navaak-ae-renderer/renderer/operator/downloader.go`) names its local
+  temp copy after a downloaded URL's **last path segment** — a bare `/api/files/{id}`
+  has no extension, so every asset/Template it downloaded was saved locally with none,
+  breaking anything downstream that infers file type from the extension. The Worker's
+  claim/get-by-id payload now appends the File's own original filename as this extra
+  segment (`buildFileUrlFromRequest`, `worker-job-payload.ts`) purely so the Worker's
+  local copy gets a real one — every other caller (the dashboard, `FileCard`, etc.)
+  never sends this segment and is completely unaffected.
 
 ## Historical integrity contract for Job/Template features
 
