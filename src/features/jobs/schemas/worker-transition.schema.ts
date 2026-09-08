@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * The Worker's state-update request body
- * (`PATCH /api/worker/v1/jobs/:id/state`). `state` accepts either a legacy
+ * (`PATCH /api/v1/worker/jobs/:id/state`). `state` accepts either a legacy
  * integer (0–9) or a Studio canonical name — `mapWorkerState`
  * (`features/jobs/domain/legacy-state-mapping.ts`) resolves which, and
  * whether it's valid at all; this schema only checks the shape.

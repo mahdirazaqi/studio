@@ -11,7 +11,7 @@ const VIDEO_MAX_SIZE_BYTES =
   FILE_KIND_RULES.find((rule) => rule.kind === "VIDEO")?.maxSizeBytes ?? 0;
 
 /**
- * `POST /api/worker/v1/jobs/:id/result` — the endpoint
+ * `POST /api/v1/worker/jobs/:id/result` — the endpoint
  * docs/integrations/worker-api.md §6 explicitly deferred to a future phase
  * (legacy `POST /jobs/:id/upload`). Implemented, Phase 9.
  *

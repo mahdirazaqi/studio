@@ -9,7 +9,7 @@ convention implemented in Phase 1.
 `src/server/api/index.ts` exports `defineRouteHandler` and `healthResponse`.
 
 ```ts
-// src/app/api/worker/v1/jobs/next/route.ts   (NOT built in Phase 1 — illustration)
+// src/app/api/v1/worker/jobs/next/route.ts   (NOT built in Phase 1 — illustration)
 import { defineRouteHandler } from "@/server/api";
 import { authenticateWorker } from "@/features/jobs/server/worker-auth";
 import { claimNextJob } from "@/features/jobs/use-cases/claim-next-job";
@@ -43,8 +43,14 @@ Flow: **request → authenticate → validate (params/query/body) → handler �
 
 - Handlers are **thin**: authenticate, validate, delegate to a use case, map the result.
 - The same use cases power Server Actions — no logic is duplicated in the handler.
-- The Worker surface is **versioned** (`/api/worker/v1/...`) and deliberately minimal —
-  only what the Worker needs (see [../integrations/worker-api.md](../integrations/worker-api.md)).
+- **Versioning convention:** `/api/v{version}/{service-or-resource}/...` — the version
+  segment comes first, before the service name, so a future v2 of any surface (or a new
+  external surface entirely) can sit alongside v1 without restructuring existing paths.
+  The Worker surface is the only one that exists today: `/api/v1/worker/...`, versioned
+  and deliberately minimal — only what the Worker needs (see
+  [../integrations/worker-api.md](../integrations/worker-api.md)). **Moved under this
+  convention, Phase 13** (was `/api/worker/v1/...` — the version segment used to come
+  after the service name; ADR-0042).
 - Health/readiness (`/api/health`) is the only unauthenticated handler and exposes no
   domain data.
 

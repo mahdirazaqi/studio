@@ -307,15 +307,23 @@ verify-file-references.ts`.
 - **Job creation now enforces Template state (disabled/deleted) — implemented, Phase 6.**
   `features/jobs/use-cases/create-job.ts` rejects a `DISABLED` or soft-deleted Template —
   the enforcement point Templates' own design always deferred to "a future Job feature."
-- **Department transfer is ADMIN-only — implemented, Phase 11 (ADR-0040).** On edit,
-  ADMIN may change a Template's `departmentId`; MANAGER/USER cannot, even via a crafted
-  request carrying `departmentId` — `updateTemplate` gates the transfer branch with
-  `requireRole(actor, "ADMIN")`, not just a capability floor. The dependent asset
-  `defaultFileId` reference is re-verified against the **target** Department, never
-  silently left pointing at the original. No historical-integrity mechanism was needed
-  for this: `Job.departmentId` is a plain column copied once at Job creation, never a
-  live join through the Template — see `docs/domain/templates.md` "Department transfer"
-  before touching this code path.
+- **Template Edit can never change a Template's Department — for any role, including
+  ADMIN — enforced structurally, not by a runtime role check (Phase 13, ADR-0042).**
+  `templateInputSchema` has no `departmentId` field at all; a client-submitted value is
+  stripped by Zod before `updateTemplate` ever sees it, and `updateTemplate`/
+  `updateTemplateWithAssets` never read, derive, or forward one. **Department transfer
+  is a separate, ADMIN-only operation** — `transferTemplateDepartment` (its own
+  use-case/schema/action/repository function — the only one that ever writes
+  `Template.departmentId`), gated by `requireRole(actor, "ADMIN")`, not just the
+  `template:manage` floor a MANAGER also holds, rendered as its own "Transfer
+  department" control, never inside the edit form. The dependent asset `defaultFileId`
+  reference is re-verified against the **target** Department, never silently left
+  pointing at the original. No historical-integrity mechanism was needed for this:
+  `Job.departmentId` is a plain column copied once at Job creation, never a live join
+  through the Template — see `docs/domain/templates.md` "Department transfer" before
+  touching this code path. Do not fold transfer back into `updateTemplate`, and do not
+  add a second `departmentId`-accepting Template write path outside `createTemplate`
+  (creation, ADMIN-only optional) and `transferTemplateDepartment`.
 - **No `description`/`tags`/`youtubeTargetId` fields — removed, ADR-0041.** A Template
   describes only the render itself; Studio has no YouTube (or any other external)
   delivery destination to configure. Do not reintroduce delivery-destination fields on
@@ -397,9 +405,9 @@ Full detail: [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md
 [`docs/architecture/decisions.md`](docs/architecture/decisions.md)
 ADR-0004/ADR-0033/ADR-0034/ADR-0040. **Implemented, Phase 7, per-Worker Department-scoped
 API keys implemented Phase 11 (ADR-0040, supersedes ADR-0032)** — versioned under
-`/api/worker/v1/**`, plus a Worker-auth branch on `/api/files/[fileId]`.
+`/api/v1/worker/**`, plus a Worker-auth branch on `/api/files/[fileId]`.
 
-- **Every `/api/worker/v1/**` Route Handler is a thin `defineRouteHandler` wrapper**:
+- **Every `/api/v1/worker/**` Route Handler is a thin `defineRouteHandler` wrapper**:
   `authenticate: authenticateWorker` (`@/server/worker-auth`), a Zod `params`/`body`
   schema, and a handler that destructures `ctx.auth.allowedDepartmentIds` and passes it
   into a Phase 6 use case (or a small Phase 7 adapter over one — `transitionJobForWorker`,
@@ -453,11 +461,11 @@ UPDATE SKIP LOCKED` filters `WHERE "departmentId" = ANY(allowedDepartmentIds)` a
   body — `claimNextJob()` returning `null` already triggers this via
   `defineRouteHandler`'s built-in mapping.
 - **Result/output upload is implemented, Phase 9** — see §15. `POST
-/api/worker/v1/jobs/:id/result` takes the raw video bytes as the request body, not
+/api/v1/worker/jobs/:id/result` takes the raw video bytes as the request body, not
   multipart — do not add multipart parsing to `defineRouteHandler` for this; the handler
   reads `request.arrayBuffer()` directly.
 - **Not implemented, deliberately**: Worker-initiated cancel/retry, per-Worker rate
-  limiting, a Worker input-file-upload endpoint (`POST /api/worker/v1/files`). Do not add
+  limiting, a Worker input-file-upload endpoint (`POST /api/v1/worker/files`). Do not add
   any of these without re-reading `docs/integrations/worker-api.md` §6 first.
 
 ## 14. Telegram rules (summary)
@@ -520,7 +528,7 @@ Single Track/Album/List/Retry/Cancel/Cancel-All flows.
 
 Full detail: [`docs/domain/jobs.md`](docs/domain/jobs.md) "Rendered result",
 [`docs/architecture/decisions.md`](docs/architecture/decisions.md) ADR-0039/ADR-0041.
-**Implemented, Phase 9** — `POST /api/worker/v1/jobs/:id/result`, `ffmpeg`-based artifact
+**Implemented, Phase 9** — `POST /api/v1/worker/jobs/:id/result`, `ffmpeg`-based artifact
 generation. **YouTube delivery removed, Phase 12 (ADR-0041)** — Studio does not upload
 rendered Jobs to YouTube (or anywhere else); `RENDERED` is the Job's final state.
 
@@ -619,7 +627,7 @@ SKIP LOCKED` Worker claim (manually verified race-free); a global, UTC-day uploa
   resolved as whole-department for USER (resolves OD-03 for Jobs); the real
   `assertNoActiveJobDependencies` File-dependency check (closing the loop ADR-0025
   opened in Phase 4); and a create/list/filter/detail/cancel/retry UI.
-- **Phase 7 (Worker REST API) — complete.** `/api/worker/v1/{jobs/next, jobs/:id,
+- **Phase 7 (Worker REST API) — complete.** `/api/v1/worker/{jobs/next, jobs/:id,
 jobs/:id/state, jobs/:id/progress, jobs/:id/duration}` — thin `defineRouteHandler`
   wrappers over Phase 6's use cases, nothing more (ADR-0033); a single shared static
   `WORKER_API_KEY` (required env var, timing-safe `Authorization: Bearer` check, no
@@ -650,7 +658,7 @@ jobs/:id/state, jobs/:id/progress, jobs/:id/duration}` — thin `defineRouteHand
   phone-editing UI. **Still no user/department management UI, no result upload, no
   YouTube.**
 - **Phase 9 (Media processing & delivery) — complete.** `POST
-/api/worker/v1/jobs/:id/result` accepts the Worker's rendered result as raw bytes
+/api/v1/worker/jobs/:id/result` accepts the Worker's rendered result as raw bytes
   (`acceptJobResult`, idempotent against duplicate/racing requests); `ffmpeg`-only media
   processing (`server/adapters/media/ffmpeg-adapter.ts`, ADR-0039 — ImageMagick
   deliberately not migrated) generates a screenshot + thumbnail and creates the first real
@@ -730,7 +738,7 @@ check`/`npm run build` both pass.
   `YOUTUBE_CLIENT_ID`/`YOUTUBE_CLIENT_SECRET`/`YOUTUBE_TOKEN_ENCRYPTION_KEY`. A real
   Prisma migration dropped the corresponding tables/columns/enum values, verified empty
   beforehand in every environment checked (zero data loss). `RENDERED` is now the Job's
-  terminal, successful completion state — `POST /api/worker/v1/jobs/:id/result` still
+  terminal, successful completion state — `POST /api/v1/worker/jobs/:id/result` still
   accepts the Worker's rendered bytes (unchanged shape) and generates the same
   `ffmpeg`-based screenshot/thumbnail artifacts, but now only sends a best-effort
   "rendered" Telegram notification afterward, never an external delivery call. Legacy
@@ -740,6 +748,31 @@ check`/`npm run build` both pass.
   genuine `ffmpeg`-generated test video) confirmed the full Worker flow reaches
   `RENDERED` directly with no YouTube API call of any kind. `npm run check`/`npm run
 build` both pass; `npm install` succeeds cleanly after the `googleapis` removal.
+- **Phase 13 (UI/API/Template/File-picker hardening) — complete (ADR-0042).** Dark
+  Mode's native `<select>`/form-control chrome fixed at the root cause — a two-line
+  `color-scheme: light`/`color-scheme: dark` CSS addition (`src/app/globals.css`), not a
+  component rewrite; every Radix overlay (`DropdownMenu`, `Sheet`) was already correctly
+  token-driven. The Worker REST API moved from `/api/worker/v1/...` to
+  `/api/v1/worker/...` (a real directory move, not a redirect) — establishing
+  `/api/v{version}/{service-or-resource}/...` as the versioning convention going
+  forward; every reference across routes, `worker-auth`, docs, and tests was updated,
+  with no backward-compatible old route kept (the Worker is in-repo and was updated
+  directly). Template Edit is now **structurally** incapable of changing a Template's
+  Department — `templateInputSchema` has no `departmentId` field, so a client-submitted
+  one is stripped by Zod before `updateTemplate` ever runs, and the use case/repository
+  layer never reads or writes one either; Department transfer became its own
+  ADMIN-only operation (`transferTemplateDepartment`, its own schema/action/repository
+  function), rendered as a separate control, never inside the edit form (see §10 above,
+  `docs/domain/templates.md` "Department transfer"). Job asset File selection for
+  `IMAGE`/`AUDIO`/`VIDEO` slots is now a visual `FilePicker`
+  (`features/files/components/file-picker.tsx`) — thumbnails, live filename search, and
+  inline upload — built entirely on the existing File Gallery/upload architecture
+  (`searchGalleryFilesAction`/`uploadFileAction`, no new storage or media pipeline); a
+  freshly uploaded file is auto-selected immediately. Every existing Department-isolation
+  guarantee is unchanged: the picker's own department narrowing is advisory/UX only,
+  and `features/jobs/use-cases/resolve-job-assets.ts` still re-validates every submitted
+  `fileId` against the Template's Department server-side, exactly as before. 446 tests
+  pass; `npm run check`/`npm run build` both pass.
 
 Do not start a new phase beyond this unless explicitly asked — see
 [`docs/development/workflow.md`](docs/development/workflow.md) for the full history

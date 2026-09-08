@@ -83,12 +83,12 @@ How legacy concepts translate to Studio. "Reason / notes" links to the governing
 
 | Legacy                                                  | Studio                                                               | Reason / notes                                 |
 | ------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------- |
-| `POST /files` (user-authenticated)                      | `POST /api/worker/v1/files` (worker-credential)                      | ADR-0004                                       |
-| `GET /jobs/fetch` (unauth, non-atomic)                  | `POST /api/worker/v1/jobs/next` (worker-credential, atomic)          | ADR-0004, K1, K3                               |
-| `GET /jobs/:id` (unauth)                                | `GET /api/worker/v1/jobs/:id` (worker-credential)                    | ADR-0004                                       |
-| `PATCH /jobs/:id/progress                               | duration                                                             | state` (unauth, unvalidated)                   | Same paths under `/api/worker/v1`, authenticated + validated | ADR-0004, K14 |
-| `POST /jobs/:id/upload` (unauth) → 200, fire-and-forget | `POST /api/worker/v1/jobs/:id/result` (auth) → 202, durable delivery | ADR-0004, ADR-0016                             |
-| No version, no `/api` prefix                            | Versioned under `/api/worker/v1`                                     | [worker-api.md](../integrations/worker-api.md) |
+| `POST /files` (user-authenticated)                      | `POST /api/v1/worker/files` (worker-credential)                      | ADR-0004                                       |
+| `GET /jobs/fetch` (unauth, non-atomic)                  | `POST /api/v1/worker/jobs/next` (worker-credential, atomic)          | ADR-0004, K1, K3                               |
+| `GET /jobs/:id` (unauth)                                | `GET /api/v1/worker/jobs/:id` (worker-credential)                    | ADR-0004                                       |
+| `PATCH /jobs/:id/progress                               | duration                                                             | state` (unauth, unvalidated)                   | Same paths under `/api/v1/worker`, authenticated + validated | ADR-0004, K14 |
+| `POST /jobs/:id/upload` (unauth) → 200, fire-and-forget | `POST /api/v1/worker/jobs/:id/result` (auth) → 202, durable delivery | ADR-0004, ADR-0016                             |
+| No version, no `/api` prefix                            | Versioned under `/api/v1/worker`                                     | [worker-api.md](../integrations/worker-api.md) |
 | No auth of any kind                                     | Service credential on every endpoint                                 | ADR-0004                                       |
 
 ## Telegram

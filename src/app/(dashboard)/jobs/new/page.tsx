@@ -5,8 +5,6 @@ import { requireUser } from "@/server/auth/current-user";
 import { toActor } from "@/server/authz";
 import { JobCreateForm } from "@/features/jobs/components/job-create-form";
 import { listDepartmentTemplates } from "@/features/templates/use-cases/list-templates";
-import { listGalleryFiles } from "@/features/files/use-cases/list-files";
-import { listAllGalleryFilesForAdmin } from "@/features/files/use-cases/list-all-gallery-files-for-admin";
 import { listDepartmentsForAdmin } from "@/features/departments/read/list-departments-for-admin";
 
 export const metadata: Metadata = { title: "New Job" };
@@ -16,17 +14,12 @@ export default async function NewJobPage() {
   const actor = toActor(user);
   const isAdmin = actor.role === "ADMIN";
 
-  const [{ items: templates }, galleryFiles, departments] = await Promise.all([
+  const [{ items: templates }, departments] = await Promise.all([
     listDepartmentTemplates(actor, {
       status: "ACTIVE",
       page: 1,
       pageSize: 100,
     }),
-    isAdmin
-      ? listAllGalleryFilesForAdmin(actor)
-      : listGalleryFiles(actor, { page: 1, pageSize: 100 }).then(
-          (result) => result.items,
-        ),
     isAdmin ? listDepartmentsForAdmin(actor) : undefined,
   ]);
 
@@ -46,10 +39,7 @@ export default async function NewJobPage() {
         title="New job"
         description="Create a render request from a template."
       />
-      <JobCreateForm
-        templateChoices={templateChoices}
-        galleryFiles={galleryFiles}
-      />
+      <JobCreateForm templateChoices={templateChoices} />
     </PageShell>
   );
 }

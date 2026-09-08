@@ -58,12 +58,13 @@ src/
 │       ├── files/[fileId]/route.ts   binary content delivery (Phase 4) — plain handler,
 │       │                             not defineRouteHandler; session- **or**
 │       │                             Worker-authenticated (Phase 7, see boundaries.md)
-│       ├── worker/v1/jobs/       IMPLEMENTED (Phase 7/9) — next/, [jobId]/,
-│       │                         [jobId]/{state,progress,duration,result}/ — every route
-│       │                         a thin defineRouteHandler over a Phase 6/9 use case;
-│       │                         result/ (Phase 9) takes the raw video body, not JSON;
-│       │                         _lib/build-file-url.ts (route-local helper, excluded
-│       │                         from routing by its `_` prefix)
+│       ├── v1/worker/jobs/       IMPLEMENTED (Phase 7/9; moved under /api/v1/, Phase 13)
+│       │                         — next/, [jobId]/, [jobId]/{state,progress,duration,
+│       │                         result}/ — every route a thin defineRouteHandler over a
+│       │                         Phase 6/9 use case; result/ (Phase 9) takes the raw
+│       │                         video body, not JSON; _lib/build-file-url.ts
+│       │                         (route-local helper, excluded from routing by its `_`
+│       │                         prefix)
 │       └── telegram/webhook/route.ts IMPLEMENTED (Phase 8) — the Telegram webhook, a thin
 │                                 defineRouteHandler authenticated by
 │                                 @/server/telegram-webhook-auth; delegates entirely to

@@ -222,7 +222,7 @@ FROM jobs WHERE state = 'QUEUED' AND "departmentId" = ANY(allowedDepartmentIds) 
 never receive the same Job — manually verified against the real database with two
 genuinely concurrent calls, and again at the HTTP layer once Phase 7 exposed it.
 Legacy's non-atomic `fetch` is exactly what this fixes. **Exposed over REST, Phase 7**:
-`POST /api/worker/v1/jobs/next` calls this directly, after its own Worker-credential
+`POST /api/v1/worker/jobs/next` calls this directly, after its own Worker-credential
 authentication — see [../integrations/worker-api.md](../integrations/worker-api.md).
 
 FIFO by `createdAt` within scope — matches legacy's single shared queue, narrowed by
@@ -277,7 +277,7 @@ is completely unaffected by that removal; it never was the same operation.
 
 `RENDERED` and its timeline timestamp (`renderedAt`) are driven by a real, tested path:
 
-- `POST /api/worker/v1/jobs/:id/result` accepts the rendered result (Studio's equivalent
+- `POST /api/v1/worker/jobs/:id/result` accepts the rendered result (Studio's equivalent
   of legacy's `POST /jobs/:id/upload`) — `features/delivery/use-cases/
 accept-job-result.ts`. Department-scoped like every other Worker Job operation
   (ADR-0040) and idempotent against a duplicate/racing request.
@@ -311,7 +311,7 @@ gated by the human capability registry. `claimNextJob`/`getJobForWorker`/
 take an `allowedDepartmentIds: string[]` (from the authenticated `WorkerApiKey`,
 ADR-0040) instead — that is not an `Actor` and must not be treated like one.
 **Implemented, Phase 7 (Department scoping, Phase 11)**: the Worker Route Handlers
-under `src/app/api/worker/v1/**` authenticate the Worker's service credential
+under `src/app/api/v1/worker/**` authenticate the Worker's service credential
 (`authenticateWorker`, ADR-0040) first, then call these same functions directly — no
 logic duplicated, exactly as planned. See
 [../integrations/worker-api.md](../integrations/worker-api.md).

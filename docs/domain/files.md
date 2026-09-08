@@ -186,3 +186,35 @@ direction — a `JobAsset` pointing at a Gallery File) are implemented, Phase 6 
   cannot be deleted while it does (`assertNoActiveTemplateDependencies` below). See
   [../domain/templates.md](../domain/templates.md) "File Gallery Integration" and
   [ADR-0027](../architecture/decisions.md#adr-0027--template-name-uniqueness-asset-level-file-defaults-and-the-templatefile-dependency-contract).
+
+### Job asset File Picker — implemented, Phase 13 (ADR-0042)
+
+Job creation's `IMAGE`/`AUDIO`/`VIDEO` asset slots are filled in through
+`features/files/components/file-picker.tsx`, a visual picker (thumbnails, filename
+search, inline upload) rather than a plain `<select>` of filenames — reusing the
+existing Gallery/upload architecture end to end, not a second storage or preview
+mechanism:
+
+- **Browsing** calls `searchGalleryFilesAction` →
+  `features/files/use-cases/search-gallery-files.ts`, the same `file:manage` (USER+)
+  floor and the same `departmentScopeFilter` department scoping `listGalleryFiles`
+  already uses for the `/files` Gallery page, plus an **advisory-only**
+  `departmentId` narrowing parameter (`ListFilesFilters.departmentId`,
+  `features/files/repository/file-repository.ts`) that is honored **only for ADMIN** —
+  applied strictly after `departmentScopeFilter(actor)` in the query's `where` clause,
+  so a non-ADMIN's own department can never be widened or redirected by a
+  client-supplied value. This narrowing exists so ADMIN's cross-department browse can
+  be scoped to one Template's Department without a second, parallel query path.
+- **Thumbnails** are served through the same authenticated, Department-scoped
+  `/api/files/[fileId]` route `FileCard` already uses on the `/files` page — no new
+  media-processing or thumbnail-generation pipeline.
+- **Uploading** calls the unmodified `uploadFileAction` (the same one the `/files`
+  page's `UploadFileForm` uses), scoped to the Template's Department. A freshly
+  uploaded file is auto-selected immediately — no extra step to find and pick it back
+  out of a list.
+- **Not a security boundary by itself.** The picker's `departmentId` narrowing only
+  controls what is _offered_; the actual selection is re-validated server-side, against
+  the Template's own Department, when the Job is created
+  (`features/jobs/use-cases/resolve-job-assets.ts`, unchanged by this work) — a crafted
+  `fileId` the picker never displayed is rejected there regardless of what the client
+  submits.

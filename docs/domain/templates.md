@@ -86,17 +86,17 @@ columns**, never combined into one field (Phase 5 brief §7). `templateLifecycle
 
 [`prisma/schema.prisma`](../../prisma/schema.prisma))
 
-| Field                                                 | Notes                                                                                                                                                                   |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                                  | Referenced by a future Job's snapshot forever — never reused, never removed.                                                                                            |
-| `departmentId`                                        | Required. Scopes ownership. Set at creation; **may be changed later, ADMIN-only** — see "Department transfer" below (ADR-0040, revises the earlier "immutable" design). |
-| `createdByUserId`                                     | Always set (Users are never deleted — ADR-0007 — so this FK is `onDelete: Restrict`, not nullable).                                                                     |
-| `name`                                                | Unique per Department among non-deleted rows — **ADR-0027, resolves OD-09.**                                                                                            |
-| `status`                                              | `ACTIVE` \| `DISABLED`. Independent of `deletedAt` — see "Lifecycle" above.                                                                                             |
-| `composition`, `source`, `scriptRef`, `outputPattern` | Legacy `composition`/`src`/`script`/`output` — opaque strings passed through to a future Job/the Render Worker. Studio never interprets them.                           |
-| `assets`                                              | Ordered `TemplateAsset[]` — see below. **Zero assets is valid** — ADR-0027, resolves OD-10 (a fully static render has no Job-supplied inputs).                          |
-| `createdAt`, `updatedAt`                              |                                                                                                                                                                         |
-| `deletedAt`, `deletedByUserId`                        | Soft-delete marker (ADR-0006). Both `null` until deleted; set together, never individually.                                                                             |
+| Field                                                 | Notes                                                                                                                                                                                                                                       |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                  | Referenced by a future Job's snapshot forever — never reused, never removed.                                                                                                                                                                |
+| `departmentId`                                        | Required. Scopes ownership. Set at creation; **immutable through ordinary Template Edit, for every role** — changeable only via the separate ADMIN-only Department transfer operation, see "Department transfer" below (ADR-0040/ADR-0042). |
+| `createdByUserId`                                     | Always set (Users are never deleted — ADR-0007 — so this FK is `onDelete: Restrict`, not nullable).                                                                                                                                         |
+| `name`                                                | Unique per Department among non-deleted rows — **ADR-0027, resolves OD-09.**                                                                                                                                                                |
+| `status`                                              | `ACTIVE` \| `DISABLED`. Independent of `deletedAt` — see "Lifecycle" above.                                                                                                                                                                 |
+| `composition`, `source`, `scriptRef`, `outputPattern` | Legacy `composition`/`src`/`script`/`output` — opaque strings passed through to a future Job/the Render Worker. Studio never interprets them.                                                                                               |
+| `assets`                                              | Ordered `TemplateAsset[]` — see below. **Zero assets is valid** — ADR-0027, resolves OD-10 (a fully static render has no Job-supplied inputs).                                                                                              |
+| `createdAt`, `updatedAt`                              |                                                                                                                                                                                                                                             |
+| `deletedAt`, `deletedByUserId`                        | Soft-delete marker (ADR-0006). Both `null` until deleted; set together, never individually.                                                                                                                                                 |
 
 **Removed, ADR-0041 (Studio no longer uploads to YouTube):** `description` (YouTube
 description), `tags` (YouTube tag templates with `{{layer}}` substitution),
@@ -169,41 +169,52 @@ creating one (validated against `departmentExists`, mirroring
 `features/files/use-cases/upload-file.ts`'s `resolveTargetDepartment`). A Job can only be
 created from a Template in the Job's own Department.
 
-### Department transfer — implemented, Phase 11 (ADR-0040)
+### Department transfer — implemented, Phase 11 (ADR-0040); split from Template Edit, Phase 13 (ADR-0042)
 
-**Only ADMIN may change a Template's Department**, on edit — never USER, never MANAGER,
-even one otherwise authorized to edit the Template in its current Department, and even
-via a crafted request that includes a `departmentId` differing from the Template's
-current one: `updateTemplate` gates the transfer branch with `requireRole(actor,
-"ADMIN")` before it ever looks at whether `input.departmentId` differs, so a non-ADMIN's
-attempted `departmentId` change is silently ignored, not merely rejected after the fact.
+**Template Edit can never change a Template's Department, for any role, including
+ADMIN.** `updateTemplateSchema`/`templateInputSchema`
+(`features/templates/schemas/template-input.schema.ts`) have **no `departmentId` field at
+all** — a client-submitted `departmentId` is silently stripped by Zod before parsing even
+finishes, so `updateTemplate` never receives one to begin with. `updateTemplate` and
+`updateTemplateWithAssets` (`features/templates/repository/template-repository.ts`) are
+themselves structurally incapable of writing `departmentId`: neither reads it from
+anywhere, and the Prisma `update` call's `data` object doesn't include the field. This is
+deliberately enforced two independent ways (schema-level stripping _and_
+use-case/repository-level absence), not a single runtime `if (actor.role !== "ADMIN")
+ignore` check — see ADR-0042.
 
-A transfer:
+**Only ADMIN may transfer a Template to a different Department, and only through a
+separate, dedicated operation** —
+`transferTemplateDepartment` (`features/templates/use-cases/transfer-template-department.ts`),
+its own schema (`transfer-template-department.schema.ts`, just `templateId` +
+`departmentId`), its own Server Action (`transferTemplateDepartmentAction`), and its own
+repository function (`transferTemplateDepartment` in `template-repository.ts` — **the
+only** function that ever writes `Template.departmentId`). It is rendered as a distinct
+"Transfer department" control on the Template detail page
+(`TransferTemplateDepartmentForm`), never inside the edit form — mirroring the
+codebase's existing "Job Retry vs Delivery Retry are different operations" pattern
+(`docs/domain/jobs.md`).
+
+`transferTemplateDepartment` gates with `requireRole(actor, "ADMIN")` — not just the
+`template:manage` capability floor, which is MANAGER+ and would otherwise let a MANAGER
+call the underlying function directly. A transfer:
 
 1. Requires the target Department to actually exist (`departmentExists`) — a
    nonexistent target is rejected with a clean `business_rule` error.
 2. **Re-verifies every dependent reference against the _target_ Department, not the
-   original** — `verifyAssetFileReferences` (the same function a plain same-department
-   edit already runs) is called with the target Department id. An asset `defaultFileId`
-   that doesn't resolve in the target Department is rejected with the same
-   `business_rule` error a same-department edit pointing at a nonexistent reference
-   would get — the transfer is never applied halfway, and nothing about the Template or
-   its dependencies is silently mutated to "fix" the mismatch. (Before ADR-0041,
-   `youtubeTargetId` was re-verified here too — that field no longer exists.)
-3. Needs **no historical-integrity mechanism of its own**. `Job.departmentId` is copied
+   original** — `verifyAssetFileReferences` runs against the Template's own
+   already-persisted assets (a transfer carries no config payload). An asset
+   `defaultFileId` that doesn't resolve in the target Department rejects the whole
+   transfer with a `business_rule` error — never applied halfway.
+3. Is a no-op when the target equals the current Department (matches Templates' existing
+   enable/disable/soft-delete idempotency convention).
+4. Needs **no historical-integrity mechanism of its own**. `Job.departmentId` is copied
    onto the Job row once, at Job-creation time, from the Template's Department _at that
    moment_ — a plain stored column, never a live join through `Job.templateId →
 Template.departmentId` (see `docs/data/historical-integrity.md` and ADR-0028). Moving
    a Template to a different Department afterward does not, and structurally cannot,
    retroactively change which Department any existing Job belongs to. A Job's own
-   immutable `snapshot`/`JobAsset` rows (ADR-0028) are equally unaffected — they were
-   captured from the Template as it existed at that Job's creation, and a later transfer
-   doesn't touch them.
-
-A same-Department edit (`departmentId` omitted, or unchanged) is unaffected by any of
-this — the transfer branch is only entered when `input.departmentId` is present and
-actually differs from the existing value, so a MANAGER's ordinary edit of their own
-department's Template still works exactly as before.
+   immutable `snapshot`/`JobAsset` rows (ADR-0028) are equally unaffected.
 
 ### Creation & editing
 

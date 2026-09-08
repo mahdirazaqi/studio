@@ -992,7 +992,7 @@ required," no API-key CRUD, no multi-key administration.
 **Decision.** A single, shared static API key — `WORKER_API_KEY`, a **required**
 environment variable (`@/server/env`, process fails to start without it, matching how
 `DATABASE_URL` is already required) — sent as `Authorization: Bearer <key>` on every
-`/api/worker/v1/**` request and every Worker-authenticated `/api/files/[fileId]`
+`/api/v1/worker/**` request and every Worker-authenticated `/api/files/[fileId]`
 request. `@/server/worker-auth` (`authenticateWorker`) is the sole place this credential
 is read or compared:
 
@@ -1038,7 +1038,7 @@ is read or compared:
 ## ADR-0033 — Worker API surface: versioned REST under the existing convention, `204` for an empty queue
 
 **Context.** `docs/integrations/worker-api.md` and `docs/architecture/rest-architecture.md`
-already sketched a `/api/worker/v1/...` surface and a `POST .../jobs/next` claim endpoint
+already sketched a `/api/v1/worker/...` surface and a `POST .../jobs/next` claim endpoint
 returning `204` when empty, ahead of Phase 6/7 existing — this phase had to decide
 whether to build that already-documented design or the Phase 7 brief's own throwaway
 illustrative example (`/api/v1/worker/...`, `POST .../jobs/claim`), which explicitly
@@ -1049,11 +1049,11 @@ implementation" (the existing docs) outranks a brief's self-disclaimed illustrat
 
 | Method  | Path                               | Maps to legacy             | Calls                                             |
 | ------- | ---------------------------------- | -------------------------- | ------------------------------------------------- |
-| `POST`  | `/api/worker/v1/jobs/next`         | `GET /jobs/fetch`          | `claimNextJob()`                                  |
-| `GET`   | `/api/worker/v1/jobs/:id`          | `GET /jobs/:id`            | `getJobForWorker(id)`                             |
-| `PATCH` | `/api/worker/v1/jobs/:id/state`    | `PATCH /jobs/:id/state`    | `transitionJobForWorker(...)` (→ `transitionJob`) |
-| `PATCH` | `/api/worker/v1/jobs/:id/progress` | `PATCH /jobs/:id/progress` | `updateJobProgress(...)`                          |
-| `PATCH` | `/api/worker/v1/jobs/:id/duration` | `PATCH /jobs/:id/duration` | `updateJobDuration(...)`                          |
+| `POST`  | `/api/v1/worker/jobs/next`         | `GET /jobs/fetch`          | `claimNextJob()`                                  |
+| `GET`   | `/api/v1/worker/jobs/:id`          | `GET /jobs/:id`            | `getJobForWorker(id)`                             |
+| `PATCH` | `/api/v1/worker/jobs/:id/state`    | `PATCH /jobs/:id/state`    | `transitionJobForWorker(...)` (→ `transitionJob`) |
+| `PATCH` | `/api/v1/worker/jobs/:id/progress` | `PATCH /jobs/:id/progress` | `updateJobProgress(...)`                          |
+| `PATCH` | `/api/v1/worker/jobs/:id/duration` | `PATCH /jobs/:id/duration` | `updateJobDuration(...)`                          |
 
 Retry and cancel are **not** exposed to the Worker — legacy's Worker REST contract never
 called either (both were GraphQL-only, dashboard-initiated in legacy), and nothing in
@@ -1118,7 +1118,7 @@ retried HTTP requests without weakening any Phase 6 concurrency guarantee.
 **Decision — trust model.** Studio's Worker is **one shared, non-departmental
 principal**. There is no per-Worker identity, so:
 
-- `GET /api/worker/v1/jobs/:id` lets an authenticated Worker read **any** Job by id,
+- `GET /api/v1/worker/jobs/:id` lets an authenticated Worker read **any** Job by id,
   claimed or not, from any Department — resolves OD-30 as "no per-claim ownership
   restriction," because none can be enforced honestly without a per-Worker identity
   this phase deliberately does not build (ADR-0032). If two physical Worker processes
@@ -1434,7 +1434,7 @@ cap with no per-channel concept. See `qtical-backend-node/src/render/job/job.ser
 **Decision.**
 
 **1. Rendered-result acceptance is a new Worker endpoint, idempotent by construction.**
-`POST /api/worker/v1/jobs/:id/result` (docs/integrations/worker-api.md §6, closing the
+`POST /api/v1/worker/jobs/:id/result` (docs/integrations/worker-api.md §6, closing the
 gap that section left open) takes the raw video bytes as the request body — not
 multipart — so `defineRouteHandler` needed no new body-parsing capability; the handler
 reads `request.arrayBuffer()` directly, exactly like `/api/files/[fileId]`'s GET response
@@ -1718,7 +1718,7 @@ documentation — not just hide it from the UI.
    `accept-job-result.ts` accepts the Worker's rendered result and the atomic
    `RENDERING -> RENDERED` transition commits, the Job is done. No further transition is
    attempted automatically.
-2. **`POST /api/worker/v1/jobs/:id/result` (legacy `POST /jobs/:id/upload`) is
+2. **`POST /api/v1/worker/jobs/:id/result` (legacy `POST /jobs/:id/upload`) is
    unchanged in shape and stays mandatory** — this is still the Worker's only way to
    hand Studio the rendered bytes, and Studio still generates a screenshot + thumbnail
    from it (`generate-render-artifacts.ts`, `ffmpeg`-only, unchanged) for the dashboard's
@@ -1792,5 +1792,100 @@ validation` error as any other unrecognized value, naming the supported values. 
 - A generic "delivery provider" abstraction sized for a future integration that doesn't
   exist yet — speculative infrastructure CLAUDE.md §12 asks not to build ahead of a real
   requirement.
+
+**Status:** DECIDED.
+
+## ADR-0042 — Native `color-scheme` dark-mode fix; `/api/v1/{service}` versioning; Template Department immutability split from transfer; visual Job asset File Picker
+
+**Context.** A UI/API/security hardening pass raised four independent issues: (1) native
+`<select>` popups and browser form-control chrome rendered with a light background in
+Dark Mode, even though every Radix-based overlay (`DropdownMenu`, `Sheet`) already
+themed correctly; (2) the Worker REST API lived at `/api/worker/v1/...` — service before
+version, backwards from a sane versioning convention; (3) `updateTemplate` (Phase
+11/ADR-0040) let ADMIN change a Template's `departmentId` as one branch of the ordinary
+edit path, which — despite being ADMIN-gated — conflated "edit" and "transfer" as one
+operation, contrary to a firmer requirement that Template Edit must be _structurally_
+incapable of moving a Template between Departments, with transfer kept as a genuinely
+separate mechanism; (4) Job asset File selection was a plain `<select>` of filenames,
+with no thumbnail, no search, and no inline upload — every Gallery File had to already
+exist and be found by name alone before a Job could be created.
+
+**Decision.**
+
+1. **Dark Mode form-control fix: the CSS `color-scheme` property, not a component
+   rewrite.** `:root` declares `color-scheme: light`, `.dark` declares `color-scheme:
+dark` (`src/app/globals.css`). This is the actual root cause: browser-native chrome
+   (native `<select>` popups, scrollbars, spell-check underlines) is drawn by the OS/
+   browser itself and is only theme-aware through this CSS property — entirely
+   orthogonal to the page's own `bg-popover`/token-driven CSS, which every Radix overlay
+   in this codebase (`DropdownMenu`, `Sheet`) already used correctly. Because
+   `next-themes`'s `attribute="class"` + `enableSystem` always resolves "System" down to
+   toggling the same `.dark` class on `<html>`, one class-scoped declaration (no `@media`
+   block needed) covers all three theme states. No component was rewritten; no color was
+   hardcoded.
+2. **API versioning convention: `/api/v{version}/{service-or-resource}/...`** — version
+   segment first. The Worker API physically moved from `src/app/api/worker/v1/**` to
+   `src/app/api/v1/worker/**` (a real directory move, since Next.js App Router routes are
+   the directory tree — not a redirect or a duplicate route). Every reference across the
+   codebase (`worker-auth`, `accept-job-result.ts`, `jobs/README.md`, every doc that
+   mentioned the old path) was updated in the same change; **no backward-compatible old
+   route was kept** — the Worker is in-repo, its own authentication/Department-scoping
+   logic is untouched, and nothing external depends on the pre-move path, so keeping a
+   duplicate would have been dead weight, not a compatibility requirement.
+3. **Template Department immutability split from transfer, structurally, not just by
+   convention.** `templateInputSchema` (backing both create's base shape and update)
+   has **no `departmentId` field at all** — a client-submitted value is stripped by Zod
+   before `updateTemplate` ever sees it. `updateTemplate`/`updateTemplateWithAssets`
+   were rewritten to never read, derive, or forward a `departmentId` under any
+   circumstance — even a hypothetical caller that bypassed the schema layer entirely
+   would find no code path left that writes it. `createTemplateSchema` (a
+   `z.intersection` of `templateInputSchema` with an optional `departmentId`) is now the
+   **only** schema that ever accepts one, honored only for ADMIN, only at creation.
+   Transfer became its own operation: `transferTemplateDepartment` (use case, dedicated
+   `transfer-template-department.schema.ts`, dedicated Server Action, and the **only**
+   repository function that ever writes `Template.departmentId`), gated by
+   `requireRole(actor, "ADMIN")` — not just the `template:manage` floor a MANAGER also
+   holds. Rendered as a separate "Transfer department" control on the Template detail
+   page, never inside the edit form. See `docs/domain/templates.md` "Department
+   transfer" for the full mechanism (unchanged from ADR-0040: target-department
+   existence check, re-verification of dependent File references against the _target_
+   Department, no historical-integrity mechanism needed since `Job.departmentId` is a
+   plain column copied once at Job creation).
+4. **Job asset File Picker** (`features/files/components/file-picker.tsx`) replaces the
+   plain `<select>` of filenames for `IMAGE`/`AUDIO`/`VIDEO` slots with a `Sheet`-based
+   visual picker: thumbnails (reusing the same authenticated `/api/files/[fileId]`
+   serving route `FileCard` already uses — no new media/thumbnail pipeline), live
+   filename search, and an inline upload form that calls the **same**
+   `uploadFileAction` the `/files` Gallery page uses — no second storage or validation
+   path. A freshly uploaded file is auto-selected immediately, no extra step. Backed by
+   a new, narrow `searchGalleryFilesAction` (`features/files/use-cases/
+search-gallery-files.ts`) — same `file:manage` (USER+) floor and same
+   `departmentScopeFilter` department scoping as the existing `listGalleryFiles`, plus
+   an **advisory-only** `departmentId` narrowing parameter honored strictly for ADMIN
+   (`ListFilesFilters.departmentId` in `file-repository.ts` — spread _after_
+   `departmentScopeFilter(actor)`, so a non-ADMIN's own department can never be
+   overridden by a client-supplied value). This narrowing is UX convenience only, never
+   a security boundary by itself: the actual Job-creation-time file resolution
+   (`features/jobs/use-cases/resolve-job-assets.ts`) already re-validates every
+   submitted `fileId` against the Template's own Department server-side, unchanged by
+   this work — a crafted `fileId` the picker never displayed is rejected there
+   regardless of what the picker showed.
+
+**Consequences.**
+
+- Dark Mode's native form controls now theme correctly everywhere in the app, with zero
+  risk to Light Mode (a `color-scheme` value is additive metadata, not a color
+  override) and zero per-component changes needed for any future native `<select>`.
+- `/api/v1/worker/...` is now the only Worker API path; `docs/integrations/worker-api.md`
+  and every other doc referencing the old path were updated in the same change described
+  by this ADR.
+- A Template's Department can never be changed by anything called "edit," for any role —
+  closing the gap between ADR-0040's ADMIN-gated-but-still-edit-shaped transfer and a
+  stricter "edit is structurally incapable of it" guarantee. The ADMIN transfer
+  capability itself is fully preserved, just relocated to its own operation.
+- Creating a Job now supports discovering and uploading Gallery Files inline, without
+  leaving the Job form or needing to already know a file's exact name — while every
+  existing Department-isolation and file-kind-matching guarantee
+  (`resolve-job-assets.ts`) is completely unchanged.
 
 **Status:** DECIDED.

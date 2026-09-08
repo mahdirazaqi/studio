@@ -8,6 +8,16 @@
    Do not hard-code colors in components — use the semantic token utilities
    (bg-background, text-muted-foreground, border-border, ...). */
 :root {
+  /* Tells the browser which palette to use for anything it renders itself —
+     native <select> popups, scrollbars, date/time pickers, form-control
+     chrome — none of which are styleable via our own CSS tokens. Without
+     this, a native <select>'s option list stays light even while `.dark`
+     repaints every token-driven surface, which is exactly the "white
+     dropdown in dark mode" defect this fixes at the root (every native
+     <select> in the app, not just one screen). Kept in sync with `.dark`
+     below — always the opposite of `light`. */
+  color-scheme: light;
+
   --radius: 0.625rem;
 
   --background: oklch(1 0 0);
@@ -45,6 +55,8 @@
 }
 
 .dark {
+  color-scheme: dark;
+
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);

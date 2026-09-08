@@ -55,7 +55,7 @@ export interface WorkerAuthContext {
  * `unauthenticated` (401) for a missing, malformed, revoked, or unknown
  * credential — never leaks which of those it was, and never echoes any part
  * of the submitted value back in the error. Intended as the `authenticate`
- * hook for every `/api/worker/v1/**` Route Handler (`defineRouteHandler`'s
+ * hook for every `/api/v1/worker/**` Route Handler (`defineRouteHandler`'s
  * `authenticate` config, `@/server/api`) — its return value flows into the
  * handler as `ctx.auth`.
  */

@@ -59,11 +59,14 @@ export function TemplateForm({
   mode: "create" | "edit";
   /** Required for `mode: "edit"`. */
   template?: SafeTemplateDetail;
-  /** ADMIN only, in **either** mode: choosing a department at creation, or
-   * transferring an existing Template to a different department
-   * (docs/domain/templates.md "Department transfer", ADR-0040). `undefined`
-   * for a non-ADMIN actor — no selector renders and the Template's
-   * department is immutable to them, exactly as the server enforces. */
+  /** ADMIN only, and **`mode: "create"` only**: choosing which department a
+   * new Template belongs to. A Template's department is immutable through
+   * this form once created — there is no selector, dropdown, or any other
+   * mechanism to change it in `mode: "edit"`, for any role, including ADMIN
+   * (docs/domain/templates.md "Department immutability through Edit").
+   * Moving an existing Template to a different department is a **separate**
+   * ADMIN-only operation (`transferTemplateDepartmentAction`, rendered by
+   * the Template detail page, not this form — see "Department transfer"). */
   departmentChoices?: DepartmentChoice[];
   /** Already scoped by the page: the actor's own department for USER/MANAGER,
    * or every department for ADMIN. */
@@ -87,20 +90,23 @@ export function TemplateForm({
   const [outputPattern, setOutputPattern] = useState(
     template?.outputPattern ?? "",
   );
+  // Only meaningful in `mode: "create"` — see the `departmentChoices` doc
+  // comment above. In `mode: "edit"` the department is fixed to the
+  // Template's own, non-selectable.
   const [departmentId, setDepartmentId] = useState(
-    template?.departmentId ?? departmentChoices?.[0]?.id ?? "",
+    departmentChoices?.[0]?.id ?? "",
   );
   const [assets, setAssets] = useState<AssetRowState[]>(
     template ? toAssetRows(template.assets, formId) : [],
   );
 
-  // ADMIN picking/changing a department (create, or a transfer in edit mode)
-  // narrows the file picker to that department; every other case (a
-  // non-ADMIN actor, who never sees the selector) uses the Template's own
-  // fixed department.
-  const effectiveDepartmentId = departmentChoices
-    ? departmentId
-    : template?.departmentId;
+  // ADMIN picking a department at creation narrows the file picker to that
+  // department; every other case (edit mode, or a non-ADMIN actor who never
+  // sees the selector) uses the Template's own fixed department.
+  const effectiveDepartmentId =
+    mode === "create" && departmentChoices
+      ? departmentId
+      : template?.departmentId;
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -108,7 +114,7 @@ export function TemplateForm({
     setFieldErrors({});
 
     const body = {
-      ...(departmentChoices ? { departmentId } : {}),
+      ...(mode === "create" && departmentChoices ? { departmentId } : {}),
       name,
       composition,
       source,
@@ -178,7 +184,7 @@ export function TemplateForm({
               ))}
             </div>
 
-            {departmentChoices ? (
+            {mode === "create" && departmentChoices ? (
               <div className="space-y-1.5">
                 <Label htmlFor={`${formId}-department`}>Department</Label>
                 <select
@@ -194,13 +200,6 @@ export function TemplateForm({
                     </option>
                   ))}
                 </select>
-                {mode === "edit" && departmentId !== template?.departmentId ? (
-                  <p className="text-muted-foreground text-xs">
-                    Transferring this template — its asset selections below must
-                    remain valid for the new department, or saving will be
-                    rejected.
-                  </p>
-                ) : null}
                 {fieldErrors.departmentId?.map((m) => (
                   <p key={m} className="text-destructive text-sm">
                     {m}

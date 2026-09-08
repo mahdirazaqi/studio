@@ -5,7 +5,7 @@ import { authenticateWorker } from "@/server/worker-auth";
 import { commonSchemas } from "@/server/validation";
 import { getJobForWorker } from "@/features/jobs/use-cases/get-job-for-worker";
 import { buildWorkerJobPayload } from "@/features/jobs/domain/worker-job-payload";
-import { buildFileUrlFromRequest } from "@/app/api/worker/v1/_lib/build-file-url";
+import { buildFileUrlFromRequest } from "@/app/api/v1/worker/_lib/build-file-url";
 
 /**
  * Read one Job (legacy `GET /jobs/:id`) — for Worker restart/recovery: a

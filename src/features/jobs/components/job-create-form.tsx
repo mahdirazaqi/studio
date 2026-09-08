@@ -11,6 +11,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createJobAction } from "@/features/jobs/actions/create-job.action";
 import { getTemplateForJobFormAction } from "@/features/jobs/actions/get-template-for-job-form.action";
+import {
+  FilePicker,
+  type FilePickerFile,
+} from "@/features/files/components/file-picker";
 import type { SafeTemplateDetail } from "@/features/templates/domain/template";
 
 export interface TemplateChoice {
@@ -19,28 +23,18 @@ export interface TemplateChoice {
   departmentName?: string;
 }
 
-export interface JobGalleryFileOption {
-  id: string;
-  originalName: string;
-  kind: "IMAGE" | "AUDIO" | "VIDEO";
-  departmentId: string;
-}
-
 /**
  * Not a rendering/canvas editor (Phase 6 brief §35) — a plain form: pick a
- * Template, then fill in its asset slots (text or a Gallery File per slot).
- * The Template's full asset list is fetched on demand once one is chosen
- * (`getTemplateForJobFormAction`), so the department-scoped Gallery File list
- * doesn't need to be pre-joined against every Template up front.
+ * Template, then fill in its asset slots (text, or a Gallery File per slot
+ * via `FilePicker`, which browses/uploads live scoped to the Template's own
+ * department — see `features/files/components/file-picker.tsx`). The
+ * Template's full asset list is fetched on demand once one is chosen
+ * (`getTemplateForJobFormAction`).
  */
 export function JobCreateForm({
   templateChoices,
-  galleryFiles,
 }: {
   templateChoices: TemplateChoice[];
-  /** Already scoped by the page: the actor's own department for USER/MANAGER,
-   * or a capped cross-department list for ADMIN. */
-  galleryFiles: JobGalleryFileOption[];
 }) {
   const router = useRouter();
   const formId = useId();
@@ -51,11 +45,15 @@ export function JobCreateForm({
   const [templateId, setTemplateId] = useState("");
   const [template, setTemplate] = useState<SafeTemplateDetail | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [fileValues, setFileValues] = useState<
+    Record<string, FilePickerFile | undefined>
+  >({});
 
   function handleTemplateChange(nextTemplateId: string) {
     setTemplateId(nextTemplateId);
     setTemplate(null);
     setValues({});
+    setFileValues({});
     setFormError(null);
     if (!nextTemplateId) return;
 
@@ -102,13 +100,6 @@ export function JobCreateForm({
       router.refresh();
     });
   }
-
-  const availableFilesForSlot = (kind: "IMAGE" | "AUDIO" | "VIDEO") =>
-    galleryFiles.filter(
-      (file) =>
-        file.kind === kind &&
-        (!template || file.departmentId === template.departmentId),
-    );
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -172,25 +163,16 @@ export function JobCreateForm({
                     }
                   />
                 ) : (
-                  <select
-                    id={`${formId}-slot-${slot.key}`}
-                    value={values[slot.key] ?? ""}
+                  <FilePicker
+                    kind={slot.kind}
+                    departmentId={template.departmentId}
+                    selectedFile={fileValues[slot.key]}
                     disabled={isPending}
-                    className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs"
-                    onChange={(e) =>
-                      setValues((prev) => ({
-                        ...prev,
-                        [slot.key]: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">Select a file…</option>
-                    {availableFilesForSlot(slot.kind).map((file) => (
-                      <option key={file.id} value={file.id}>
-                        {file.originalName}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(fileId, file) => {
+                      setValues((prev) => ({ ...prev, [slot.key]: fileId }));
+                      setFileValues((prev) => ({ ...prev, [slot.key]: file }));
+                    }}
+                  />
                 )}
                 {fieldErrors[
                   `assets.${template.assets.indexOf(slot)}.text`

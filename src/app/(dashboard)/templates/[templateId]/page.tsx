@@ -8,6 +8,7 @@ import { toActor } from "@/server/authz";
 import { AppError } from "@/server/errors/app-error";
 import { hasAtLeastRole } from "@/lib/roles";
 import { TemplateForm } from "@/features/templates/components/template-form";
+import { TransferTemplateDepartmentForm } from "@/features/templates/components/transfer-template-department-form";
 import { getTemplate } from "@/features/templates/use-cases/get-template";
 import { listGalleryFiles } from "@/features/files/use-cases/list-files";
 import { listAllGalleryFilesForAdmin } from "@/features/files/use-cases/list-all-gallery-files-for-admin";
@@ -49,8 +50,9 @@ export default async function TemplateDetailPage({
       : listGalleryFiles(actor, { page: 1, pageSize: 100 }).then(
           (result) => result.items,
         ),
-    // ADMIN-only — lets `TemplateForm` offer a Department transfer
-    // (docs/domain/templates.md "Department transfer", ADR-0040).
+    // ADMIN-only — renders the separate Transfer Department control below,
+    // never `TemplateForm` itself (docs/domain/templates.md "Department
+    // transfer" — deliberately distinct from Template Edit, ADR-0040/0042).
     isAdmin ? listDepartmentsForAdmin(actor) : undefined,
   ]);
 
@@ -70,9 +72,15 @@ export default async function TemplateDetailPage({
         mode="edit"
         template={template}
         galleryFiles={galleryFiles}
-        departmentChoices={departmentChoices}
         readOnly={!canManage || Boolean(template.deletedAt)}
       />
+      {isAdmin && departmentChoices && !template.deletedAt ? (
+        <TransferTemplateDepartmentForm
+          templateId={template.id}
+          currentDepartmentId={template.departmentId}
+          departmentChoices={departmentChoices}
+        />
+      ) : null}
     </PageShell>
   );
 }

@@ -2,7 +2,7 @@ import { defineRouteHandler } from "@/server/api";
 import { authenticateWorker } from "@/server/worker-auth";
 import { claimNextJob } from "@/features/jobs/use-cases/claim-next-job";
 import { buildWorkerJobPayload } from "@/features/jobs/domain/worker-job-payload";
-import { buildFileUrlFromRequest } from "@/app/api/worker/v1/_lib/build-file-url";
+import { buildFileUrlFromRequest } from "@/app/api/v1/worker/_lib/build-file-url";
 
 /**
  * Atomic Job claim (docs/integrations/worker-api.md; ADR-0029 for the

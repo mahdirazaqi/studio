@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Actor } from "@/server/authz";
 import type { SafeTemplateDetail } from "@/features/templates/domain/template";
-import type { UpdateTemplateInput } from "@/features/templates/schemas/update-template.schema";
+import {
+  updateTemplateSchema,
+  type UpdateTemplateInput,
+} from "@/features/templates/schemas/update-template.schema";
 
 const findTemplateInScope = vi.fn();
 const updateTemplateWithAssets = vi.fn();
 const findGalleryFileIdsInDepartment = vi.fn();
-const departmentExists = vi.fn();
 
 vi.mock("@/features/templates/repository/template-repository", () => ({
   findTemplateInScope: (...args: unknown[]) => findTemplateInScope(...args),
@@ -18,10 +20,6 @@ vi.mock("@/features/templates/repository/template-repository", () => ({
 vi.mock("@/features/files/repository/file-repository", () => ({
   findGalleryFileIdsInDepartment: (...args: unknown[]) =>
     findGalleryFileIdsInDepartment(...args),
-}));
-
-vi.mock("@/features/departments/repository/department-repository", () => ({
-  departmentExists: (...args: unknown[]) => departmentExists(...args),
 }));
 
 const { updateTemplate } = await import("./update-template");
@@ -70,7 +68,6 @@ const input = (
 beforeEach(() => {
   vi.clearAllMocks();
   findGalleryFileIdsInDepartment.mockResolvedValue(new Set());
-  departmentExists.mockResolvedValue(true);
   updateTemplateWithAssets.mockResolvedValue(template());
 });
 
@@ -149,86 +146,19 @@ describe("updateTemplate", () => {
   });
 });
 
-describe("updateTemplate — Department transfer (ADR-0040)", () => {
-  it("lets ADMIN transfer a template to a different, existing department", async () => {
+describe("updateTemplate — Department immutability (never changes departmentId)", () => {
+  it("never passes departmentId through to the repository, even for ADMIN", async () => {
     findTemplateInScope.mockResolvedValue(template({ departmentId: "dept-a" }));
-    await updateTemplate(
-      actor({ role: "ADMIN" }),
-      input({ departmentId: "dept-b" }),
-    );
-    expect(departmentExists).toHaveBeenCalledWith("dept-b");
-    expect(updateTemplateWithAssets).toHaveBeenCalledWith(
-      expect.objectContaining({ departmentId: "dept-b" }),
-    );
+    await updateTemplate(actor({ role: "ADMIN" }), input());
+    const call = updateTemplateWithAssets.mock.calls[0]?.[0];
+    expect(call).not.toHaveProperty("departmentId");
   });
 
-  it("rejects a MANAGER's attempt to transfer, even one otherwise authorized to edit the template", async () => {
-    findTemplateInScope.mockResolvedValue(template({ departmentId: "dept-a" }));
-    await expect(
-      updateTemplate(
-        actor({ role: "MANAGER" }),
-        input({ departmentId: "dept-b" }),
-      ),
-    ).rejects.toMatchObject({ kind: "forbidden" });
-    expect(updateTemplateWithAssets).not.toHaveBeenCalled();
-  });
-
-  it("rejects a USER's attempt to transfer", async () => {
-    findTemplateInScope.mockResolvedValue(template({ departmentId: "dept-a" }));
-    await expect(
-      updateTemplate(
-        actor({ role: "USER" }),
-        input({ departmentId: "dept-b" }),
-      ),
-    ).rejects.toMatchObject({ kind: "forbidden" });
-    expect(updateTemplateWithAssets).not.toHaveBeenCalled();
-  });
-
-  it("rejects a transfer to a nonexistent department", async () => {
-    departmentExists.mockResolvedValue(false);
-    findTemplateInScope.mockResolvedValue(template({ departmentId: "dept-a" }));
-    await expect(
-      updateTemplate(
-        actor({ role: "ADMIN" }),
-        input({ departmentId: "dept-bogus" }),
-      ),
-    ).rejects.toMatchObject({ kind: "business_rule" });
-    expect(updateTemplateWithAssets).not.toHaveBeenCalled();
-  });
-
-  it("rejects a transfer that would orphan an asset's defaultFileId in the target department", async () => {
-    findTemplateInScope.mockResolvedValue(template({ departmentId: "dept-a" }));
-    findGalleryFileIdsInDepartment.mockResolvedValue(new Set()); // file not in dept-b
-    await expect(
-      updateTemplate(
-        actor({ role: "ADMIN" }),
-        input({
-          departmentId: "dept-b",
-          assets: [
-            {
-              key: "cover",
-              kind: "IMAGE",
-              composition: "c1",
-              layer: "l1",
-              imageRatio: "SQUARE",
-              defaultFileId: "file-only-in-dept-a",
-            },
-          ],
-        }),
-      ),
-    ).rejects.toMatchObject({ kind: "business_rule" });
-    expect(updateTemplateWithAssets).not.toHaveBeenCalled();
-  });
-
-  it("is a no-op transfer-wise when departmentId is unchanged, even for a non-ADMIN", async () => {
-    findTemplateInScope.mockResolvedValue(template({ departmentId: "dept-a" }));
-    await updateTemplate(
-      actor({ role: "MANAGER" }),
-      input({ departmentId: "dept-a" }),
-    );
-    expect(departmentExists).not.toHaveBeenCalled();
-    expect(updateTemplateWithAssets).toHaveBeenCalledWith(
-      expect.objectContaining({ departmentId: "dept-a" }),
-    );
+  it("the update schema strips a client-submitted departmentId before it ever reaches the use case (structural enforcement)", () => {
+    const parsed = updateTemplateSchema.parse({
+      ...input(),
+      departmentId: "dept-b",
+    });
+    expect(parsed).not.toHaveProperty("departmentId");
   });
 });

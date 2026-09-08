@@ -21,7 +21,7 @@ const {
 function requestWithAuth(header: string | null): Request {
   const headers = new Headers();
   if (header !== null) headers.set("authorization", header);
-  return new Request("http://localhost/api/worker/v1/jobs/next", { headers });
+  return new Request("http://localhost/api/v1/worker/jobs/next", { headers });
 }
 
 function unauthenticated() {

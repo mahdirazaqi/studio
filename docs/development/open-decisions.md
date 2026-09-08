@@ -334,7 +334,7 @@ its own Department set.
 
 _Where:_ [../architecture/boundaries.md](../architecture/boundaries.md), [../integrations/worker-api.md](../integrations/worker-api.md).
 
-**Resolved, Phase 7:** path prefix, `/api/worker/v1/...` — matches what
+**Resolved, Phase 7:** path prefix, `/api/v1/worker/...` — matches what
 `docs/architecture/rest-architecture.md`'s own illustration and this page already
 assumed ahead of implementation.
 
@@ -342,7 +342,7 @@ assumed ahead of implementation.
 
 _Where:_ [../integrations/worker-api.md](../integrations/worker-api.md), [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).
 
-**Resolved (Studio's own behavior):** `POST /api/worker/v1/jobs/next` + `204` when empty
+**Resolved (Studio's own behavior):** `POST /api/v1/worker/jobs/next` + `204` when empty
 — no `GET` alias, no `404`-for-empty compatibility shim (ADR-0033). **Still open:**
 whether the actual, currently-deployed Worker can tolerate this without its own update —
 unconfirmed, since the real Worker's source is outside this repo.
@@ -351,7 +351,7 @@ unconfirmed, since the real Worker's source is outside this repo.
 
 _Where:_ [../integrations/worker-api.md](../integrations/worker-api.md).
 
-**Resolved, Phase 7:** no restriction — `GET /api/worker/v1/jobs/:id` returns any Job by
+**Resolved, Phase 7:** no restriction — `GET /api/v1/worker/jobs/:id` returns any Job by
 id, claimed or not. Studio's Worker is one shared, non-departmental principal with no
 per-Worker identity (ADR-0032), so a per-claim restriction would be a restriction Studio
 cannot actually enforce; the docs say so honestly rather than implying one exists.
@@ -372,7 +372,7 @@ substates for UI detail. (The Worker API accepts legacy ints regardless.)
 
 _Where:_ [../legacy/compatibility-matrix.md](../legacy/compatibility-matrix.md).
 
-**Resolved:** renamed to `{ durationSeconds }` — `PATCH /api/worker/v1/jobs/:id/duration`
+**Resolved:** renamed to `{ durationSeconds }` — `PATCH /api/v1/worker/jobs/:id/duration`
 does not accept the legacy `duration` key. A real Worker integration needs its own
 matching update; this was not kept as a dual-key compatibility shim.
 

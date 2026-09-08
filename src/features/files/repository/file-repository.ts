@@ -153,6 +153,17 @@ export interface ListFilesFilters {
   category: FileCategory;
   kind?: FileKind;
   q?: string;
+  /**
+   * Narrows further within `departmentScopeFilter(actor)`'s own result —
+   * **only ever honored for ADMIN.** For a non-ADMIN actor,
+   * `departmentScopeFilter` already forces `departmentId: actor.departmentId`
+   * ahead of this in the spread below, so a non-ADMIN-supplied value here can
+   * never widen or redirect their scope; only ADMIN's `{}` scope leaves room
+   * for this to apply. Lets the Job asset File Picker narrow ADMIN's
+   * cross-department browse down to one Template's department without a
+   * second, parallel query path.
+   */
+  departmentId?: string;
   page: number;
   pageSize: number;
 }
@@ -163,6 +174,9 @@ export async function listFiles(
 ): Promise<Paginated<SafeFile>> {
   const where = {
     ...departmentScopeFilter(actor),
+    ...(actor.role === "ADMIN" && filters.departmentId
+      ? { departmentId: filters.departmentId }
+      : {}),
     category: filters.category,
     ...(filters.kind ? { kind: filters.kind } : {}),
     ...(filters.q

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Actor } from "@/server/authz";
-import type { TemplateInput } from "@/features/templates/schemas/template-input.schema";
+import type { CreateTemplateInput } from "@/features/templates/schemas/create-template.schema";
 
 const createTemplateWithAssets = vi.fn();
 const departmentExists = vi.fn();
@@ -30,7 +30,9 @@ const actor = (overrides: Partial<Actor> = {}): Actor => ({
   ...overrides,
 });
 
-const input = (overrides: Partial<TemplateInput> = {}): TemplateInput => ({
+const input = (
+  overrides: Partial<CreateTemplateInput> = {},
+): CreateTemplateInput => ({
   name: "Weekly Highlight",
   composition: "main-comp",
   source: "src://project",

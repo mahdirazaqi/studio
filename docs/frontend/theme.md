@@ -29,6 +29,22 @@ and `.dark`, mapped into Tailwind v4 via `@theme inline`. Semantic tokens:
 **Components never hard-code colors** — always the token utilities (`bg-background`,
 `text-muted-foreground`, `border-border`, …). This is what makes light/dark automatic.
 
+### `color-scheme` — native form-control theming
+
+`:root` declares `color-scheme: light`, `.dark` overrides it to `color-scheme: dark`.
+This is the one piece our own CSS tokens cannot reach: a native `<select>`'s dropdown
+option list, scrollbars, and other browser-drawn form-control chrome are rendered by the
+browser itself, not by our stylesheet — without `color-scheme`, they stay light-themed
+even while every token-driven surface repaints for `.dark`. Since `next-themes` (with
+`enableSystem`) always resolves "System" down to toggling the same `.dark` class (it
+reads `prefers-color-scheme` in JS, not via a CSS media query), this single
+class-scoped declaration covers all three theme states — explicit Light, explicit Dark,
+and System-resolved-to-dark — with no separate `@media` block needed. Studio has no
+shadcn `Select`/`Popover`/`Command` component; every "dropdown" in the app is either this
+native `<select>` (fixed by `color-scheme`) or Radix `DropdownMenu`/`Sheet`
+(`src/components/ui/dropdown-menu.tsx`/`sheet.tsx`), which were already correctly
+token-driven (`bg-popover`/`bg-background`) and needed no change.
+
 ## Flash-of-wrong-theme
 
 Prevented by:
@@ -46,3 +62,5 @@ Prevented by:
 - [x] Survives reload (explicit choice persisted; System re-resolved).
 - [x] No color transition flash on switch (`disableTransitionOnChange`).
 - [x] Every screen legible in both light and dark (token-driven).
+- [x] Native `<select>` popups, scrollbars, and other browser-drawn form-control
+      chrome follow the active theme (`color-scheme`, fixed this phase — see above).

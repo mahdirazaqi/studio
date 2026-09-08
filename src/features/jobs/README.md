@@ -3,7 +3,7 @@
 **Scope:** Job creation, the state machine, assets, progress/duration, cancellation, and
 non-destructive retry. **Status: implemented (Phase 6; extended Phase 7)** —
 domain/application layer + dashboard UI, plus the Worker-facing adapters
-(`app/api/worker/v1/jobs/**`) that expose the same use cases (atomic claim,
+(`app/api/v1/worker/jobs/**`) that expose the same use cases (atomic claim,
 progress/duration, state transition) to the external Render Worker over REST.
 
 **Key rules** (`docs/domain/jobs.md`, ADR-0005/0010/0013/0028/0029/0031/0041):
@@ -56,10 +56,10 @@ components/   JobCreateForm, JobListItem, JobActions (Cancel/Retry), JobsToolbar
               JobStatusBadge
 ```
 
-**Worker REST API (Phase 7):** `app/api/worker/v1/jobs/{next,[jobId],[jobId]/state,
-[jobId]/progress,[jobId]/duration}` — thin `defineRouteHandler`s authenticated by
-`@/server/worker-auth` (a shared static `WORKER_API_KEY`, not an `Actor`), calling the
-Worker-facing use cases above. See
+**Worker REST API (Phase 7, versioned under `/api/v1/`, Phase 13):** `app/api/v1/worker/jobs/{next,[jobId],[jobId]/state,
+[jobId]/progress,[jobId]/duration,[jobId]/result}` — thin `defineRouteHandler`s
+authenticated by `@/server/worker-auth` (a Department-scoped `WorkerApiKey` credential,
+ADR-0040, not an `Actor`), calling the Worker-facing use cases above. See
 [`docs/integrations/worker-api.md`](../../../docs/integrations/worker-api.md) for the
 full contract.
 

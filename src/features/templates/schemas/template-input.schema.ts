@@ -11,14 +11,23 @@ import { findDuplicateAssetKey } from "@/features/templates/domain/template-asse
  * wholesale rather than diffed, which is simple and safe because a Template's
  * mutable configuration never needs to preserve continuity for a historical
  * Job (that's what a future Job's own immutable snapshot is for, ADR-0010).
+ *
+ * **Deliberately has no `departmentId` field.** A Template's Department is
+ * immutable through the ordinary edit flow (docs/domain/templates.md
+ * "Department transfer", ADR-0042/ADR-0043) — this schema is what the Server
+ * Action for **update** parses, so a client-submitted `departmentId` is
+ * stripped by Zod before it ever reaches `updateTemplate` (a plain
+ * `z.object`, not `.strict()`, silently drops unrecognized keys). This is
+ * the structural half of "the backend must guarantee updating a Template
+ * cannot change its Department" — `updateTemplate` itself additionally never
+ * accepts or forwards one, so there are two independent reasons this can
+ * never happen, not just one. See `create-template.schema.ts` for the
+ * separate, ADMIN-only department **choice** at creation, and
+ * `transfer-template-department.schema.ts` for the separate, ADMIN-only
+ * department **transfer** operation.
  */
 export const templateInputSchema = z
   .object({
-    /** Only honored for ADMIN, in either direction: choosing a department at
-     * creation (`resolveTargetDepartment`) or transferring an existing
-     * Template to a different one at edit time (`update-template.ts`,
-     * ADR-0040) — a non-ADMIN's value is always ignored server-side. */
-    departmentId: commonSchemas.id.optional(),
     name: commonSchemas.shortText,
     composition: commonSchemas.shortText,
     source: commonSchemas.shortText,

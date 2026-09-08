@@ -25,7 +25,7 @@ Job row (state = QUEUED)  +  snapshot stored on the job
 ... time passes ...
 
 Render Worker
-  │  GET /api/worker/v1/jobs/next   (service credential)
+  │  GET /api/v1/worker/jobs/next   (service credential)
   ▼
 Route Handler → use case  claimNextJob(worker)
   │  ATOMIC claim: pick oldest QUEUED job and set state = CLAIMED
@@ -34,9 +34,9 @@ Route Handler → use case  claimNextJob(worker)
 returns { jobId, composition, templateSource, output, assets }  (from snapshot)
 
 Render Worker
-  │  PATCH /api/worker/v1/jobs/:id/state   { state: RENDERING }
-  │  PATCH /api/worker/v1/jobs/:id/progress { progress: 0..100 }   (repeated)
-  │  PATCH /api/worker/v1/jobs/:id/duration { seconds }
+  │  PATCH /api/v1/worker/jobs/:id/state   { state: RENDERING }
+  │  PATCH /api/v1/worker/jobs/:id/progress { progress: 0..100 }   (repeated)
+  │  PATCH /api/v1/worker/jobs/:id/duration { seconds }
   ▼
 use cases  changeState / reportProgress / reportDuration
   │  validate transition against the state machine
@@ -44,7 +44,7 @@ use cases  changeState / reportProgress / reportDuration
   ▼
 
 Render Worker
-  │  POST /api/worker/v1/jobs/:id/result   (raw video bytes, not multipart)
+  │  POST /api/v1/worker/jobs/:id/result   (raw video bytes, not multipart)
   ▼
 Route Handler → use case  acceptJobResult(job, videoBuffer)
   │  store video bytes via storage adapter

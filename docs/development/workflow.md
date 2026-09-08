@@ -292,8 +292,8 @@ authenticated, versioned REST surface — a thin adapter layer, no new business 
   `WorkerCredential` table, no per-Worker identity, no rotation without a redeploy: a
   deliberate simplification, not an oversight. **Superseded, Phase 11 (ADR-0040):** a
   real `WorkerApiKey` table now exists — see that phase's own section below.
-- `/api/worker/v1/jobs/next` (`POST`, atomic claim, `204` on an empty queue),
-  `/api/worker/v1/jobs/:id` (`GET`), `.../state` / `.../progress` / `.../duration`
+- `/api/v1/worker/jobs/next` (`POST`, atomic claim, `204` on an empty queue),
+  `/api/v1/worker/jobs/:id` (`GET`), `.../state` / `.../progress` / `.../duration`
   (`PATCH`) — every handler a thin `defineRouteHandler` wrapper calling straight into
   Phase 6's use cases (`claimNextJob`, `getJobForWorker`, `transitionJob` via
   `transitionJobForWorker`, `updateJobProgress`, `updateJobDuration`). Resolves OD-28
@@ -376,7 +376,7 @@ Phase 4's `File.category = JOB_ARTIFACT` and Phase 6/7's `RENDERED`/`DELIVERING`
 
 **Delivered:**
 
-- `POST /api/worker/v1/jobs/:id/result` (raw video bytes, not multipart) —
+- `POST /api/v1/worker/jobs/:id/result` (raw video bytes, not multipart) —
   `accept-job-result.ts`, idempotent against duplicate/racing Worker requests via the
   same atomic conditional `UPDATE` pattern every other `Job.state` writer uses.
 - `ffmpeg`-only media processing (`server/adapters/media/ffmpeg-adapter.ts`) — screenshot
@@ -529,7 +529,7 @@ non-null `Template.youtubeTargetId`/`description`/non-empty `tags`) in every env
 checked beforehand, so the migration carries zero data-loss risk despite being a real
 schema change (not `db push`).
 
-**Kept, unchanged:** `POST /api/worker/v1/jobs/:id/result` (still mandatory — the
+**Kept, unchanged:** `POST /api/v1/worker/jobs/:id/result` (still mandatory — the
 Worker's only way to hand Studio the rendered bytes), `ffmpeg`-based screenshot/
 thumbnail generation and the three `JOB_ARTIFACT` Files it creates (general "view the
 result in the dashboard" functionality, independent of any delivery destination), Job

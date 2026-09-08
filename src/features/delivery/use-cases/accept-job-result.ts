@@ -25,7 +25,7 @@ const VIDEO_MAX_SIZE_BYTES =
 /**
  * Accept a rendered result from the Worker (legacy `POST /jobs/:id/upload`;
  * docs/integrations/worker-api.md §6, Phase 9, ADR-0039). Called only from
- * `POST /api/worker/v1/jobs/:id/result` after Worker authentication — this
+ * `POST /api/v1/worker/jobs/:id/result` after Worker authentication — this
  * function itself takes no `Actor` (the Worker is never one,
  * docs/domain/jobs.md "Worker identity").
  *

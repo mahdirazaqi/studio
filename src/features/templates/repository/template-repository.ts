@@ -176,12 +176,6 @@ export async function createTemplateWithAssets(
 
 export interface UpdateTemplateData {
   templateId: string;
-  /** ADMIN-only transfer (docs/domain/templates.md "Department transfer",
-   * ADR-0040) — the use case only ever sets this to a value different from
-   * the Template's current department when the actor is ADMIN and the
-   * target department was validated to exist; every other caller passes the
-   * existing, unchanged department id straight through. */
-  departmentId: string;
   name: string;
   composition: string;
   source: string;
@@ -196,6 +190,12 @@ export interface UpdateTemplateData {
  * (docs/domain/templates.md "Updating Template assets") — safe because a
  * Template's live configuration never needs row-level continuity for a
  * historical Job, which will hold its own immutable snapshot (ADR-0010).
+ *
+ * **Never writes `departmentId`** — deliberately absent from `data` and from
+ * the Prisma `update` call below, so this function is structurally incapable
+ * of moving a Template between Departments no matter what a future caller
+ * passes in. Department transfer is `transferTemplateDepartment` below, a
+ * separate, narrower function.
  */
 export async function updateTemplateWithAssets(
   data: UpdateTemplateData,
@@ -208,7 +208,6 @@ export async function updateTemplateWithAssets(
       return tx.template.update({
         where: { id: data.templateId },
         data: {
-          departmentId: data.departmentId,
           name: data.name,
           composition: data.composition,
           source: data.source,
@@ -313,6 +312,35 @@ export async function softDeleteTemplate(
     where: { id: templateId },
     data: { deletedAt: new Date(), deletedByUserId },
   });
+}
+
+/**
+ * The **only** function that ever writes `Template.departmentId`
+ * (docs/domain/templates.md "Department transfer") — deliberately narrow: it
+ * touches nothing else about the Template's configuration or assets, unlike
+ * `updateTemplateWithAssets` (which, symmetrically, never touches
+ * `departmentId` at all). Called only from `transferTemplateDepartment`
+ * (ADMIN-only, a separate operation from the ordinary Template edit flow).
+ */
+export async function transferTemplateDepartment(
+  templateId: string,
+  departmentId: string,
+): Promise<SafeTemplateDetail> {
+  try {
+    const row = await db.template.update({
+      where: { id: templateId },
+      data: { departmentId },
+      select: SAFE_TEMPLATE_DETAIL_SELECT,
+    });
+    return toSafeTemplateDetail(row);
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw conflictError(
+        "A template with this name already exists in the target department.",
+      );
+    }
+    throw error;
+  }
 }
 
 /**
