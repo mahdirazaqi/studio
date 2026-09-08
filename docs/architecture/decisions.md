@@ -1889,3 +1889,130 @@ search-gallery-files.ts`) — same `file:manage` (USER+) floor and same
   (`resolve-job-assets.ts`) is completely unchanged.
 
 **Status:** DECIDED.
+
+## ADR-0043 — Worker compatibility audit: fix Studio to match the actual Worker's real HTTP contract
+
+**Context.** Studio's Worker REST API had been designed and documented (Phase 7, ADR-0004/
+ADR-0033/ADR-0034, later ADR-0040/ADR-0041/ADR-0042) against an _assumed_ contract —
+never against the actual Worker's real source code
+(`navaak-ae-renderer`, external repository). An explicit compatibility audit read that
+repository in full — HTTP client, endpoint paths, request/response shapes, auth headers,
+state codes, file download/upload behavior, the mid-render cancellation mechanism — and
+found several concrete, previously-undetected defects that would have broken the real
+integration outright. **The Worker is immutable** (an explicit constraint of this task):
+every fix is on Studio's side.
+
+**Decision — findings and fixes, most severe first.**
+
+1. **The render pipeline could never have completed a single real render.** The actual
+   Worker (`renderer/renderer.go`'s `next()`) reports three legacy per-stage state codes
+   in sequence while rendering — `Downloading(2)`, `Started(3)`, `InProgress(4)` — all
+   three mapping onto the same Studio `RENDERING` state
+   (`legacy-state-mapping.ts`). Studio's state machine deliberately forbids a self-loop
+   transition (tested, `job-state-machine.test.ts`) — so the _second_ of these calls
+   (`Started`, immediately after the first genuinely moved `CLAIMED -> RENDERING`) was
+   rejected with a `422 business_rule` error, aborting the render every time. Fixed by
+   making `transitionJobForWorker` (the Worker-facing adapter only) treat "mapped target
+   equals current state" as an idempotent no-op — the general state machine's no-self-loop
+   invariant is untouched for every other caller.
+2. **The rendered-result upload could never have succeeded, for three independent
+   reasons.** The actual Worker's `UploadJob()`
+   (`renderer/operator/upload.go`): (a) POSTs to `.../jobs/:id/upload`, not the
+   previously implemented `.../jobs/:id/result`; (b) sends a real
+   `multipart/form-data` body with the video under form field `"file"`, not raw bytes
+   (the previously implemented handler read `request.arrayBuffer()` directly); (c)
+   sends **no `Authorization` header at all** — it builds its `http.NewRequest`
+   manually, unlike every other Worker call (which goes through `operator.Request()`,
+   which does set `Authorization: Bearer <key>`). Fixed: the route was renamed to
+   `.../upload`, now parses `request.formData()`'s `"file"` field, and authenticates via
+   a new `authenticateWorkerLenient` (`@/server/worker-auth`) — a present header is
+   still validated exactly as strictly as before; a missing one is tolerated
+   (`allowedDepartmentIds: null`), with the Job's own state as the compensating gate.
+   Additionally, the real Worker calls `ChangeState(Rendered)` (a bare `PATCH
+.../state`) **before** uploading — `acceptJobResult` previously required strictly
+   `RENDERING`, rejecting every real upload once that separate call had already landed;
+   it now also accepts an already-`RENDERED`, no-video Job, using `[job.state]` (not a
+   hardcoded `["RENDERING"]`) as the atomic transition's `fromStates` set.
+3. **Every Job asset/Template download was broken.** The previously implemented
+   `buildFileUrlFromRequest` returned an absolute URL
+   (`${origin}/api/files/{id}`). The actual Worker's downloader
+   (`renderer/operator/downloader.go`'s `download()`) resolves a non-`file://`
+   reference by taking only the **path** portion of it and joining that onto its own
+   configured `BaseURL` (`u.Path = path.Join(u.Path, addr)`) — handed a full URL, Go's
+   `path.Join`/`path.Clean` collapses the `"://"` inside it into a mangled,
+   unreachable request (verified by hand). Fixed: the builder now returns a relative
+   path (`/api/files/{id}`) only.
+4. **The empty-queue response would have been logged as a spurious error on every
+   single poll.** The previously documented/implemented design returned `204 No
+Content` (a deliberate ADR-0033 decision, made without the real Worker's code to
+   check it against). The actual Worker's `Request()`
+   (`renderer/operator/request.go`) treats any status `> 300` as an error; its
+   caller (`renderer.go`) silences that error only when the text contains the literal
+   substring `"Not Found"` — a check written for the legacy backend's `404 Not
+Found` response, never updated. A `204` has no body, so the Worker's own
+   `json.Unmarshal` failed with an unrelated message that doesn't contain "Not
+   Found", logging a real error every ~10 seconds while idle (harmless to the render
+   loop itself, but a confirmed defect). Fixed: `POST /api/v1/worker/jobs/next` now
+   throws `notFoundError("Not Found")` for an empty queue.
+5. **Every duration report was silently rejected.** The actual Worker's
+   `SetDuration()` sends `{"duration": <int seconds>}` — the previously implemented
+   route's body schema required a field literally named `durationSeconds`. Fixed at
+   the route boundary only (`duration` accepted, mapped to Studio's internal
+   `Job.durationSeconds` — the internal domain field name is unchanged).
+6. **The real Worker's mid-render cancellation signal had no Studio counterpart at
+   all.** The Worker's supervisor process (`worker/worker.go`'s `checkCancelJob`)
+   polls, roughly every 5 seconds while actively rendering, `GET
+{baseURL}/jobs/{activeJobId}` — no `/api` prefix, no credential — expecting the
+   _legacy backend's_ exact response shape (`{"job":{"_id":...,"state":...}}` on
+   success, `{"statusCode":404}` on a missing Job) to learn whether to kill the local
+   AfterFX process. That literal URL is already the human-facing Job detail dashboard
+   page, and a `page.tsx`/`route.ts` cannot co-resolve one path in the App Router.
+   Fixed via `src/middleware.ts` — a **pure content-negotiation rewrite** (not an
+   authorization decision; nothing here decides access, since there is no credential
+   to decide about) that distinguishes a real browser (`Accept: text/html,...`) from
+   the Worker's headerless `http.Get` and rewrites only the latter to a new internal
+   handler (`src/app/api/internal/legacy-job-status/[jobId]/route.ts`) returning the
+   exact legacy shape.
+7. **No credential on three real Worker calls — a structural gap, addressed with
+   bounded, explained compensating checks, not a silently accepted opening.** The
+   result upload, the asset/Template download, and the cancel-status poll all send no
+   Worker credential in the real Worker's actual code — this cannot be changed short
+   of modifying the Worker, which is out of scope. Rather than either breaking these
+   calls outright (requiring a credential that will never arrive) or opening the
+   underlying endpoints with no scope at all, each gained its own narrow substitute
+   gate: the upload requires the Job to be in an acceptable render state; File serving
+   without any credential is limited to a File that is a genuine input of a Job
+   currently `QUEUED`/`CLAIMED`/`RENDERING`
+   (`findFileIfActiveJobInput`); the cancel-status poll returns the minimum possible
+   information (an id already known to the caller, plus a coarse numeric state).
+
+**Consequences.**
+
+- `docs/integrations/worker-api.md` was substantially rewritten — every item this ADR
+  fixes is documented with the specific Worker source line/behavior that justified it,
+  and §7 ("Compatibility notes / risks") changed from "unconfirmed, coordinate before
+  cutover" to a resolved record.
+- `src/middleware.ts` is new — the first middleware in this codebase. It performs
+  routing only, never an authorization decision; CLAUDE.md's "no authorization in
+  Next.js middleware" rule is about the latter and is not violated by the former.
+- Three endpoints now knowingly operate without a Worker credential
+  (`.../jobs/:id/upload`, the asset/Template branch of `/api/files/[fileId]`, and the
+  new `/jobs/:id` legacy cancel-status route) — a real, explained narrowing of Studio's
+  security posture, bounded in each case as described above, not a blanket opening.
+  A future Worker update that adds the missing `Authorization` header on these three
+  calls would let the compensating checks be tightened or removed — that is a Worker
+  change, out of scope here, and not required for correctness today.
+- The Worker repository (`navaak-ae-renderer`) was read extensively but never modified —
+  confirmed via `git status` before and after this work; any pre-existing local,
+  uncommitted changes to it (unrelated to this task) were left untouched.
+
+**Out of scope, deliberately:**
+
+- Modifying the Worker to send the missing `Authorization` header on its
+  upload/download/cancel-poll calls, or to stop expecting the legacy
+  `{"job":{"_id":...}}` shape — the Worker is immutable for this task.
+- A general-purpose Next.js middleware framework or routing layer — `src/middleware.ts`
+  is scoped to the one literal path collision this phase needed to resolve, not a
+  precedent for moving other logic into middleware.
+
+**Status:** DECIDED.

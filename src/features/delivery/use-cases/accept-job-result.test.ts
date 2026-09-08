@@ -242,4 +242,59 @@ describe("acceptJobResult", () => {
     ).rejects.toMatchObject({ kind: "not_found" });
     expect(generateRenderArtifacts).not.toHaveBeenCalled();
   });
+
+  // ADR-0043 — the actual Worker's upload call sends no Authorization
+  // header, and calls `ChangeState(Rendered)` before uploading.
+  describe("Worker-compatibility broadening (ADR-0043)", () => {
+    it("accepts a job already RENDERED with no videoFileId yet (the Worker's real call order)", async () => {
+      const alreadyRendered = job({ state: "RENDERED", videoFileId: null });
+      const rendered = job({
+        state: "RENDERED",
+        videoFileId: "file-video",
+        screenshotFileId: "file-screenshot",
+        thumbnailFileId: "file-thumbnail",
+      });
+      findJobById.mockResolvedValue(alreadyRendered);
+      generateRenderArtifacts.mockResolvedValue(artifacts);
+      transitionJobRow.mockResolvedValue(rendered);
+
+      const result = await acceptJobResult(
+        "job-1",
+        Buffer.from("video bytes"),
+        ALLOWED,
+      );
+
+      expect(transitionJobRow).toHaveBeenCalledWith(
+        "job-1",
+        ["RENDERED"],
+        "RENDERED",
+        expect.objectContaining({ videoFileId: "file-video" }),
+      );
+      expect(result.videoFileId).toBe("file-video");
+    });
+
+    it("accepts with allowedDepartmentIds: null (no Worker credential presented) without any Department check", async () => {
+      const rendering = job({ state: "RENDERING" });
+      const rendered = job({ state: "RENDERED", videoFileId: "file-video" });
+      findJobById.mockResolvedValue(rendering);
+      generateRenderArtifacts.mockResolvedValue(artifacts);
+      transitionJobRow.mockResolvedValue(rendered);
+
+      const result = await acceptJobResult(
+        "job-1",
+        Buffer.from("video bytes"),
+        null,
+      );
+
+      expect(result.state).toBe("RENDERED");
+    });
+
+    it("still rejects a job in a genuinely wrong state (e.g. QUEUED) even with null credentials", async () => {
+      findJobById.mockResolvedValue(job({ state: "QUEUED" }));
+      await expect(
+        acceptJobResult("job-1", Buffer.from("x"), null),
+      ).rejects.toMatchObject({ kind: "business_rule" });
+      expect(generateRenderArtifacts).not.toHaveBeenCalled();
+    });
+  });
 });

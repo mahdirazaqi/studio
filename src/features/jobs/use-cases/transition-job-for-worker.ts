@@ -2,7 +2,10 @@ import { assertWorkerDepartmentAccess } from "@/server/worker-auth";
 import { notFoundError, validationError } from "@/server/errors/app-error";
 import { mapWorkerState } from "@/features/jobs/domain/legacy-state-mapping";
 import { transitionJob } from "@/features/jobs/use-cases/transition-job";
-import { findJobState } from "@/features/jobs/repository/job-repository";
+import {
+  findJobById,
+  findJobState,
+} from "@/features/jobs/repository/job-repository";
 import type { SafeJobDetail } from "@/features/jobs/domain/job";
 import type { WorkerTransitionInput } from "@/features/jobs/schemas/worker-transition.schema";
 
@@ -42,6 +45,26 @@ export async function transitionJobForWorker(
     throw validationError("An errorReason is required when reporting ERROR.", {
       fieldErrors: { errorReason: ["Required when state is ERROR."] },
     });
+  }
+
+  // Idempotent no-op — revised, ADR-0043. The actual Worker
+  // (`navaak-ae-renderer/renderer/renderer.go`'s `next()`) reports THREE
+  // distinct legacy per-stage codes in sequence while a Job is actively
+  // rendering — Downloading(2), Started(3), InProgress(4) — and
+  // `mapWorkerState` maps all three onto the same Studio `RENDERING`
+  // bucket (`legacy-state-mapping.ts`). Only the first of the three is a
+  // real `CLAIMED -> RENDERING` transition; the other two are same-state
+  // reports. `isValidTransition`/`transitionJob`'s state machine
+  // deliberately forbids a self-loop for every *other* caller (tested,
+  // `job-state-machine.test.ts`) — that invariant is untouched. This is the
+  // one Worker-facing boundary that treats "already in the reported state"
+  // as success rather than a `business_rule` error, matching the existing
+  // idempotent-no-op convention used elsewhere (Template enable/disable,
+  // Template transfer, `acceptJobResult`'s duplicate-result handling).
+  if (targetState === current.state) {
+    const job = await findJobById(jobId);
+    if (!job) throw notFoundError();
+    return job;
   }
 
   return transitionJob(

@@ -149,6 +149,47 @@ export async function findFileForWorkerServing(
   });
 }
 
+/**
+ * **ADR-0043 — the credential-less fallback `/api/files/[fileId]` uses when
+ * a request has no `Authorization` header AND no session.** The actual
+ * Worker's asset/template downloader
+ * (`navaak-ae-renderer/renderer/operator/downloader.go`'s `downloadFile`) is
+ * a plain `http.Get` with no headers set at all — unlike every Worker
+ * request routed through `operator.Request()` (fetch/state/progress/
+ * duration), it carries no Bearer credential whatsoever, so there is no
+ * credential this function (or its caller) can check.
+ *
+ * The compensating scope, since there is no credential: **only a File that
+ * is currently a genuine input (`JobAsset.fileId`) of a Job that is
+ * actively in flight** (`QUEUED`/`CLAIMED`/`RENDERING`) is servable this
+ * way — not an arbitrary Gallery File. This does not reproduce full
+ * Department isolation (there is nothing to scope by, with no credential),
+ * but it is a real, bounded narrowing: once a Job leaves those three
+ * states, the File this returned while the Job was active stops being
+ * servable through this path at all, falling back to requiring a real
+ * session (or a real Worker credential, if the caller ever presents one).
+ * File ids are unguessable (`cuid()`), so this is not a practical
+ * enumeration surface.
+ */
+export async function findFileIfActiveJobInput(
+  fileId: string,
+): Promise<FileForServing | null> {
+  return db.file.findFirst({
+    where: {
+      id: fileId,
+      jobAssetReferences: {
+        some: { job: { state: { in: ["QUEUED", "CLAIMED", "RENDERING"] } } },
+      },
+    },
+    select: {
+      storageKey: true,
+      mimeType: true,
+      sizeBytes: true,
+      originalName: true,
+    },
+  });
+}
+
 export interface ListFilesFilters {
   category: FileCategory;
   kind?: FileKind;

@@ -376,7 +376,7 @@ Phase 4's `File.category = JOB_ARTIFACT` and Phase 6/7's `RENDERED`/`DELIVERING`
 
 **Delivered:**
 
-- `POST /api/v1/worker/jobs/:id/result` (raw video bytes, not multipart) —
+- `POST /api/v1/worker/jobs/:id/upload` (multipart/form-data, field "file" — ADR-0043) —
   `accept-job-result.ts`, idempotent against duplicate/racing Worker requests via the
   same atomic conditional `UPDATE` pattern every other `Job.state` writer uses.
 - `ffmpeg`-only media processing (`server/adapters/media/ffmpeg-adapter.ts`) — screenshot
@@ -529,7 +529,7 @@ non-null `Template.youtubeTargetId`/`description`/non-empty `tags`) in every env
 checked beforehand, so the migration carries zero data-loss risk despite being a real
 schema change (not `db push`).
 
-**Kept, unchanged:** `POST /api/v1/worker/jobs/:id/result` (still mandatory — the
+**Kept, unchanged:** `POST /api/v1/worker/jobs/:id/upload` (still mandatory — the
 Worker's only way to hand Studio the rendered bytes), `ffmpeg`-based screenshot/
 thumbnail generation and the three `JOB_ARTIFACT` Files it creates (general "view the
 result in the dashboard" functionality, independent of any delivery destination), Job

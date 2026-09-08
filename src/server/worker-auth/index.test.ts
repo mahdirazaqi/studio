@@ -14,6 +14,7 @@ vi.mock("@/server/db", () => ({
 
 const {
   authenticateWorker,
+  authenticateWorkerLenient,
   assertWorkerDepartmentAccess,
   hashWorkerApiKeySecret,
 } = await import("./index");
@@ -116,6 +117,38 @@ describe("authenticateWorker", () => {
         "some-guessed-secret-value",
       );
     }
+  });
+});
+
+// ADR-0043 — the actual Worker's upload/download calls send no
+// Authorization header at all, unlike fetch/state/progress/duration.
+describe("authenticateWorkerLenient", () => {
+  it("returns null for a request with no Authorization header at all", async () => {
+    const result = await authenticateWorkerLenient(requestWithAuth(null));
+    expect(result).toBeNull();
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it("authenticates strictly, exactly like authenticateWorker, when a header IS present", async () => {
+    findUnique.mockResolvedValue({
+      id: "key-1",
+      status: "ACTIVE",
+      departments: [{ id: "dept-a" }],
+    });
+    const result = await authenticateWorkerLenient(
+      requestWithAuth("Bearer real-secret"),
+    );
+    expect(result).toEqual({
+      workerApiKeyId: "key-1",
+      allowedDepartmentIds: ["dept-a"],
+    });
+  });
+
+  it("still rejects a present-but-invalid header — never silently downgrades a failed auth attempt to null", async () => {
+    findUnique.mockResolvedValue(null);
+    await expect(
+      authenticateWorkerLenient(requestWithAuth("Bearer nonexistent")),
+    ).rejects.toMatchObject(unauthenticated());
   });
 });
 

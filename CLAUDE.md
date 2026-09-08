@@ -75,6 +75,13 @@ Studio replaces the `src/render` module of the legacy NestJS backend
 The legacy repository is at `/home/mahdirazaqi/Projects/qtical-backend-node`
 (module of interest: `src/render`).
 
+The actual Render Worker repository is at `/home/mahdirazaqi/Projects/navaak-ae-renderer`
+(Go, two binaries: `cmd/worker` supervises `cmd/renderer`, which does the real
+fetch/render/report loop). **It is immutable — never modify it.** It is the source of
+truth for the Worker REST API contract (ADR-0043); Studio's own design intent for that
+contract is a starting point, not a substitute for reading this source when the two
+disagree. See [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md).
+
 ## 3. Mandatory workflow for AI agents
 
 > **Before implementing or modifying any significant feature, first read the relevant
@@ -403,9 +410,14 @@ WHERE state IN (fromStates)`** — never a read-then-write, never a direct
 
 Full detail: [`docs/integrations/worker-api.md`](docs/integrations/worker-api.md),
 [`docs/architecture/decisions.md`](docs/architecture/decisions.md)
-ADR-0004/ADR-0033/ADR-0034/ADR-0040. **Implemented, Phase 7, per-Worker Department-scoped
-API keys implemented Phase 11 (ADR-0040, supersedes ADR-0032)** — versioned under
-`/api/v1/worker/**`, plus a Worker-auth branch on `/api/files/[fileId]`.
+ADR-0004/ADR-0033/ADR-0034/ADR-0040/ADR-0043. **Implemented, Phase 7, per-Worker
+Department-scoped API keys implemented Phase 11 (ADR-0040, supersedes ADR-0032)** —
+versioned under `/api/v1/worker/**`, plus a Worker-auth branch on
+`/api/files/[fileId]`. **Verified/fixed against the actual Worker's real source, Phase
+14 (ADR-0043)** — every rule below marked "(ADR-0043)" replaced a design that was
+never actually checked against the real `navaak-ae-renderer` repository and would have
+broken the real integration; do not revert any of them without re-reading ADR-0043 and
+re-checking the real Worker source first.
 
 - **Every `/api/v1/worker/**` Route Handler is a thin `defineRouteHandler` wrapper**:
   `authenticate: authenticateWorker` (`@/server/worker-auth`), a Zod `params`/`body`
@@ -446,27 +458,65 @@ UPDATE SKIP LOCKED` filters `WHERE "departmentId" = ANY(allowedDepartmentIds)` a
   secret is shown exactly once, at creation, never re-displayed or stored anywhere
   retrievable. **`WORKER_API_KEY` no longer exists** — removed from `@/server/env`
   entirely, no fallback path. Do not reintroduce a shared static key without a new ADR.
-- **`/api/files/[fileId]` has two independent auth paths**: an `Authorization` header
-  present means "authenticate as the Worker, unscoped by Department, or reject" — it
-  never falls back to session auth. No header means the original session-cookie path,
-  unchanged. Do not blur this into a single combined check. (File serving itself remains
-  unscoped by Department — only Job operations are, per ADR-0040; do not conflate the
-  two without re-reading `docs/integrations/worker-api.md` §5 first.)
+- **`/api/files/[fileId]` has three, not two, request paths (ADR-0043)**: an
+  `Authorization` header present means "authenticate as the Worker, unscoped by
+  Department, or reject" — never falls back to session or unauthenticated serving. No
+  header, with a valid session, serves through the original Department-scoped path.
+  No header **and no session** falls to `getFileForUnauthenticatedWorkerDownload` —
+  the real Worker's asset/Template downloader sends no credential at all, so this is
+  the one real way its downloads succeed; it is bounded to a File that is a genuine
+  input of a currently-`QUEUED`/`CLAIMED`/`RENDERING` Job, never an arbitrary Gallery
+  File. Do not blur these into a single combined check, and do not widen the third
+  path's scope without re-reading `docs/integrations/worker-api.md` §5 first.
 - **The claim/get-by-id payload keeps legacy's exact field names**
   (`output`/`title`/`composition`/`template`/`assets[].{composition,layer,type,src,text}`)
   — only add fields, never rename or remove one without a compatibility review.
   `PATCH .../state` must keep accepting both a legacy integer (0–9) and a Studio state
-  name (`mapWorkerState`).
-- **The empty-queue response is `204 No Content`**, never `404` or a `200` with an empty
-  body — `claimNextJob()` returning `null` already triggers this via
-  `defineRouteHandler`'s built-in mapping.
-- **Result/output upload is implemented, Phase 9** — see §15. `POST
-/api/v1/worker/jobs/:id/result` takes the raw video bytes as the request body, not
-  multipart — do not add multipart parsing to `defineRouteHandler` for this; the handler
-  reads `request.arrayBuffer()` directly.
-- **Not implemented, deliberately**: Worker-initiated cancel/retry, per-Worker rate
-  limiting, a Worker input-file-upload endpoint (`POST /api/v1/worker/files`). Do not add
-  any of these without re-reading `docs/integrations/worker-api.md` §6 first.
+  name (`mapWorkerState`). **A same-state call is a no-op, not an error (ADR-0043)** —
+  the real Worker reports 3 legacy codes that all map to `RENDERING`; only
+  `transitionJobForWorker` (the Worker-facing adapter) special-cases this, the general
+  state machine's no-self-loop invariant is unchanged for every other caller.
+- **`assets[].src`/Template download URLs are relative paths (`/api/files/{id}`), never
+  absolute (ADR-0043).** The real Worker's downloader only resolves a **path** joined
+  onto its own configured base URL — an absolute URL breaks it outright (verified by
+  hand). `buildFileUrlFromRequest` (`src/app/api/v1/worker/_lib/build-file-url.ts`)
+  returns a relative path; do not change it back without re-reading ADR-0043.
+- **The empty-queue response is `404` with the message `"Not Found"` (verbatim),
+  never `204` (ADR-0043 — reverses the originally shipped, never-Worker-verified
+  design).** The real Worker's error-suppression only recognizes a response whose body
+  contains that exact substring; a `204` (no body) gets logged as a spurious error on
+  every empty poll. Do not change this message text or revert to `204` without
+  re-reading ADR-0043 and the real Worker's `renderer.go`.
+- **Result/output upload is implemented, Phase 9; path and body format corrected
+  Phase 14 (ADR-0043).** `POST /api/v1/worker/jobs/:id/upload` (**not** `.../result` —
+  renamed to match the real Worker's actual path) is `multipart/form-data` with the
+  video under form field `"file"` (**not** raw bytes — the real Worker's `UploadJob`
+  sends real multipart) — the handler reads `request.formData()`. **No Worker
+  credential is required for this specific route (ADR-0043)** — the real Worker sends
+  none; `authenticateWorkerLenient` (not `authenticateWorker`) is used, and
+  `acceptJobResult` accepts `allowedDepartmentIds: null`, gated instead by the Job's
+  own render state (`RENDERING`, or `RENDERED` with no `videoFileId` yet — the real
+  Worker calls `ChangeState(Rendered)` before uploading). Do not add multipart parsing
+  to `defineRouteHandler` itself for this — the handler reads the body directly, same
+  pattern as before.
+- **`PATCH .../duration`'s wire field name is `duration`, not `durationSeconds`
+  (ADR-0043)** — the real Worker's `SetDuration()` sends `{"duration": <int>}`. Studio's
+  internal domain field stays `Job.durationSeconds`; this route is the one place the
+  translation happens. Do not "fix" this back to `durationSeconds` at the wire boundary.
+- **`GET {origin}/jobs/:id` (no `/api` prefix) is real, ADR-0043** — the actual Worker's
+  mid-render cancellation poll (`worker.go`'s `CanCancel`) hits this literal,
+  unauthenticated URL, expecting the legacy `{"job":{"_id":...,"state":...}}` shape.
+  Since that URL is already the dashboard's Job detail page, `src/middleware.ts`
+  content-negotiates the two apart (Worker: no `Accept: text/html`) and rewrites only
+  the Worker's request to `src/app/api/internal/legacy-job-status/[jobId]/route.ts`.
+  This is routing, not authorization — it does not violate "no authorization in
+  middleware" (§5's dashboard session check is still the only authorization gate for
+  every request middleware does not rewrite). Do not add unrelated logic to
+  `middleware.ts` — it exists for this one literal path collision.
+- **Not implemented, deliberately**: Worker-initiated cancel/retry (the cancel _signal_
+  above is Worker→Studio informational polling, not a Worker-initiated action), per-Worker
+  rate limiting, a Worker input-file-upload endpoint (`POST /api/v1/worker/files`). Do not
+  add any of these without re-reading `docs/integrations/worker-api.md` §6 first.
 
 ## 14. Telegram rules (summary)
 
@@ -773,6 +823,45 @@ build` both pass; `npm install` succeeds cleanly after the `googleapis` removal.
   and `features/jobs/use-cases/resolve-job-assets.ts` still re-validates every submitted
   `fileId` against the Template's Department server-side, exactly as before. 446 tests
   pass; `npm run check`/`npm run build` both pass.
+- **Phase 14 (Worker compatibility audit — real Worker source as source of truth) —
+  complete (ADR-0043).** Every prior phase's Worker REST API design was built and
+  documented **without ever reading the actual Worker's real source
+  (`navaak-ae-renderer`, external repository)** — this phase did, in full, and fixed
+  every concrete defect that comparison found; the Worker itself was never modified
+  (verified via `git status` before and after — its own pre-existing, unrelated
+  uncommitted local changes were left untouched). Findings, most severe first: (1) the
+  render pipeline could never complete a single real render — the real Worker reports
+  3 legacy per-stage codes (Downloading/Started/InProgress) that all map to Studio's
+  `RENDERING`, and the state machine's deliberate no-self-loop rule rejected the second
+  and third as illegal transitions every time — fixed by making the Worker-facing
+  `transitionJobForWorker` treat a same-state report as an idempotent no-op, leaving
+  the general state machine's invariant untouched for every other caller; (2) the
+  result upload could never succeed — wrong path (`.../result` vs. the real Worker's
+  `.../upload`), wrong body format (raw bytes vs. the real Worker's actual
+  `multipart/form-data`, field `"file"`), and a required-`RENDERING` state check that
+  the real Worker's own call order (`ChangeState(Rendered)` sent _before_ uploading)
+  defeats — all three fixed; (3) every asset/Template download was broken — the
+  claim/get-by-id payload returned an absolute URL, but the real Worker's downloader
+  only resolves a relative path joined onto its own base URL, corrupting the request
+  otherwise (verified by hand) — fixed; (4) the empty-queue response (`204`) was
+  logged as a spurious error on every poll, since the real Worker's error-suppression
+  only recognizes a `404` body containing the literal text `"Not Found"` — reverted to
+  `404`; (5) every duration report was rejected — the real Worker sends `{"duration":
+...}`, not `{"durationSeconds": ...}` — fixed at the route boundary only, Studio's
+  internal domain field name is unchanged; (6) the real Worker's mid-render
+  cancellation poll (`GET {baseURL}/jobs/:id`, unauthenticated, legacy
+  `{"job":{"_id",...}}` shape) had no Studio counterpart at all and collides with the
+  dashboard's own Job detail page URL — added via a new, narrowly-scoped
+  `src/middleware.ts` performing a pure content-negotiation rewrite (never an
+  authorization decision) to a new internal Route Handler. Three real Worker calls
+  (result upload, asset/Template download, the cancel poll) send **no credential of
+  any kind** in the real Worker's actual code — each gained an explained, bounded
+  compensating check instead of either breaking the call outright or opening the
+  underlying endpoint with no scope at all (see ADR-0043 and
+  `docs/integrations/worker-api.md` for the exact, per-endpoint trade-off). 473 tests
+  pass (27 new/rewritten); `npm run check`/`npm run build` both pass; the middleware
+  rewrite and the empty-queue/file-serving fixes were additionally verified against a
+  running dev server with real HTTP requests, not just unit tests.
 
 Do not start a new phase beyond this unless explicitly asked — see
 [`docs/development/workflow.md`](docs/development/workflow.md) for the full history

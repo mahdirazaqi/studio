@@ -277,10 +277,13 @@ is completely unaffected by that removal; it never was the same operation.
 
 `RENDERED` and its timeline timestamp (`renderedAt`) are driven by a real, tested path:
 
-- `POST /api/v1/worker/jobs/:id/result` accepts the rendered result (Studio's equivalent
+- `POST /api/v1/worker/jobs/:id/upload` accepts the rendered result (Studio's equivalent
   of legacy's `POST /jobs/:id/upload`) — `features/delivery/use-cases/
-accept-job-result.ts`. Department-scoped like every other Worker Job operation
-  (ADR-0040) and idempotent against a duplicate/racing request.
+accept-job-result.ts`. Multipart (`"file"` field), and — unlike every other Worker Job
+  operation — **not required to carry a Worker credential** (ADR-0043; the real Worker's
+  upload call sends none), with the Job's own render state as the compensating gate
+  instead of Department scope when none is presented. Idempotent against a
+  duplicate/racing request.
 - `features/delivery/use-cases/generate-render-artifacts.ts` (`MediaProcessingService`)
   generates a screenshot + thumbnail via `ffmpeg` and creates all three `JOB_ARTIFACT`
   File rows, set atomically together with the `RENDERING -> RENDERED` transition.

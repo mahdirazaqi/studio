@@ -64,11 +64,14 @@ function toWorkerAsset(
     };
   }
 
-  // IMAGE | AUDIO | VIDEO — `src` is a URL the Worker can `GET` (with its own
-  // Bearer credential) to download the bytes, not a raw filesystem path
-  // (Studio's storage is behind `StorageAdapter`, ADR-0024 — there is no
-  // path to hand out). `null` when the source File has since been deleted;
-  // the Worker cannot download it, but every other field here still reflects
+  // IMAGE | AUDIO | VIDEO — `src` is a relative path the Worker `GET`s to
+  // download the bytes, not a raw filesystem path (Studio's storage is
+  // behind `StorageAdapter`, ADR-0024 — there is no path to hand out). The
+  // actual Worker's downloader sends **no credential at all** on this
+  // request (`downloader.go`'s `downloadFile` is a plain `http.Get`) —
+  // `/api/files/[fileId]` accommodates that (ADR-0043; see its own doc
+  // comment). `null` when the source File has since been deleted; the
+  // Worker cannot download it, but every other field here still reflects
   // what the Job was created with.
   return {
     key: asset.slotKey,
@@ -81,9 +84,11 @@ function toWorkerAsset(
 }
 
 /**
- * @param buildFileUrl Builds the absolute, Worker-fetchable URL for a File id
- *   (`/api/files/[fileId]`, Bearer-authenticated for a Worker caller — see
- *   `docs/architecture/files.md` "Access & preview: Worker access").
+ * @param buildFileUrl Builds the Worker-fetchable **relative path** for a
+ *   File id (`/api/files/[fileId]` — see `docs/architecture/files.md`
+ *   "Access & preview: Worker access"). Deliberately relative, not absolute
+ *   (ADR-0043) — the actual Worker's downloader only resolves correctly
+ *   against a path joined onto its own configured base URL.
  */
 export function buildWorkerJobPayload(
   job: SafeJobDetail,

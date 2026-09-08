@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 
-import { requireUser } from "@/server/auth/current-user";
+import { getCurrentUser } from "@/server/auth/current-user";
 import { toActor } from "@/server/authz";
 import { authenticateWorker } from "@/server/worker-auth";
 import { storage } from "@/server/adapters/storage";
@@ -8,6 +8,7 @@ import { AppError } from "@/server/errors/app-error";
 import { logger } from "@/server/logger";
 import { getFileForServing } from "@/features/files/use-cases/get-file-for-serving";
 import { getFileForWorkerServing } from "@/features/files/use-cases/get-file-for-worker-serving";
+import { getFileForUnauthenticatedWorkerDownload } from "@/features/files/use-cases/get-file-for-unauthenticated-worker-download";
 import type { FileForServing } from "@/features/files/repository/file-repository";
 
 /**
@@ -28,15 +29,24 @@ import type { FileForServing } from "@/features/files/repository/file-repository
  * `assertDepartmentScopeOrNotFound`'s reasoning even though this path uses
  * the query-scoping variant instead (`findFileForServing`).
  *
- * **Two callers, two trust models (Phase 7):** an `Authorization` header
- * present on the request is treated strictly as a Worker credential attempt
- * — authenticated via `authenticateWorker` and, if valid, served **unscoped**
- * (no Department check; see `findFileForWorkerServing`'s doc comment for why
- * that is the honest reflection of Studio's single-shared-Worker trust
- * model). No `Authorization` header falls back to the original session-cookie
- * path, unchanged. A request is never silently retried on the other path —
- * a malformed/incorrect `Authorization` header fails as a Worker auth
- * failure, it does not fall back to session auth.
+ * **Three callers, three trust models (Phase 7; broadened ADR-0043):** an
+ * `Authorization` header present on the request is treated strictly as a
+ * Worker credential attempt — authenticated via `authenticateWorker` and, if
+ * valid, served **unscoped** (no Department check; see
+ * `findFileForWorkerServing`'s doc comment for why that is the honest
+ * reflection of Studio's single-shared-Worker trust model). A
+ * malformed/incorrect `Authorization` header fails as a Worker auth
+ * failure — it never falls back to session or unauthenticated serving.
+ *
+ * No `Authorization` header: a valid session cookie serves through the
+ * original, fully Department-scoped path, unchanged. **No session either**
+ * (ADR-0043) falls to `getFileForUnauthenticatedWorkerDownload` — the
+ * actual Worker's asset/template downloader
+ * (`navaak-ae-renderer/renderer/operator/downloader.go`) sends no
+ * credential of any kind, so this is the one real way its downloads can
+ * succeed; see that function's doc comment for the bounded scope this
+ * fallback is restricted to (only a File that is a genuine input to a
+ * currently-active Job).
  */
 export async function GET(
   request: Request,
@@ -100,19 +110,25 @@ export async function GET(
 
 /**
  * An `Authorization` header means "this is a Worker" — authenticate and serve
- * unscoped, or fail outright. No header means the original session-cookie
- * path, unchanged. Never falls through from one to the other.
+ * unscoped, or fail outright (never falls through to session or
+ * unauthenticated serving). No header, with a valid session, serves through
+ * the original Department-scoped path. No header and no session falls to
+ * the bounded, credential-less Worker fallback (ADR-0043) — see this file's
+ * top doc comment.
  */
 async function resolveFileForServing(
   request: Request,
   fileId: string,
 ): Promise<FileForServing> {
   if (request.headers.get("authorization")) {
-    authenticateWorker(request);
+    await authenticateWorker(request);
     return getFileForWorkerServing(fileId);
   }
-  const actor = toActor(await requireUser());
-  return getFileForServing(actor, fileId);
+  const user = await getCurrentUser();
+  if (user) {
+    return getFileForServing(toActor(user), fileId);
+  }
+  return getFileForUnauthenticatedWorkerDownload(fileId);
 }
 
 function toWebStream(nodeStream: NodeJS.ReadableStream): ReadableStream {

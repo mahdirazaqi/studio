@@ -119,3 +119,34 @@ export function assertWorkerDepartmentAccess(
     throw notFoundError();
   }
 }
+
+/**
+ * **Lenient variant — ADR-0043, used only where the actual Worker sends no
+ * credential at all.** Two of the Worker's real HTTP calls
+ * (`navaak-ae-renderer/renderer/operator/upload.go`'s `UploadJob`, and
+ * `.../renderer/downloader.go`'s asset/template downloads) build their
+ * request manually and never set an `Authorization` header — unlike every
+ * request routed through `operator.Request()` (fetch/state/progress/
+ * duration), which does. This is not a credential Studio can require
+ * without breaking those two real code paths outright.
+ *
+ * Behavior: an `Authorization` header present is validated exactly as
+ * strictly as `authenticateWorker` (a malformed/unknown/revoked credential
+ * still throws `unauthenticated`) — this function never silently downgrades
+ * a *failed* auth attempt into "no credential". Only a **missing** header
+ * returns `null`, signaling "the Worker's actual behavior for this call —
+ * proceed, but the caller must apply its own compensating check" (e.g.
+ * `acceptJobResult` only accepts an unscoped call for a Job already in
+ * `RENDERING`/`RENDERED`-without-`videoFileId`, and
+ * `/api/files/[fileId]` only serves an unscoped, header-less request when
+ * the file is a genuine input to a currently-active Job — see each call
+ * site's own doc comment). Never use this where the Worker's actual
+ * behavior does send a credential (fetch/state/progress/duration keep using
+ * `authenticateWorker`).
+ */
+export async function authenticateWorkerLenient(
+  request: Request,
+): Promise<WorkerAuthContext | null> {
+  if (!request.headers.get("authorization")) return null;
+  return authenticateWorker(request);
+}

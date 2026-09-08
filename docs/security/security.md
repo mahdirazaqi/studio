@@ -110,7 +110,7 @@ Binding security requirements for Studio. Many are direct responses to
   root, as defense in depth, even though `key` is always system-generated and never
   derived from user input (Security Requirements §8).
 - **Implemented, Phase 9:** the Worker's rendered-result upload
-  (`POST /api/v1/worker/jobs/:id/result`) goes through the identical content-sniffing/
+  (`POST /api/v1/worker/jobs/:id/upload`) goes through the identical content-sniffing/
   size-limit rules as an ordinary Gallery upload (`features/files/use-cases/
 create-job-artifact.ts` reuses `sniffContentType`/`resolveFileKind` unmodified) — the
   Worker's own request `Content-Type` header, if any, is never trusted. A `JOB_ARTIFACT`

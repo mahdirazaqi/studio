@@ -44,7 +44,7 @@ use cases  changeState / reportProgress / reportDuration
   ▼
 
 Render Worker
-  │  POST /api/v1/worker/jobs/:id/result   (raw video bytes, not multipart)
+  │  POST /api/v1/worker/jobs/:id/upload   (multipart, field "file" — ADR-0043)
   ▼
 Route Handler → use case  acceptJobResult(job, videoBuffer)
   │  store video bytes via storage adapter

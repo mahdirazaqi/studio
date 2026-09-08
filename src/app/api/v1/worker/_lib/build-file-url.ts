@@ -1,14 +1,25 @@
 /**
- * Builds the absolute, Worker-fetchable URL for a File id, from the
- * inbound request's own origin — not `env.APP_URL` (optional, dev-only
- * today). Whatever host/scheme the Worker used to reach Studio is, by
- * construction, a host/scheme it can also use to reach `/api/files/[fileId]`
- * with its own Bearer credential (see `/api/files/[fileId]/route.ts`'s
- * Phase 7 Worker-auth branch).
+ * Builds the Worker-fetchable reference for a File id.
+ *
+ * **Revised, ADR-0043 — relative path, not an absolute URL.** The actual
+ * Worker (`navaak-ae-renderer/renderer/operator/downloader.go`'s
+ * `download()`) resolves a non-`file://` asset reference by taking only the
+ * **path** component and joining it onto its own configured `BaseURL`:
+ * `u, _ := url.Parse(config.C.BaseURL); u.Path = path.Join(u.Path, addr)`.
+ * Go's `path.Join` treats `addr` purely as a path string — if `addr` is
+ * itself a full absolute URL (`https://host/api/files/{id}`), the `"://"`
+ * inside it collapses under `path.Clean`'s double-slash normalization,
+ * producing a mangled, unreachable URL (verified by hand: joining
+ * `"http://localhost:3002"` with the *path* `"http://localhost:3002/api/
+ * files/abc"` yields `"http://localhost:3002http:/localhost:3002/api/
+ * files/abc"`). A relative path (`/api/files/{id}`) joins cleanly and
+ * resolves correctly against the Worker's own `BaseURL`. Do not change this
+ * back to an absolute URL without re-verifying against the actual Worker
+ * source.
  */
 export function buildFileUrlFromRequest(
-  request: Request,
+  _request: Request,
   fileId: string,
 ): string {
-  return `${new URL(request.url).origin}/api/files/${fileId}`;
+  return `/api/files/${fileId}`;
 }
