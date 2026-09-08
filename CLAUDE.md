@@ -862,6 +862,26 @@ build` both pass; `npm install` succeeds cleanly after the `googleapis` removal.
   pass (27 new/rewritten); `npm run check`/`npm run build` both pass; the middleware
   rewrite and the empty-queue/file-serving fixes were additionally verified against a
   running dev server with real HTTP requests, not just unit tests.
+- **Phase 15 (Job thumbnail, video duration & render time, status chip colors) —
+  complete (ADR-0045).** No new backend media processing — the Phase 9 `ffmpeg`
+  thumbnail (`Job.thumbnailFileId`) already existed and is now simply surfaced in the
+  UI (`JobThumbnail`, `features/jobs/components/job-thumbnail.tsx`), placeholder
+  before render / actual thumbnail after, with an `HH:MM:SS` duration overlay, served
+  through the unmodified `/api/files/[fileId]` route. `thumbnailFileId`/`startedAt`/
+  `renderedAt` moved from `SafeJobDetail` into the list-view `SafeJob` type and its
+  Prisma select, so the Jobs List gets a thumbnail + render time per row without an
+  extra query. The one real schema-adjacent change: `Job.startedAt` (existing column,
+  previously never written) is now set exactly once by `transitionJobForWorker` on the
+  real `CLAIMED -> RENDERING` transition — no migration needed. Render time
+  (`computeRenderSeconds`, `features/jobs/domain/job.ts`) is `startedAt -> renderedAt`,
+  deliberately excluding queue wait and asset-download time, distinct from the
+  rendered video's own duration (`Job.durationSeconds`) — both formatted through one
+  shared `formatDurationHHMMSS` utility (`src/lib/format-duration.ts`, always
+  `HH:MM:SS`, never a raw number or `Date` format). `JobStatusBadge`
+  (`features/jobs/components/job-status-badge.tsx`) recolored using the existing,
+  previously-unused `--success`/`--warning`/`--info` semantic tokens — no new color
+  invented, no removed YouTube-era state (`Uploading`/`Uploaded`) reintroduced. 506
+  tests pass (28 new); `npm run lint`/`typecheck`/`build` all pass.
 
 Do not start a new phase beyond this unless explicitly asked — see
 [`docs/development/workflow.md`](docs/development/workflow.md) for the full history

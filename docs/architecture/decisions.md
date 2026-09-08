@@ -2061,3 +2061,77 @@ breaking anything downstream that infers file type from the extension (Adobe's
   determination — `Content-Type` still comes from the File's own server-side record.
 
 **Status:** DECIDED.
+
+## ADR-0045 — Job thumbnail, video duration & render time, and centralized status chips
+
+**Context.** Jobs List and Job Detail showed only a text status badge and a raw
+`{durationSeconds}s` number — no visual thumbnail, no distinction between a rendered
+video's own duration and how long the render actually took, and a 4-variant status
+badge that didn't clearly distinguish all 6 Job states. A product brief asked for a
+thumbnail (placeholder before render, actual generated thumbnail after), an `HH:MM:SS`
+duration overlay on the thumbnail, a separately-displayed render time, and clearly
+distinguishable status chips — explicitly scoped to reuse existing architecture
+wherever it already covers the need, not to introduce new backend infrastructure.
+
+**Decision.**
+
+1. **No thumbnail generation was added — it already existed.** Phase 9
+   (`generate-render-artifacts.ts`, ADR-0039) already generates a screenshot and a
+   small (150px-height) thumbnail via `ffmpeg` for every rendered Job, stored as a
+   `JOB_ARTIFACT` File (`Job.thumbnailFileId`) atomically with the `RENDERING ->
+RENDERED` transition. This phase only **surfaces** it in the UI (`JobThumbnail`,
+   `features/jobs/components/job-thumbnail.tsx`), served through the existing
+   `/api/files/[fileId]` route exactly like a Gallery File preview.
+2. **`Job.thumbnailFileId` (and `startedAt`/`renderedAt`) moved from `SafeJobDetail`
+   into the list-view `SafeJob` type** (`features/jobs/domain/job.ts`) and into the
+   list `Prisma.JobSelect` (`SAFE_JOB_SELECT`, `job-repository.ts`) — the Jobs List
+   needs a thumbnail and render time per row without a second per-row query.
+   `videoFileId`/`screenshotFileId` stayed detail-only; the list never needs the full
+   video or the larger screenshot.
+3. **Render time is a new, narrow schema addition: populating the already-existing,
+   previously-unused `Job.startedAt` column.** The column existed in the schema from
+   Phase 6 but no code ever wrote to it. `transitionJobForWorker`
+   (`features/jobs/use-cases/transition-job-for-worker.ts`) now sets it, exactly once,
+   on the real `CLAIMED -> RENDERING` transition — ADR-0043's same-state-idempotency
+   fix is what makes "exactly once" true, since the Worker's later same-bucket reports
+   (`Started`/`InProgress`) are already short-circuited as no-ops before reaching the
+   real-transition code path. No migration was needed — the column already existed,
+   unused.
+4. **`computeRenderSeconds(startedAt, renderedAt)`** (`features/jobs/domain/job.ts`) is
+   the one render-time calculation, deliberately **not** `createdAt -> renderedAt`
+   (includes queue wait) and **not** `claimedAt -> renderedAt` (includes
+   asset-download time before the Worker actually starts rendering). Returns `null`
+   for a missing or inconsistent (negative) pair, never a negative number.
+5. **One shared duration formatter**, `formatDurationHHMMSS`
+   (`src/lib/format-duration.ts`) — always `HH:MM:SS`, zero-padded, supports durations
+   past 24 hours without wrapping, `"—"` for `null`/`undefined`/`NaN`/`Infinity`/
+   negative input. Used for both the rendered video's own duration
+   (`Job.durationSeconds`) and render time — two different values, one formatting
+   function, never a `Date`-based format (a duration is not a timestamp).
+6. **`JobStatusBadge` recolored** (`features/jobs/components/job-status-badge.tsx`) —
+   using the existing `--success`/`--warning`/`--info` semantic CSS tokens
+   (`globals.css`, already theme-aware in both Light/Dark, previously declared but
+   unused anywhere in the app) layered onto the existing `Badge` component via the same
+   `bg-{color}/10 text-{color} border-{color}/30` treatment already used for inline
+   error banners elsewhere — no new color was invented, no new component variant was
+   added to `badge.tsx` itself. Every state keeps its own distinct text label (status
+   was never communicated by color alone even before this change); a small
+   `aria-hidden` colored dot was added purely as an additional at-a-glance visual cue.
+   Exactly the 6 states the current state machine has — `Uploading`/`Uploaded`
+   (removed with YouTube upload, ADR-0041) were not reintroduced.
+
+**Consequences.**
+
+- Zero new database columns; `Job.startedAt` (existing, previously dead) is now
+  written for the first time — a Job created before this change simply has `null`
+  `startedAt`/render time until it next renders (no backfill attempted or needed —
+  historical Jobs' other fields remain fully intact and readable).
+- Thumbnail rendering adds no new request per Job row — the list query already
+  includes `thumbnailFileId`; the browser fetches the small thumbnail image lazily
+  like any other `<img>`, not a video/ffmpeg operation at request time.
+- `JobThumbnail`/`JobStatusBadge`/`formatDurationHHMMSS` are each used from exactly
+  one place per concern (Jobs List row, Job Detail page) — no duplicate formatting or
+  color logic exists anywhere else in the codebase (verified by repository-wide
+  search).
+
+**Status:** DECIDED.

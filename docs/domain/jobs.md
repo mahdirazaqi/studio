@@ -292,6 +292,63 @@ accept-job-result.ts`. Multipart (`"file"` field), and — unlike every other Wo
   and returns. **No further state transition is attempted, and no external delivery
   call is ever made** — `RENDERED` is the Job's final state.
 
+### Job thumbnail, video duration & render time — implemented, Phase 15 (ADR-0045)
+
+Every Job carries three distinct, easily-confused pieces of visual/timing information —
+the UI (Jobs List and Job Detail) shows all three, via one shared set of
+components/utilities, never a per-page reimplementation:
+
+- **Thumbnail** (`Job.thumbnailFileId`) — a small (150px-height) `JOB_ARTIFACT` image
+  `generate-render-artifacts.ts` already generates via `ffmpeg` at result-acceptance
+  time (Phase 9); nothing new was generated for this phase, only surfaced in the UI.
+  `null` until the Job successfully renders — `JobThumbnail`
+  (`features/jobs/components/job-thumbnail.tsx`) shows a consistent placeholder
+  (a muted panel + `Clapperboard` icon) in every other state, never an empty area.
+  Served through the existing `/api/files/[fileId]` route exactly like a Gallery File
+  preview — no new storage/media pipeline.
+- **Video duration** (`Job.durationSeconds`) — the _rendered video's own_ duration,
+  reported by the Worker (`PATCH .../jobs/:id/duration`, unchanged). Shown as an
+  `HH:MM:SS` overlay directly on the thumbnail (`JobThumbnail`), and again as text.
+- **Render time** — how long Studio/the Worker actually took to _produce_ the render,
+  deliberately distinct from video duration and from the Job's total lifetime
+  (`computeRenderSeconds(job.startedAt, job.renderedAt)`,
+  `features/jobs/domain/job.ts`). **Not** `createdAt -> renderedAt` (would include
+  queue wait) and **not** `claimedAt -> renderedAt` (would include asset-download
+  time) — `Job.startedAt` is a new timeline timestamp, set exactly once by
+  `transitionJobForWorker` on the real `CLAIMED -> RENDERING` transition (the _first_
+  of the Worker's three legacy per-stage reports that all map to `RENDERING` —
+  ADR-0043's same-state no-op fix is what makes "exactly once" true; every later
+  same-state report is already a no-op before reaching this code). `null` until the Job
+  starts rendering.
+
+Both durations render through the one shared `formatDurationHHMMSS` utility
+(`src/lib/format-duration.ts`) — always `HH:MM:SS`, zero-padded, never a raw decimal or
+`Date`-formatted value, `"—"` for `null`/invalid. A duration is not a timestamp; this
+utility never touches `Intl.DateTimeFormat`.
+
+### Job status chips — implemented, Phase 15
+
+`JobStatusBadge` (`features/jobs/components/job-status-badge.tsx`) is the **one**
+Job-state → label/color mapping — Jobs List and Job Detail both render it, never a
+per-page color choice. Uses the existing `--success`/`--warning`/`--info` semantic
+tokens (`globals.css` — already theme-aware in both Light and Dark, previously unused
+anywhere) layered onto the existing Badge component, the same
+`bg-{color}/10 text-{color} border-{color}/30` treatment already used for inline error
+banners elsewhere — no new visual language invented. Every state also keeps its own
+distinct text label, so status is never communicated by color alone:
+
+| State       | Label     | Semantic intent        |
+| ----------- | --------- | ---------------------- |
+| `QUEUED`    | Queued    | neutral                |
+| `CLAIMED`   | Claimed   | informational (`info`) |
+| `RENDERING` | Rendering | active (`warning`)     |
+| `RENDERED`  | Rendered  | success (`success`)    |
+| `ERROR`     | Error     | destructive            |
+| `CANCELED`  | Canceled  | neutral/muted          |
+
+Only the 6 states the current state machine actually has — no `Uploading`/`Uploaded`
+(removed with YouTube upload, ADR-0041) was reintroduced.
+
 ### Historical integrity for Jobs
 
 See [../data/historical-integrity.md](../data/historical-integrity.md). A Job must always

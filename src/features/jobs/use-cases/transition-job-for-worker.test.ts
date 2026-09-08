@@ -120,8 +120,30 @@ describe("transitionJobForWorker", () => {
         departmentId: "dept-a",
       });
       await transitionJobForWorker("job-1", { state: 2 }, ALLOWED); // Downloading -> RENDERING
-      expect(transitionJob).toHaveBeenCalledWith("job-1", "RENDERING", {});
+      expect(transitionJob).toHaveBeenCalledWith(
+        "job-1",
+        "RENDERING",
+        expect.objectContaining({ startedAt: expect.any(Date) }),
+      );
       expect(findJobById).not.toHaveBeenCalled();
+    });
+
+    // Phase 15/ADR-0045 — render time (`computeRenderSeconds`) measures
+    // `startedAt -> renderedAt`, not `claimedAt -> renderedAt` (which would
+    // include asset-download time) or `createdAt -> renderedAt` (which would
+    // include queue wait).
+    it("sets startedAt only on the real CLAIMED -> RENDERING transition, never on ERROR or another target", async () => {
+      findJobState.mockResolvedValue({
+        state: "RENDERING",
+        departmentId: "dept-a",
+      });
+      await transitionJobForWorker(
+        "job-1",
+        { state: "ERROR", errorReason: "boom" },
+        ALLOWED,
+      );
+      const call = transitionJob.mock.calls[0];
+      expect(call?.[2]).not.toHaveProperty("startedAt");
     });
 
     it("throws not_found if the job disappears between the state check and the no-op read", async () => {

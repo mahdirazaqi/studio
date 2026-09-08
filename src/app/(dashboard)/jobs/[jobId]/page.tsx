@@ -9,10 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/server/auth/current-user";
 import { toActor } from "@/server/authz";
 import { AppError } from "@/server/errors/app-error";
+import { formatDurationHHMMSS } from "@/lib/format-duration";
 import { getJob } from "@/features/jobs/use-cases/get-job";
 import { JobActions } from "@/features/jobs/components/job-actions";
 import { JobStatusBadge } from "@/features/jobs/components/job-status-badge";
-import type { SafeJobAsset } from "@/features/jobs/domain/job";
+import { JobThumbnail } from "@/features/jobs/components/job-thumbnail";
+import { computeRenderSeconds, type SafeJobAsset } from "@/features/jobs/domain/job";
 
 export const metadata: Metadata = { title: "Job" };
 
@@ -56,6 +58,8 @@ export default async function JobDetailPage({
     throw error;
   }
 
+  const renderSeconds = computeRenderSeconds(job.startedAt, job.renderedAt);
+
   return (
     <PageShell>
       <PageHeader
@@ -67,6 +71,12 @@ export default async function JobDetailPage({
       />
 
       <div className="space-y-6">
+        <JobThumbnail
+          thumbnailFileId={job.thumbnailFileId}
+          durationSeconds={job.durationSeconds}
+          className="max-w-md"
+        />
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -83,7 +93,15 @@ export default async function JobDetailPage({
             </div>
             <div>
               <span className="text-muted-foreground">Duration: </span>
-              {job.durationSeconds !== null ? `${job.durationSeconds}s` : "—"}
+              <span className="font-mono">
+                {formatDurationHHMMSS(job.durationSeconds)}
+              </span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Render time: </span>
+              <span className="font-mono">
+                {formatDurationHHMMSS(renderSeconds)}
+              </span>
             </div>
             <div>
               <span className="text-muted-foreground">Created by: </span>

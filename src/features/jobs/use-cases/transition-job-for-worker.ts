@@ -67,9 +67,16 @@ export async function transitionJobForWorker(
     return job;
   }
 
-  return transitionJob(
-    jobId,
-    targetState,
-    targetState === "ERROR" ? { errorReason: input.errorReason } : {},
-  );
+  // Render time (Phase 15/ADR-0045): `startedAt` is set exactly once, on the
+  // real transition into `RENDERING` — never on the later same-state calls
+  // above (already short-circuited), and never re-set on a hypothetical
+  // future re-entry (the state machine has no transition back into
+  // `RENDERING` once left, so this can only ever run once per Job). This is
+  // deliberately `startedAt`, not `claimedAt` — the gap between claim and
+  // the Worker actually starting to render (asset download time) is not
+  // part of the render period `computeRenderSeconds` measures.
+  return transitionJob(jobId, targetState, {
+    ...(targetState === "ERROR" ? { errorReason: input.errorReason } : {}),
+    ...(targetState === "RENDERING" ? { startedAt: new Date() } : {}),
+  });
 }

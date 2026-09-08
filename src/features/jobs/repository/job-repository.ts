@@ -44,6 +44,12 @@ const SAFE_JOB_SELECT = {
   errorReason: true,
   createdAt: true,
   updatedAt: true,
+  // Included at list-select level (Phase 15) — the Jobs List needs a
+  // thumbnail + render time per row without a second per-row query. See
+  // `SafeJob`'s doc comment in `domain/job.ts`.
+  startedAt: true,
+  renderedAt: true,
+  thumbnailFileId: true,
 } satisfies Prisma.JobSelect;
 
 type SafeJobRow = Prisma.JobGetPayload<{ select: typeof SAFE_JOB_SELECT }>;
@@ -65,6 +71,9 @@ function toSafeJob(row: SafeJobRow): SafeJob {
     errorReason: row.errorReason,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    startedAt: row.startedAt,
+    renderedAt: row.renderedAt,
+    thumbnailFileId: row.thumbnailFileId,
   };
 }
 
@@ -79,11 +88,8 @@ const SAFE_JOB_DETAIL_SELECT = {
   canceledAt: true,
   cancelReason: true,
   claimedAt: true,
-  startedAt: true,
-  renderedAt: true,
   videoFileId: true,
   screenshotFileId: true,
-  thumbnailFileId: true,
   assets: {
     select: {
       id: true,
@@ -135,11 +141,8 @@ function toSafeJobDetail(row: SafeJobDetailRow): SafeJobDetail {
     canceledAt: row.canceledAt,
     cancelReason: row.cancelReason,
     claimedAt: row.claimedAt,
-    startedAt: row.startedAt,
-    renderedAt: row.renderedAt,
     videoFileId: row.videoFileId,
     screenshotFileId: row.screenshotFileId,
-    thumbnailFileId: row.thumbnailFileId,
   };
 }
 
