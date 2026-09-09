@@ -2184,3 +2184,55 @@ against `docs/architecture/files.md`'s own "one module generates it" intent.
   two near-duplicate blocks; both use cases behave identically to before.
 
 **Status:** DECIDED.
+
+## ADR-0047 — Fix a real double-encoding bug in the Worker filename-hint segment (corrects part of ADR-0044)
+
+**Context.** A real render run against the actual `navaak-ae-renderer` Worker failed:
+`aerender ERROR: ... Path is not valid. Path: "C:\Renderer\temp\...\Screenshot from
+2026-02-09 16-34-26.png"`, and the Worker's own log showed it had requested
+`.../Screenshot%2520from%25202026-02-09%252016-34-26.png` — `%20` encoded a **second**
+time into `%2520`. Root cause: ADR-0044's `buildFileUrlFromRequest` called
+`encodeURIComponent()` on the filename hint before returning it. The Worker's
+`download()` (`navaak-ae-renderer/renderer/operator/downloader.go`) assigns that whole
+string directly to `u.Path` — the **decoded** field in Go's `net/url` — and `u.String()`
+percent-encodes `Path` itself when building the actual request. A literal `%` already
+present in `Path` (from Studio's own encoding) gets encoded again. The same
+still-encoded string is also what `filepath.Base(addr)` uses for the **local** temp
+filename (computed before the request is even sent), so the local file was saved under
+the equally mangled literal name — which After Effects then failed to import.
+
+**Decision.** `buildFileUrlFromRequest` no longer calls `encodeURIComponent` on the
+filename hint. It reaches the Worker exactly as typed (spaces, Unicode, punctuation
+included) — Go's own `net/url` percent-encodes it exactly once, correctly, when it
+builds the request URL. A new `sanitizeFilenameSegment` replaces only:
+
+- `/` and `\` — would otherwise introduce extra path segments once the Worker's
+  `path.Join(u.Path, addr)` processes the string.
+- `..` — would let `path.Clean` (inside that same `path.Join`) walk back out of
+  `/api/files/{id}` entirely (e.g. `../../secret` turning the request into one for
+  `/api/secret`).
+- `<>:"|?*` and control characters (0x00–0x1F) — illegal in a **Windows** filename;
+  the real deployment this was verified against runs the renderer on Windows
+  (`C:\Renderer\temp\...` in its own log), and `filepath.Base(addr)` becomes a literal
+  argument to `os.Create`, which fails outright on any of them — the same "Path is not
+  valid" failure mode the double-encoding bug produced, from a different cause.
+
+Everything else — spaces, Unicode (Persian filenames included), and every other
+punctuation character — is left as literal text.
+
+**Consequences.**
+
+- A real Worker render of a Job whose input assets have spaces/Unicode/punctuation in
+  their original filenames (the common case) now actually downloads them and saves them
+  locally under a real, correct, importable filename — this was silently broken before,
+  despite ADR-0044's own test suite passing (`build-file-url.test.ts` asserted the
+  _shape_ of the encoded output, never round-tripped it through Go's actual `net/url`
+  encoding behavior).
+- `docs/architecture/files.md`'s "Access & preview" ADR-0044 bullet and this file's
+  ADR-0044 entry describe the original (encoding) approach; this entry is the correction
+  — do not re-introduce `encodeURIComponent` here without re-reading both.
+- No change to `/api/files/[fileId]/[[...rest]]` itself, `Content-Disposition`
+  (ADR-0046), or any other Worker route — this is scoped entirely to
+  `buildFileUrlFromRequest`.
+
+**Status:** DECIDED.

@@ -153,7 +153,14 @@ never its storage key. That route:
   claim/get-by-id payload now appends the File's own original filename as this extra
   segment (`buildFileUrlFromRequest`, `worker-job-payload.ts`) purely so the Worker's
   local copy gets a real one — every other caller (the dashboard, `FileCard`, etc.)
-  never sends this segment and is completely unaffected.
+  never sends this segment and is completely unaffected. The segment is never
+  percent-encoded (**ADR-0047**, correcting ADR-0044's original implementation) — the
+  Worker's own `net/url` encodes it exactly once when building its request; encoding it
+  here first produced a real double-encoding bug (`%20` → `%2520`) confirmed against an
+  actual Worker run. Only `/`, `\`, `..`, and the characters illegal in a Windows
+  filename (`<>:"|?*` + control characters — the real deployment runs the renderer on
+  Windows) are neutralized; everything else, including spaces and Unicode, reaches the
+  Worker exactly as typed.
 - **Sends a `Content-Disposition` header carrying the File's `originalName` —
   ADR-0046.** `inline; filename="<ascii fallback>"; filename*=UTF-8''<percent-encoded
 originalName>` on every response — the same extension-loss failure mode ADR-0044
