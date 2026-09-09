@@ -12,9 +12,13 @@ import { AppError } from "@/server/errors/app-error";
 import { formatDurationHHMMSS } from "@/lib/format-duration";
 import { getJob } from "@/features/jobs/use-cases/get-job";
 import { JobActions } from "@/features/jobs/components/job-actions";
+import { JobRenderProgress } from "@/features/jobs/components/job-render-progress";
 import { JobStatusBadge } from "@/features/jobs/components/job-status-badge";
 import { JobThumbnail } from "@/features/jobs/components/job-thumbnail";
-import { computeRenderSeconds, type SafeJobAsset } from "@/features/jobs/domain/job";
+import {
+  computeRenderSeconds,
+  type SafeJobAsset,
+} from "@/features/jobs/domain/job";
 
 export const metadata: Metadata = { title: "Job" };
 
@@ -73,7 +77,11 @@ export default async function JobDetailPage({
       <div className="space-y-6">
         <JobThumbnail
           thumbnailFileId={job.thumbnailFileId}
-          durationSeconds={job.durationSeconds}
+          // Duration overlay only once the rendered output actually exists
+          // (Phase 16 brief §3) — never a stray mid-render report.
+          durationSeconds={
+            job.state === "RENDERED" ? job.durationSeconds : null
+          }
           className="max-w-md"
         />
 
@@ -87,10 +95,16 @@ export default async function JobDetailPage({
             </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            <div>
-              <span className="text-muted-foreground">Progress: </span>
-              {job.progress !== null ? `${job.progress}%` : "—"}
-            </div>
+            {job.state === "RENDERING" ? (
+              <div className="sm:col-span-2">
+                <JobRenderProgress progress={job.progress} />
+              </div>
+            ) : (
+              <div>
+                <span className="text-muted-foreground">Progress: </span>
+                {job.progress !== null ? `${job.progress}%` : "—"}
+              </div>
+            )}
             <div>
               <span className="text-muted-foreground">Duration: </span>
               <span className="font-mono">

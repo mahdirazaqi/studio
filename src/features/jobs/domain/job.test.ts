@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computeRenderSeconds } from "./job";
+import { clampJobProgress, computeRenderSeconds } from "./job";
 
 /**
  * Render time — `startedAt -> renderedAt` — deliberately distinct from the
@@ -49,5 +49,36 @@ describe("computeRenderSeconds", () => {
     expect(computeRenderSeconds(startedAt, renderedAt)).toBe(
       3600 + 24 * 60 + 30,
     );
+  });
+});
+
+/**
+ * Presentation-layer clamp for `Job.render-progress` UI
+ * (`features/jobs/components/job-render-progress.tsx`, Phase 16) — never a
+ * mutation of the stored value (the Worker-facing schema already enforces
+ * `0..100`), only defensive normalization for display.
+ */
+describe("clampJobProgress", () => {
+  it("passes an in-range value through unchanged", () => {
+    expect(clampJobProgress(0)).toBe(0);
+    expect(clampJobProgress(67)).toBe(67);
+    expect(clampJobProgress(100)).toBe(100);
+  });
+
+  it("treats null (no report yet) as 0", () => {
+    expect(clampJobProgress(null)).toBe(0);
+  });
+
+  it("clamps a value above 100", () => {
+    expect(clampJobProgress(150)).toBe(100);
+  });
+
+  it("clamps a negative value to 0", () => {
+    expect(clampJobProgress(-5)).toBe(0);
+  });
+
+  it("treats a non-finite value as 0", () => {
+    expect(clampJobProgress(Number.NaN)).toBe(0);
+    expect(clampJobProgress(Number.POSITIVE_INFINITY)).toBe(0);
   });
 });

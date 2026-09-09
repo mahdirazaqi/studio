@@ -6,15 +6,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatDurationHHMMSS } from "@/lib/format-duration";
 import { computeRenderSeconds, type SafeJob } from "@/features/jobs/domain/job";
 import { JobActions } from "@/features/jobs/components/job-actions";
+import { JobRenderProgress } from "@/features/jobs/components/job-render-progress";
 import { JobStatusBadge } from "@/features/jobs/components/job-status-badge";
 import { JobThumbnail } from "@/features/jobs/components/job-thumbnail";
-
-function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
 
 /** Server Component row — the only interactive piece is `JobActions`. */
 export function JobListItem({ job }: { job: SafeJob }) {
@@ -27,12 +21,17 @@ export function JobListItem({ job }: { job: SafeJob }) {
           <Link href={`/jobs/${job.id}`} className="shrink-0">
             <JobThumbnail
               thumbnailFileId={job.thumbnailFileId}
-              durationSeconds={job.durationSeconds}
+              // Duration overlay only for a Job whose rendered output is
+              // actually available (Phase 16 brief §3) — never a stray
+              // `Job.durationSeconds` the Worker reported mid-render.
+              durationSeconds={
+                job.state === "RENDERED" ? job.durationSeconds : null
+              }
               className="w-28 sm:w-32"
             />
           </Link>
 
-          <div className="min-w-0 space-y-1">
+          <div className="min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <Link
                 href={`/jobs/${job.id}`}
@@ -49,17 +48,7 @@ export function JobListItem({ job }: { job: SafeJob }) {
             </div>
             <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               <span>Template: {job.templateName}</span>
-              {job.progress !== null ? <span>{job.progress}%</span> : null}
               {job.createdByName ? <span>By {job.createdByName}</span> : null}
-              <span>{formatDate(job.createdAt)}</span>
-            </div>
-            <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <span>
-                Duration:{" "}
-                <span className="font-mono">
-                  {formatDurationHHMMSS(job.durationSeconds)}
-                </span>
-              </span>
               <span>
                 Render time:{" "}
                 <span className="font-mono">
@@ -67,6 +56,9 @@ export function JobListItem({ job }: { job: SafeJob }) {
                 </span>
               </span>
             </div>
+            {job.state === "RENDERING" ? (
+              <JobRenderProgress progress={job.progress} className="max-w-xs" />
+            ) : null}
             {job.state === "ERROR" && job.errorReason ? (
               <p className="text-destructive text-xs">{job.errorReason}</p>
             ) : null}

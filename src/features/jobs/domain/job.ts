@@ -124,6 +124,19 @@ export function computeRenderSeconds(
 }
 
 /**
+ * Normalizes `Job.progress` for display (`features/jobs/components/
+ * job-render-progress.tsx`, Phase 16) — a **presentation-layer clamp only**,
+ * never a mutation of the stored value (`updateJobProgressSchema` already
+ * enforces `0..100` at the Worker boundary, so this is purely defensive: a
+ * `null` pre-first-report value becomes `0`, not `NaN`/a crash, and any
+ * theoretically out-of-range value is clamped rather than rendered as-is).
+ */
+export function clampJobProgress(progress: number | null): number {
+  if (progress === null || !Number.isFinite(progress)) return 0;
+  return Math.min(100, Math.max(0, progress));
+}
+
+/**
  * The immutable, Template-level half of a Job's historical snapshot
  * (ADR-0028) — written once at creation, in `Job.snapshot` (JSONB). The
  * per-slot *resolved* values are `JobAsset` rows, not part of this shape.
