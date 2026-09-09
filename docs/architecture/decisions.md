@@ -2135,3 +2135,52 @@ RENDERED` transition. This phase only **surfaces** it in the UI (`JobThumbnail`,
   search).
 
 **Status:** DECIDED.
+
+## ADR-0046 — Centralize technical-filename generation; give `/api/files/[fileId]` a real `Content-Disposition` filename
+
+**Context.** A user report: opening/saving `/api/files/{fileId}` directly (e.g.
+`http://localhost:3000/api/files/cmtsb9vtb0001ml6p8r53t5o7`) produces a downloaded file
+with **no extension** — even though the File's own `originalName` (Gallery-displayed)
+has one. Cause: the route (ADR-0025/ADR-0044) is deliberately identity-by-id, not
+identity-by-path, so its URL never carries an extension by design — but the route also
+never sent a `Content-Disposition` header, so a browser falls back to the URL's last
+segment (the bare id) for a "Save As"/direct-navigation download, same failure mode
+ADR-0044 already fixed once for the Worker's own downloader via a different mechanism
+(the `[[...rest]]` filename-hint segment) — this is the browser-facing half of that same
+class of bug, on a path ADR-0044 didn't touch.
+
+Separately, while auditing this: `File.storedName`/`storageKey` generation
+(`` `${randomUUID()}.${extension}` `` + `` `${departmentId}/${storedName}` ``) was
+duplicated verbatim between `features/files/use-cases/upload-file.ts` (Gallery uploads)
+and `features/files/use-cases/create-job-artifact.ts` (Worker render-result artifacts) —
+against `docs/architecture/files.md`'s own "one module generates it" intent.
+
+**Decision.**
+
+1. `/api/files/[fileId]/[[...rest]]/route.ts` now sets
+   `Content-Disposition: inline; filename="<ascii-fallback>"; filename*=UTF-8''<percent-encoded originalName>`
+   on every response (streamed or ranged). `inline` (not `attachment`) — this changes
+   only the filename a save/download proposes, not whether an `<img>`/`<audio>`/`<video>`
+   tag still renders it directly, which is unaffected. The ASCII `filename` is a
+   sanitized fallback (non-printable-ASCII characters replaced with `_`) for clients
+   without RFC 5987/8187 support; `filename*` always carries the exact, potentially
+   Unicode `originalName` — never `storedName`/`storageKey`, which stay internal per
+   the existing rule.
+2. `generateStorageName(departmentId, extension)` — the one function that produces a
+   File's `storedName`/`storageKey` — now lives in `@/server/media/probe.ts` (not
+   `features/files/domain/file-types.ts`, which is also imported by the Client Component
+   `file-picker.tsx` and must stay free of `node:crypto`/other server-only imports).
+   Both `upload-file.ts` and `create-job-artifact.ts` call it instead of each inlining
+   the same two lines.
+
+**Consequences.**
+
+- A file downloaded directly from `/api/files/{fileId}` (by a human, in a browser) now
+  saves with its real, original extension — matching what ADR-0044 already guaranteed
+  for the Worker's own downloads, closing the equivalent gap on the human-facing side.
+- No URL shape changed, no new field on `File`, no migration — this is a response-header
+  addition only.
+- `generateStorageName` has one call site's worth of tests (`probe.test.ts`) instead of
+  two near-duplicate blocks; both use cases behave identically to before.
+
+**Status:** DECIDED.

@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import { authorize, type Actor } from "@/server/authz";
 import {
   businessRuleError,
@@ -9,6 +7,7 @@ import {
 import { logger } from "@/server/logger";
 import { storage } from "@/server/adapters/storage";
 import {
+  generateStorageName,
   hashContent,
   probeImageDimensions,
   sniffContentType,
@@ -86,8 +85,10 @@ export async function uploadFile(
   const contentHash = hashContent(buffer);
   const duplicate = await findFileByContentHash(departmentId, contentHash);
 
-  const storedName = `${randomUUID()}.${sniffed.extension}`;
-  const storageKey = `${departmentId}/${storedName}`;
+  const { storedName, storageKey } = generateStorageName(
+    departmentId,
+    sniffed.extension,
+  );
 
   try {
     await storage.put(storageKey, buffer);

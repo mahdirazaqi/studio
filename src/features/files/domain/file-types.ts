@@ -10,10 +10,12 @@
  * it. Size limits are new (legacy had none) — see ADR-0026 for the numbers'
  * rationale, resolving OD-21's size-limit half.
  *
- * Pure — no I/O, no Prisma import (domain layers stay pure; see
- * `features/users/domain/user.ts` for the same pattern with `UserStatus`).
- * `@/server/media` does the actual byte-level sniffing this module's rules
- * are checked against.
+ * Pure — no I/O, no Prisma import, no `node:*` import (domain layers stay
+ * isomorphic: `features/files/components/file-picker.tsx` — a Client
+ * Component — imports this module too, so anything server-only, including
+ * `node:crypto`, belongs in `@/server/media` instead — see
+ * `generateStorageName` there for the technical-filename counterpart to
+ * this module's kind/size rules).
  */
 
 /** Mirrors the Prisma `FileKind` enum's values exactly — see `prisma/schema.prisma`. */

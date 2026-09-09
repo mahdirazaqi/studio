@@ -70,10 +70,7 @@ describe("GET /api/files/[fileId]/[[...rest]] — filename-hint segment is ignor
     );
 
     expect(response.status).toBe(200);
-    expect(getFileForServing).toHaveBeenCalledWith(
-      expect.anything(),
-      "file-1",
-    );
+    expect(getFileForServing).toHaveBeenCalledWith(expect.anything(), "file-1");
   });
 
   it("resolves the same File when a filename-hint segment is present", async () => {
@@ -86,10 +83,7 @@ describe("GET /api/files/[fileId]/[[...rest]] — filename-hint segment is ignor
     );
 
     expect(response.status).toBe(200);
-    expect(getFileForServing).toHaveBeenCalledWith(
-      expect.anything(),
-      "file-1",
-    );
+    expect(getFileForServing).toHaveBeenCalledWith(expect.anything(), "file-1");
   });
 
   it("also ignores the segment on the Worker-authenticated path", async () => {
@@ -123,5 +117,43 @@ describe("GET /api/files/[fileId]/[[...rest]] — filename-hint segment is ignor
     expect(getFileForUnauthenticatedWorkerDownload).toHaveBeenCalledWith(
       "file-1",
     );
+  });
+});
+
+describe("GET /api/files/[fileId]/[[...rest]] — Content-Disposition", () => {
+  it("sets an inline Content-Disposition carrying the File's originalName, so a direct save keeps its extension", async () => {
+    getCurrentUser.mockResolvedValue({ id: "u1", role: "USER" });
+    getFileForServing.mockResolvedValue(FILE);
+
+    const response = await GET(
+      new Request("http://localhost/api/files/file-1"),
+      routeCtx("file-1"),
+    );
+
+    const disposition = response.headers.get("content-disposition");
+    expect(disposition).toContain("inline");
+    expect(disposition).toContain('filename="cover.png"');
+    expect(disposition).toContain("filename*=UTF-8''cover.png");
+  });
+
+  it("percent-encodes a Unicode originalName in filename*, with a sanitized ASCII fallback in filename", async () => {
+    getCurrentUser.mockResolvedValue({ id: "u1", role: "USER" });
+    getFileForServing.mockResolvedValue({
+      ...FILE,
+      originalName: "ویدیوی نهایی.mp4",
+    });
+
+    const response = await GET(
+      new Request("http://localhost/api/files/file-1"),
+      routeCtx("file-1"),
+    );
+
+    const disposition = response.headers.get("content-disposition");
+    expect(disposition).toContain(
+      `filename*=UTF-8''${encodeURIComponent("ویدیوی نهایی.mp4")}`,
+    );
+    // The ASCII fallback still ends in the real extension — every non-ASCII
+    // character is replaced, never dropped/truncated ahead of it.
+    expect(disposition).toMatch(/filename="[_ ]+\.mp4"/);
   });
 });

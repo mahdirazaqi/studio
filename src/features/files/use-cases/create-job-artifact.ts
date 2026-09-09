@@ -1,9 +1,8 @@
-import { randomUUID } from "node:crypto";
-
 import { dependencyError, validationError } from "@/server/errors/app-error";
 import { logger } from "@/server/logger";
 import { storage } from "@/server/adapters/storage";
 import {
+  generateStorageName,
   hashContent,
   probeImageDimensions,
   sniffContentType,
@@ -65,8 +64,10 @@ export async function createJobArtifactFile(input: {
   }
 
   const contentHash = hashContent(input.buffer);
-  const storedName = `${randomUUID()}.${sniffed.extension}`;
-  const storageKey = `${input.departmentId}/${storedName}`;
+  const { storedName, storageKey } = generateStorageName(
+    input.departmentId,
+    sniffed.extension,
+  );
 
   try {
     await storage.put(storageKey, input.buffer);

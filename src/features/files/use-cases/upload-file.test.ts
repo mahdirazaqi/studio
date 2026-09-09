@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Actor } from "@/server/authz";
+import type * as ProbeModule from "@/server/media/probe";
 
 const sniffContentType = vi.fn();
 const probeImageDimensions = vi.fn();
@@ -11,11 +12,17 @@ const createFile = vi.fn();
 const findFileByContentHash = vi.fn();
 const departmentExists = vi.fn();
 
-vi.mock("@/server/media/probe", () => ({
-  sniffContentType: (...args: unknown[]) => sniffContentType(...args),
-  probeImageDimensions: (...args: unknown[]) => probeImageDimensions(...args),
-  hashContent: (...args: unknown[]) => hashContent(...args),
-}));
+vi.mock("@/server/media/probe", async () => {
+  const actual = await vi.importActual<typeof ProbeModule>(
+    "@/server/media/probe",
+  );
+  return {
+    sniffContentType: (...args: unknown[]) => sniffContentType(...args),
+    probeImageDimensions: (...args: unknown[]) => probeImageDimensions(...args),
+    hashContent: (...args: unknown[]) => hashContent(...args),
+    generateStorageName: actual.generateStorageName,
+  };
+});
 
 vi.mock("@/server/adapters/storage", () => ({
   storage: {

@@ -96,6 +96,7 @@ export async function GET(
     "Content-Type": file.mimeType,
     "Cache-Control": "private, no-store",
     "Accept-Ranges": "bytes",
+    "Content-Disposition": buildContentDisposition(file.originalName),
   });
 
   try {
@@ -186,4 +187,30 @@ function parseRange(
   }
 
   return { start, end: Math.min(end, sizeBytes - 1) };
+}
+
+/**
+ * `/api/files/{fileId}` is deliberately extension-less (the id, not a path,
+ * is the identity — see `docs/architecture/files.md`), so a browser saving
+ * this response with no other hint falls back to the URL's last segment,
+ * i.e. the bare id, with no extension at all. `Content-Disposition` is the
+ * standard way to give a response a real, correct download filename without
+ * the URL itself needing one — `inline` (not `attachment`) so this keeps
+ * rendering directly in an `<img>`/`<audio>`/`<video>` tag exactly as
+ * before; only the *filename* a "Save As"/direct-navigation download uses
+ * changes.
+ *
+ * Always the File's own `originalName` (never `storedName`/`storageKey` —
+ * those stay internal, per docs/architecture/files.md) — this is real,
+ * potentially-Unicode, user-supplied text (docs/domain/files.md "Original
+ * Filename"), so it's carried both as an ASCII-sanitized `filename` fallback
+ * (RFC 6266) and the exact original as `filename*` (RFC 5987/8187,
+ * UTF-8-percent-encoded) for the clients that support it — every modern
+ * browser does.
+ */
+function buildContentDisposition(originalName: string): string {
+  const asciiFallback =
+    originalName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'") || "file";
+  const encoded = encodeURIComponent(originalName);
+  return `inline; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
 }

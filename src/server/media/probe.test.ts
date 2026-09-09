@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { hashContent, probeImageDimensions, sniffContentType } from "./probe";
+import {
+  generateStorageName,
+  hashContent,
+  probeImageDimensions,
+  sniffContentType,
+} from "./probe";
 
 // A real 1x1 transparent PNG, so `file-type`/`image-size` see valid magic
 // bytes/structure rather than us hand-rolling a fake header.
@@ -61,5 +66,43 @@ describe("hashContent", () => {
 
   it("produces a 64-character hex digest (SHA-256)", () => {
     expect(hashContent(ONE_PIXEL_PNG)).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("generateStorageName", () => {
+  // `generateStorageName` never takes an `originalName` at all — this is a
+  // structural guarantee, not just a convention, that a user-supplied
+  // filename (spaces, Unicode, punctuation, `../` traversal attempts, or any
+  // length) can never influence the technical storage name. Every test below
+  // only ever passes a `departmentId` and a sniffed `extension`.
+
+  it("produces a `<uuid>.<ext>` storedName and a `<departmentId>/<storedName>` storageKey", () => {
+    const { storedName, storageKey } = generateStorageName("dept-1", "mp4");
+    expect(storedName).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.mp4$/,
+    );
+    expect(storageKey).toBe(`dept-1/${storedName}`);
+  });
+
+  it("never contains a space", () => {
+    const { storedName, storageKey } = generateStorageName("dept-1", "png");
+    expect(storedName).not.toMatch(/\s/);
+    expect(storageKey).not.toMatch(/\s/);
+  });
+
+  it("generates a different storedName on every call — same department, same extension", () => {
+    const first = generateStorageName("dept-1", "mp4");
+    const second = generateStorageName("dept-1", "mp4");
+    expect(first.storedName).not.toBe(second.storedName);
+  });
+
+  it("lowercases the extension for consistency", () => {
+    const { storedName } = generateStorageName("dept-1", "MP4");
+    expect(storedName.endsWith(".mp4")).toBe(true);
+  });
+
+  it("only ever uses characters from the safe set a-z0-9- in the storedName", () => {
+    const { storedName } = generateStorageName("dept-1", "jpg");
+    expect(storedName).toMatch(/^[a-z0-9-]+\.[a-z0-9]+$/);
   });
 });

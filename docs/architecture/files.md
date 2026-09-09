@@ -58,6 +58,18 @@ is opaque to everything above the repository layer — `SafeFile` (the type retu
 Server Components/Actions) does not carry it. Only `get-file-for-serving.ts` reads it, for
 the one legitimate reason: the content route needs it to call `storage.readStream`.
 
+`storedName`/`storageKey` generation itself is centralized in one function,
+`generateStorageName(departmentId, extension)` (`@/server/media/probe.ts`, ADR-0046) —
+never inlined at a call site. It never takes `originalName`: `randomUUID()` is the only
+source of uniqueness, so nothing about the client-supplied name (spaces, Unicode,
+punctuation, length) needs sanitizing to become Worker/filesystem-safe, and
+`extension` must already be the one `resolveFileKind` validated against the sniffed
+bytes, never the client's declared one. Both `upload-file.ts` (Gallery uploads) and
+`create-job-artifact.ts` (Worker render-result artifacts) call this same function.
+It lives in `@/server/media` rather than the isomorphic
+`features/files/domain/file-types.ts` because that module is also imported by the
+Client Component `file-picker.tsx`, which can never pull in `node:crypto`.
+
 ## Upload lifecycle
 
 `features/files/use-cases/upload-file.ts`, in order:
@@ -142,6 +154,15 @@ never its storage key. That route:
   segment (`buildFileUrlFromRequest`, `worker-job-payload.ts`) purely so the Worker's
   local copy gets a real one — every other caller (the dashboard, `FileCard`, etc.)
   never sends this segment and is completely unaffected.
+- **Sends a `Content-Disposition` header carrying the File's `originalName` —
+  ADR-0046.** `inline; filename="<ascii fallback>"; filename*=UTF-8''<percent-encoded
+originalName>` on every response — the same extension-loss failure mode ADR-0044
+  fixed for the Worker's downloader, but on the browser side: the URL itself is
+  deliberately extension-less (identity is the id, not a path), so without this header
+  a direct "Save As"/navigation download falls back to the bare id with no extension.
+  `inline` keeps every existing `<img>`/`<audio>`/`<video>` embed rendering exactly as
+  before — only the filename a save proposes changes. Always `originalName`, never
+  `storedName`/`storageKey` (those stay internal, per "Storage abstraction" above).
 
 ## Historical integrity contract for Job/Template features
 
