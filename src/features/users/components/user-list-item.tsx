@@ -1,4 +1,8 @@
+import Link from "next/link";
+import { Pencil } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { UserActions } from "@/features/users/components/user-actions";
 import type { SafeUser } from "@/features/users/domain/user";
@@ -52,7 +56,12 @@ export function UserListItem({
         </div>
 
         {canActOnThisRow ? (
-          <div className="shrink-0">
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/users/${user.id}/edit`}>
+                <Pencil /> Edit
+              </Link>
+            </Button>
             <UserActions
               userId={user.id}
               userName={user.fullName}

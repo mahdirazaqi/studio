@@ -55,6 +55,7 @@ const SAFE_USER_SELECT = {
   role: true,
   status: true,
   departmentId: true,
+  phone: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.UserSelect;
@@ -69,6 +70,7 @@ function toSafeUser(row: SafeUserRow): SafeUser {
     role: row.role,
     status: row.status,
     departmentId: row.departmentId,
+    phone: row.phone,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -174,4 +176,50 @@ export async function setUserStatus(
 
 export async function setUserRole(userId: string, role: Role): Promise<void> {
   await db.user.update({ where: { id: userId }, data: { role } });
+}
+
+/**
+ * `fullName`/`phone` only — never role/departmentId/status/email/
+ * passwordHash. Both fields are optional independently so a partial update
+ * never clobbers the other with `undefined` (Prisma simply omits an
+ * `undefined` key from `data`); `phone: null` is a legal, explicit value
+ * (clearing it), always written when provided, never merged in
+ * conditionally (mirrors `TransitionExtraData`'s own "every key assigned
+ * explicitly" convention in `features/jobs/repository/job-repository.ts`).
+ *
+ * Used identically by both the self-service profile edit and the
+ * MANAGER/ADMIN "edit another user" path (`features/users/use-cases/
+ * update-user-profile.ts`) — one write path, two authorization gates above
+ * it, never two competing update functions.
+ */
+export interface UpdateUserProfileData {
+  fullName?: string;
+  phone?: string | null;
+}
+
+export async function updateUserProfile(
+  userId: string,
+  data: UpdateUserProfileData,
+): Promise<SafeUser> {
+  try {
+    const row = await db.user.update({
+      where: { id: userId },
+      data: {
+        ...(data.fullName !== undefined ? { fullName: data.fullName } : {}),
+        ...(data.phone !== undefined ? { phone: data.phone } : {}),
+      },
+      select: SAFE_USER_SELECT,
+    });
+    return toSafeUser(row);
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw conflictError(
+        "This phone number is already associated with another user.",
+      );
+    }
+    throw error;
+  }
 }

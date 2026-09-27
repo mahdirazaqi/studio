@@ -18,11 +18,15 @@ export interface DepartmentChoice {
 }
 
 /**
- * Create form for a new User (docs/domain/users.md "Creation"). There is no
- * edit form — email/name/password are set once at creation; role and
- * active/disabled status are changed through `UserActions` on the list page
- * instead (each its own authorized, audited-by-nature operation, not a
- * generic PATCH).
+ * Create form for a new User (docs/domain/users.md "Creation"). `email`/
+ * `password` are set once, here, at creation and never editable afterward.
+ * `fullName`/`phone` editing lives on its own page instead
+ * (`/profile` for self-service, `/users/[userId]/edit` for MANAGER/ADMIN
+ * editing another user — Phase 20/ADR-0051,
+ * `features/users/components/user-profile-fields-form.tsx`) — not a second
+ * copy of this form. Role and active/disabled status are changed through
+ * `UserActions` on the list page (and now also on the edit page), each its
+ * own authorized, audited-by-nature operation, never a generic PATCH.
  */
 export function UserForm({
   departmentChoices,

@@ -2408,3 +2408,77 @@ error-prone by having the app do it itself at startup.
   is read/compared per request; this ADR only adds who tells Telegram where to send them.
 
 **Status:** DECIDED.
+
+## ADR-0051 — User profile editing (self-service + MANAGER/ADMIN), reusing the existing `phone` column
+
+**Context.** Studio had no way for a User to add/edit their own `phone` number or basic
+profile info at all — `phone` (added Phase 8/ADR-0036 for Telegram linking) was set only
+via `prisma db seed` or a direct administrative write, by design at the time (linking the
+_mechanism_ was Phase 8's scope, not an editing surface). No `/profile` page and no
+`/users/[userId]/edit` page existed. Asked to close this gap: self-service profile
+editing, phone add/edit, and MANAGER/ADMIN editing of other Users, all within the existing
+authorization model.
+
+**Decision.**
+
+1. **No schema change.** `User.phone` already existed (nullable, `@unique`, Phase 8) —
+   reused exactly as-is, including its uniqueness constraint and its normalization
+   function (`features/telegram/domain/phone.ts`'s `normalizePhone`, now also imported by
+   `features/users/schemas/update-user-profile.schema.ts` — a plain pure-function import
+   across features, not a use-case-layer one, so it doesn't extend the "Telegram's
+   cross-feature use-case imports" exception `docs/architecture/project-structure.md` §3
+   documents). `SafeUser` gained a `phone` field (previously omitted, since nothing needed
+   to display it before this).
+2. **One write path for `fullName`/`phone`, two authorization shapes**:
+   `updateUserProfile(actor, targetUserId, input)`
+   (`features/users/use-cases/update-user-profile.ts`) branches on
+   `actor.userId === targetUserId`:
+   - **Self**: unconditionally allowed — no `authorize()` call, no capability floor. This
+     is deliberate: `user:manage`/`user:view` are both `minRole: MANAGER`, so routing
+     self-edit through either would incorrectly block a plain `USER` from editing their
+     own name/phone. Self-profile-editing is identity-based, not role-gated — the one
+     Users-feature operation a `USER` role can perform at all.
+   - **Someone else**: `findUserInScope` (department-scoped, folds "doesn't exist"/
+     "cross-department" into `not_found`) then a new `assertCanEditProfile`
+     (`authorize-user-management.ts`) — the same shape as `assertCanSetActiveStatus`:
+     MANAGER may only touch a `USER`-role target in their own Department, ADMIN may touch
+     anyone. Unlike `assertCanChangeRole`/`assertCanSetActiveStatus`, there is no
+     self-modification block here — `fullName`/`phone` carry no escalation risk, so an
+     ADMIN editing their own row through the _managed_ path (not just `/profile`) is
+     harmless and not specially prevented.
+   - `role`/`departmentId`/`status`/`email` are **structurally** unreachable from this
+     function: `updateUserProfileSchema` has no such fields at all, so nothing needs a
+     runtime check to strip them (the `templateInputSchema`-has-no-`departmentId` pattern,
+     CLAUDE.md §10, reused for a new field set).
+3. **Phone validation**: `normalizePhone` (strip to digits) plus a plausibility check —
+   7–15 digits, E.164's own upper bound — rejecting obvious garbage without a
+   `libphonenumber`-style dependency this codebase never needed before. A duplicate
+   (`phone` already `@unique`) is caught (`P2002`) and turned into a clean `conflict`
+   error, matching `createUser`'s existing duplicate-email handling exactly. No SMS/OTP —
+   entering a number here proves nothing; only the existing Telegram "share contact" flow
+   does that, unchanged.
+4. **UI**: `/profile` (self-service — read-only Email/Department/Role/Status alongside an
+   editable Name/Phone form) and `/users/[userId]/edit` (MANAGER/ADMIN — the same
+   Name/Phone form, `EditUserProfileForm`, plus the existing, unmodified `UserActions`
+   component for role/active-status, never a second copy of that logic). Both pages share
+   one presentational form component, `UserProfileFieldsForm` — one field set, one
+   validation/error-rendering path, never two competing profile forms.
+5. `/users` list rows gained an "Edit" link to `/users/[userId]/edit`, shown under the
+   exact same `canActOnThisRow` condition `UserActions` already used — no new visibility
+   rule.
+
+**Consequences.**
+
+- No migration. `phone`'s existing Phase 8 column, uniqueness constraint, and
+  normalization function are the only phone-related things in this feature — there was
+  never a second, competing phone concept to reconcile.
+- `create-user.ts`'s form doc comment (previously "there is no edit form") updated to
+  point at the new pages instead of describing a gap that no longer exists.
+- A manually-entered phone number is guaranteed to normalize identically to Telegram's own
+  linking match, since both paths call the same `normalizePhone` — a User who sets their
+  phone via `/profile` and later shares their Telegram contact will link successfully on
+  the first try.
+- No Worker/Job/Template/File change of any kind; no new REST endpoint (Server Actions
+  only, per CLAUDE.md §12); no user deletion introduced or implied.
+
+**Status:** DECIDED.

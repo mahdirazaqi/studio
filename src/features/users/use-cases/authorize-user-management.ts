@@ -95,3 +95,31 @@ export function assertCanSetActiveStatus(
     throw forbiddenError();
   }
 }
+
+/**
+ * Can `actor` edit `target`'s basic profile fields (`fullName`/`phone`) —
+ * **another** user, not themselves (Phase 20/ADR-0051,
+ * docs/domain/authorization.md "Edit another user's profile"). Editing
+ * *your own* profile is a completely separate, unconditional path
+ * (`update-user-profile.ts`'s `actor.userId === targetUserId` branch) that
+ * never calls this function at all — unlike role/status, there is no
+ * self-lockout risk in a person changing their own display name, so there is
+ * nothing here to block for the self case.
+ *
+ * Same shape as `assertCanSetActiveStatus` on purpose: MANAGER may only
+ * touch a `USER`-role target (never a peer MANAGER or an ADMIN), in their
+ * own Department; ADMIN may touch anyone. `fullName`/`phone` are not
+ * privilege-related fields, but the *floor* for "may this actor manage this
+ * other person's account at all" is the same one every other user-management
+ * operation uses — inventing a looser one here would be a new, undocumented
+ * capability shape, not a reuse of the existing model.
+ */
+export function assertCanEditProfile(
+  actor: Actor,
+  target: ManagedUserRef,
+): void {
+  authorize(actor, "user:manage", { departmentId: target.departmentId });
+  if (actor.role !== "ADMIN" && target.role !== "USER") {
+    throw forbiddenError();
+  }
+}

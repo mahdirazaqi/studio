@@ -24,12 +24,19 @@ means disable. Every user belongs to exactly one Department and has one role
 - `actions/`, `schemas/`, `components/` (Phase 10) — the `/users` and `/users/new`
   dashboard pages: list (search, pagination, department column for ADMIN), create,
   disable/enable, and ADMIN-only role change.
+- `use-cases/update-user-profile.ts` + `schemas/update-user-profile.schema.ts` +
+  `actions/update-user-profile.action.ts` (Phase 20, ADR-0051) — `fullName`/`phone`
+  editing, one write path shared by two pages: `/profile` (self-service, every role,
+  identity-based, no capability check) and `/users/[userId]/edit` (MANAGER/ADMIN editing
+  another user, `assertCanEditProfile` — same shape as `assertCanSetActiveStatus`).
+  `role`/`departmentId`/`status`/`email` are structurally absent from this schema, never
+  reachable through this path.
 - Telegram-account linking (`phone`/`telegramUserId`, Phase 8) lives in
   `features/telegram/domain/phone.ts` and `features/telegram/use-cases/
 link-telegram-account.ts` — this feature's `User` rows are the target, but the linking
-  _mechanism_ is Telegram-feature scope. There is still no self-service phone-editing UI
-  (ADR-0036) — set today only via `prisma db seed`'s `SEED_ADMIN_PHONE` or a direct
-  administrative write.
+  _mechanism_ is Telegram-feature scope. `phone`'s editing UI (Phase 20) reuses
+  `normalizePhone` from that same module so a manually-entered number always normalizes
+  identically to what Telegram linking expects.
 
 See [`docs/domain/users.md`](../../../docs/domain/users.md) for the full field set and
 permission rules.

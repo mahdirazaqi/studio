@@ -27,6 +27,7 @@ const target = (overrides: Partial<SafeUser> = {}): SafeUser => ({
   role: "USER",
   status: "ACTIVE",
   departmentId: "dept-a",
+  phone: null,
   createdAt: new Date(),
   updatedAt: new Date(),
   ...overrides,

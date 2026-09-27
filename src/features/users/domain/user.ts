@@ -20,6 +20,11 @@ export interface SafeUser {
   role: Role;
   status: UserStatus;
   departmentId: string;
+  /** Normalized digits-only (`features/telegram/domain/phone.ts`'s
+   * `normalizePhone`) or `null` if never set — Phase 8/ADR-0036 added the
+   * column for Telegram linking; Phase 20/ADR-0051 added the profile-editing
+   * UI that lets a user set/change it themselves. */
+  phone: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

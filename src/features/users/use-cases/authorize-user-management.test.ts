@@ -4,6 +4,7 @@ import type { Actor } from "@/server/authz";
 import {
   assertCanChangeRole,
   assertCanCreateUserWithRole,
+  assertCanEditProfile,
   assertCanSetActiveStatus,
   type ManagedUserRef,
 } from "./authorize-user-management";
@@ -165,6 +166,68 @@ describe("assertCanSetActiveStatus", () => {
     const admin = actor({ role: "ADMIN", departmentId: "dept-a" });
     expect(() =>
       assertCanSetActiveStatus(
+        admin,
+        target({ role: "MANAGER", departmentId: "dept-b" }),
+      ),
+    ).not.toThrow();
+  });
+});
+
+// Phase 20/ADR-0051 — editing *another* user's basic profile
+// (fullName/phone). Editing your *own* profile never calls this function at
+// all (see `update-user-profile.test.ts`) — there is no self-modification
+// case to test here, unlike `assertCanChangeRole`/`assertCanSetActiveStatus`.
+describe("assertCanEditProfile", () => {
+  it("USER can never edit another user's profile", () => {
+    expect(() =>
+      assertCanEditProfile(actor({ role: "USER" }), target()),
+    ).toThrow(forbidden());
+  });
+
+  it("MANAGER may edit a USER's profile in their own department", () => {
+    const manager = actor({ role: "MANAGER", departmentId: "dept-a" });
+    expect(() =>
+      assertCanEditProfile(
+        manager,
+        target({ role: "USER", departmentId: "dept-a" }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("MANAGER cannot edit a user's profile in another department", () => {
+    const manager = actor({ role: "MANAGER", departmentId: "dept-a" });
+    expect(() =>
+      assertCanEditProfile(
+        manager,
+        target({ role: "USER", departmentId: "dept-b" }),
+      ),
+    ).toThrow(forbidden());
+  });
+
+  it("MANAGER cannot edit a peer MANAGER's profile, even in their own department", () => {
+    const manager = actor({ role: "MANAGER", departmentId: "dept-a" });
+    expect(() =>
+      assertCanEditProfile(
+        manager,
+        target({ role: "MANAGER", departmentId: "dept-a" }),
+      ),
+    ).toThrow(forbidden());
+  });
+
+  it("MANAGER cannot edit an ADMIN's profile", () => {
+    const manager = actor({ role: "MANAGER", departmentId: "dept-a" });
+    expect(() =>
+      assertCanEditProfile(
+        manager,
+        target({ role: "ADMIN", departmentId: "dept-a" }),
+      ),
+    ).toThrow(forbidden());
+  });
+
+  it("ADMIN may edit anyone's profile, any department, any role", () => {
+    const admin = actor({ role: "ADMIN", departmentId: "dept-a" });
+    expect(() =>
+      assertCanEditProfile(
         admin,
         target({ role: "MANAGER", departmentId: "dept-b" }),
       ),

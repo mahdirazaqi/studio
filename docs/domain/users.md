@@ -29,11 +29,11 @@ Final schema: [`prisma/schema.prisma`](../../prisma/schema.prisma). Rationale:
 
 **Implemented (Phase 8, ADR-0036):** `phone` (nullable, `@unique`, digits-only normalized
 — `features/telegram/domain/phone.ts`'s `normalizePhone`), `telegramUserId` (nullable,
-`@unique`, set once by `features/telegram/use-cases/link-telegram-account.ts`). Neither
-field has a self-service or admin editing UI yet — `phone` is set today only via
-`prisma db seed`'s optional `SEED_ADMIN_PHONE` or a direct administrative write, pending a
-real user-management phase; Phase 8's own scope was the linking _mechanism_, not a
-phone-editing surface (see ADR-0036 for why this is a deliberate boundary, not a gap).
+`@unique`, set once by `features/telegram/use-cases/link-telegram-account.ts`).
+
+**Implemented (Phase 20, ADR-0051):** a self-service and admin/manager editing UI for
+`fullName`/`phone` — see "Profile editing" below. `telegramUserId` still has no editing
+UI (it's set only by the Telegram linking flow itself, never directly); `phone` now does.
 
 **Not yet implemented** — added when the feature that needs them lands:
 
@@ -87,6 +87,41 @@ phone-editing surface (see ADR-0036 for why this is a deliberate boundary, not a
 > their own Department; ADMIN may create any role in any Department. A brand-new User is
 > always `ACTIVE`; the password is set once at creation (bcrypt-hashed before it ever
 > reaches the repository) — there is no separate "invite" flow.
+
+## Profile editing — implemented, Phase 20 (ADR-0051)
+
+Two entry points, one write path (`features/users/use-cases/update-user-profile.ts`,
+`features/users/repository/user-repository.ts`'s `updateUserProfile`) — `fullName`/
+`phone` only, ever. `role`/`departmentId`/`status`/`email` are structurally unreachable
+here: `updateUserProfileSchema` has no such fields, so a client-submitted one is stripped
+by Zod before the use case ever runs (same pattern as `templateInputSchema` having no
+`departmentId`, CLAUDE.md §10).
+
+- **`/profile`** — every authenticated User, `USER` role included, edits their own
+  `fullName`/`phone`. No `authorize()`/capability check at all for this path — it's
+  identity-based (`actor.userId === targetUserId`), not role-gated; a plain `USER` has no
+  `user:manage`/`user:view` capability but can still always reach this. Department/role/
+  status are shown read-only on the same page.
+- **`/users/[userId]/edit`** — MANAGER/ADMIN editing **another** user's `fullName`/
+  `phone`, via `assertCanEditProfile`
+  ([../architecture/authorization.md](../architecture/authorization.md)): the same shape
+  as `assertCanSetActiveStatus` — MANAGER may only touch a `USER`-role target in their own
+  Department, ADMIN may touch anyone. Role/active-status changes on this same page reuse
+  the existing, unmodified `UserActions` component/actions — never a second copy of that
+  logic.
+- **Phone validation**: `phone` is normalized through the exact same
+  `features/telegram/domain/phone.ts`'s `normalizePhone` Telegram's own "share contact"
+  linking already uses — a manually-entered phone number is guaranteed to normalize
+  identically to what a later Telegram link attempt expects. Plausibility is 7–15 digits
+  after stripping formatting (E.164's own upper bound), rejecting obvious garbage without
+  a full phone-parsing library. An empty value clears `phone` back to `null` — a User
+  having no phone remains a fully valid state (unchanged since Phase 8).
+- **No SMS/OTP verification of any kind** — entering a phone number here does not prove
+  ownership of it; only the existing Telegram "share contact" flow does that (unchanged).
+- **Uniqueness**: `phone` was already `@unique` since Phase 8 — a duplicate submission is
+  caught (`P2002`) and turned into a clean `conflict` error
+  ("This phone number is already associated with another user."), never a raw Prisma
+  error, same pattern `createUser`'s duplicate-email handling already uses.
 
 ## Disabling
 
