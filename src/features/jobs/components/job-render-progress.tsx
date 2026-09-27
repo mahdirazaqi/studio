@@ -12,11 +12,13 @@ import { clampJobProgress } from "@/features/jobs/domain/job";
  * `Progress` primitive, the `--warning` token `JobStatusBadge` already uses
  * for `RENDERING`), not two components:
  *
- * - `compact` (default) — Jobs List row (`job-list-item.tsx`, Phase 17
- *   brief). A minimal `Rendering · 67%` label over a hairline bar, sized to
- *   drop into the row's existing metadata slot **in place of** (not
- *   in addition to) the Template/By/Render-time line, so a rendering Job's
- *   card is not taller than a completed one's.
+ * - `compact` (default) — Jobs List row (`job-list-item.tsx`). A minimal
+ *   `Rendering · 67%` label over a hairline bar, rendered **alongside** the
+ *   Template/By/Render-time metadata line (which stays visible in every
+ *   state, rendering included — Jobs List brief §6), never in place of it —
+ *   kept deliberately small (no icon, no border/padding box) so this one
+ *   extra line never makes a rendering Job's card *significantly* taller
+ *   than a completed one's.
  * - `full` — the Job Detail page's Status card (Phase 16 brief), where a
  *   larger, bordered treatment is appropriate.
  *
@@ -43,14 +45,11 @@ export function JobRenderProgress({
   const clamped = clampJobProgress(progress);
 
   if (variant === "compact") {
-    // No "Rendering" word here — the adjacent `JobStatusBadge` already says
-    // it; repeating it would be exactly the duplicated-information pattern
-    // the Jobs List brief calls out to avoid. Just the number and a
-    // hairline bar, read as "how far along" the status chip already named.
     return (
       <div className={cn("space-y-1", className)}>
-        <span className="text-warning block text-xs font-semibold tabular-nums">
-          {clamped}%
+        <span className="text-warning block text-xs font-medium">
+          Rendering ·{" "}
+          <span className="font-semibold tabular-nums">{clamped}%</span>
         </span>
         <Progress
           value={clamped}
