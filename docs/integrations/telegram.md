@@ -270,10 +270,17 @@ notification is not wired up this phase).
   failure mode so "Telegram is disabled here" is never confused with "someone sent a bad
   secret" in logs.
 - **Local development / setup**: `TELEGRAM_BOT_TOKEN` from @BotFather;
-  `TELEGRAM_WEBHOOK_SECRET` any long random value (`openssl rand -hex 32`); call
-  Telegram's `setWebhook` with `url: https://<your-domain>/api/telegram/webhook` and
-  `secret_token: <the same value>`. There is no local-polling fallback for development —
-  a real HTTPS-reachable URL (e.g. a tunnel) is needed to receive webhook calls locally.
+  `TELEGRAM_WEBHOOK_SECRET` any long random value (`openssl rand -hex 32`); `APP_URL` set
+  to a real, publicly HTTPS-reachable address (a tunnel for local testing, or the real
+  deployed domain in production) — with all three set, Studio calls Telegram's
+  `setWebhook` **automatically on server startup** (ADR-0050,
+  `registerTelegramWebhookOnStartup`), pointing it at `${APP_URL}/api/telegram/webhook`
+  with `secret_token` set to `TELEGRAM_WEBHOOK_SECRET`. Manually calling `setWebhook`
+  yourself still works exactly the same way (this is just Telegram's own supported
+  mechanism, called for you) — useful if `APP_URL` isn't set, or the URL changed since the
+  server last started (e.g. a fresh tunnel session with a new random subdomain). There is
+  no local-polling fallback for development — a real HTTPS-reachable URL is needed to
+  receive webhook calls at all, automatic registration or not.
 
 ## 4. Improvements over legacy (summary)
 

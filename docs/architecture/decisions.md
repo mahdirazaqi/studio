@@ -2363,3 +2363,48 @@ the first place, so nothing there needed touching either.
   optional in `workerTransitionSchema`; only the use-case's runtime requirement moved.
 
 **Status:** DECIDED.
+
+## ADR-0050 — Register the Telegram webhook automatically on server startup
+
+**Context.** Setting up the Telegram bot required a manual, one-time `curl
+.../setWebhook` call outside the app (`docs/integrations/telegram.md` "Local development /
+setup") — easy to forget, and the actual cause of the bot silently doing nothing in a real
+session: `TELEGRAM_WEBHOOK_SECRET` was never set, and separately, `setWebhook` had never
+been called at all (`getWebhookInfo` returned `url: ""`). Asked to make this less
+error-prone by having the app do it itself at startup.
+
+**Decision.**
+
+1. `src/instrumentation.ts` — Next.js's own documented server-startup hook (stable since
+   Next 15, `register()` runs once per server boot, dev and prod both, never during
+   `next build`). Studio's first use of it.
+2. `registerTelegramWebhookOnStartup` (`@/server/adapters/telegram/register-webhook`) —
+   does nothing unless `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `APP_URL` (a
+   previously-declared-but-unused env var — its own doc comment already said "used for ...
+   webhook configuration later") are all set; otherwise calls Telegram's `setWebhook` with
+   `${APP_URL}/api/telegram/webhook` and the configured secret. Never throws — a failure
+   here (no internet at boot, `APP_URL` not yet publicly reachable) is logged and Studio
+   starts normally regardless, matching every other best-effort Telegram send in this
+   codebase.
+3. **Deliberately a plain `fetch` against Telegram's raw Bot API, not the shared
+   `telegraf` client.** This project's `middleware.ts` (ADR-0043) makes Next.js bundle
+   `instrumentation.ts` for the **Edge** runtime as well as Node.js. `telegraf`
+   transitively requires Node-only builtins (`fs`, `https`) that don't exist there —
+   confirmed by an actual build failure when the shared client was used here, even behind
+   a `process.env.NEXT_RUNTIME === "nodejs"` guard and a dynamic `import()` (webpack still
+   traces the imported module graph for the Edge bundle regardless). `setWebhook` is one
+   stateless HTTP call — it needs no Telegraf instance, so `fetch` (safe in both runtimes)
+   sidesteps the problem entirely rather than working around it.
+
+**Consequences.**
+
+- Setting `APP_URL` alongside the two existing Telegram variables is now enough — no
+  external tooling or manual step required, in any environment.
+- Manually calling `setWebhook` still works identically (this only automates the same,
+  unchanged, Telegram-native mechanism) — useful whenever `APP_URL` isn't set, or a tunnel
+  URL changes between server restarts.
+- No Worker/Worker-API change, no schema change. `authenticateTelegramWebhook`
+  (`@/server/telegram-webhook-auth`) is unaffected — it's still the sole place the secret
+  is read/compared per request; this ADR only adds who tells Telegram where to send them.
+
+**Status:** DECIDED.
