@@ -314,12 +314,23 @@ components/utilities, never a per-page reimplementation:
   (`computeRenderSeconds(job.startedAt, job.renderedAt)`,
   `features/jobs/domain/job.ts`). **Not** `createdAt -> renderedAt` (would include
   queue wait) and **not** `claimedAt -> renderedAt` (would include asset-download
-  time) — `Job.startedAt` is a new timeline timestamp, set exactly once by
-  `transitionJobForWorker` on the real `CLAIMED -> RENDERING` transition (the _first_
-  of the Worker's three legacy per-stage reports that all map to `RENDERING` —
-  ADR-0043's same-state no-op fix is what makes "exactly once" true; every later
-  same-state report is already a no-op before reaching this code). `null` until the Job
-  starts rendering.
+  time) — `Job.startedAt` is a new timeline timestamp, set exactly once, at the actual
+  render-start moment. `null` until then.
+
+  **Revised, Phase 18 (ADR-0048).** The real Worker reports three legacy per-stage
+  codes that all map to `RENDERING` — `Downloading`(2), `Started`(3), `InProgress`(4) —
+  but they are **not** interchangeable for this purpose: `Downloading`/`Started` both
+  fire _before_ any actual rendering work (asset fetch, then script generation);
+  only `InProgress` fires immediately before the real `aerender` invocation
+  (verified against `navaak-ae-renderer/renderer/operator/render.go`). The originally
+  shipped Phase 15 implementation set `startedAt` on whichever of the three happened to
+  trigger the real `CLAIMED -> RENDERING` transition — in practice always
+  `Downloading`, since it fires first — which silently included asset-download and
+  script-generation time in "render time." `markRenderStarted`
+  (`features/jobs/repository/job-repository.ts`) now sets `startedAt` specifically on
+  the `InProgress` report — almost always a **same-state** report by the time it
+  arrives (ADR-0043's no-op branch), not the transition itself. See ADR-0048 for the
+  fallback behavior when no per-stage code is available to wait for.
 
 Both durations render through the one shared `formatDurationHHMMSS` utility
 (`src/lib/format-duration.ts`) — always `HH:MM:SS`, zero-padded, never a raw decimal or

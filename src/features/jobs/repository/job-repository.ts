@@ -412,6 +412,41 @@ export async function setDuration(
   return toSafeJobDetail(row);
 }
 
+/**
+ * Sets `Job.startedAt` at the actual, verified render-start moment (Phase
+ * 18/ADR-0048) — called from `transition-job-for-worker.ts` on the real
+ * Worker's "InProgress" (legacy code 4) report, the one issued immediately
+ * before it invokes `aerender` itself (`render.go`'s `Render()`), as
+ * opposed to "Downloading"/"Started" (legacy 2/3), which both arrive
+ * *before* any actual rendering work and previously, incorrectly, set this
+ * field instead (see that use case's doc comment for the full trace against
+ * the real Worker source).
+ *
+ * A conditional `UPDATE ... WHERE state = 'RENDERING' AND startedAt IS
+ * NULL` — never a read-then-write, matching every other Worker-facing
+ * write in this file. `startedAt IS NULL` makes this naturally idempotent
+ * against a duplicate/retried "InProgress" report (the real Worker only
+ * ever sends it once per Job, but nothing here depends on that). A `count
+ * === 0` is never an error: it just means either this Job already has a
+ * `startedAt` (a harmless duplicate report) or it left `RENDERING` before
+ * this report was processed (already `RENDERED`/`ERROR`/`CANCELED`) — the
+ * caller reads the row back regardless.
+ */
+export async function markRenderStarted(
+  jobId: string,
+): Promise<SafeJobDetail | null> {
+  await db.job.updateMany({
+    where: { id: jobId, state: "RENDERING", startedAt: null },
+    data: { startedAt: new Date() },
+  });
+
+  const row = await db.job.findUnique({
+    where: { id: jobId },
+    select: SAFE_JOB_DETAIL_SELECT,
+  });
+  return row ? toSafeJobDetail(row) : null;
+}
+
 export interface CreateRetryData {
   originalJobId: string;
   departmentId: string;

@@ -2236,3 +2236,130 @@ punctuation character — is left as literal text.
   `buildFileUrlFromRequest`.
 
 **Status:** DECIDED.
+
+## ADR-0048 — `Job.startedAt` now set on the real Worker's "InProgress" report, not "Downloading"
+
+**Context.** A task asked to "fix render time not being displayed," premised on the real
+Worker sending an explicit `renderTime` value Studio was failing to map. Tracing the
+actual Worker source (`navaak-ae-renderer`, per CLAUDE.md's source-of-truth mandate)
+found no such field exists — the Worker reports only `duration` (`SetDuration`, the
+rendered video's own playback length, already correctly handled as `Job.durationSeconds`
+since Phase 7) and a handful of per-stage state codes. Studio's own `computeRenderSeconds
+(startedAt, renderedAt)` (ADR-0045) is, and remains, the only correct source for "render
+time" — there is nothing from the Worker to map differently.
+
+However, tracing the _exact_ real call sequence (`renderer.go`'s `next()`) surfaced a
+real, previously unverified bug in that computation's accuracy: `transitionJobForWorker`
+set `startedAt` on the _first_ report that maps to `RENDERING`, and in the real Worker
+that is legacy code `2` ("Downloading") — fired at the very start of
+`operator.Download()`, i.e. **before** any asset is fetched. `computeRenderSeconds`'s own
+doc comment already says `startedAt` is deliberately not `claimedAt` "because the gap
+between claim and the Worker actually starting to render (asset download time) is not
+render time" — but the implementation didn't actually achieve that: because "Downloading"
+fires essentially immediately after claim, the measured window included asset download,
+script generation, and aerender startup, not just the render itself. The real render only
+begins at legacy code `4` ("InProgress"), fired by `operator/render.go`'s `Render()`
+immediately before invoking `aerender` — verified by reading that exact line.
+
+**Decision.** `Job.startedAt` is now set specifically at the Worker's `InProgress` (legacy
+`4`) report, not merely "the first report that maps to `RENDERING`":
+
+1. `markRenderStarted(jobId)` (`features/jobs/repository/job-repository.ts`) — a new,
+   atomic conditional `UPDATE ... WHERE state = 'RENDERING' AND startedAt IS NULL`,
+   matching `setProgress`/`setDuration`'s existing shape. Naturally idempotent against a
+   duplicate report.
+2. `transitionJobForWorker` (`features/jobs/use-cases/transition-job-for-worker.ts`): in
+   the real Worker, `InProgress` almost always arrives as a **same-state** report (the
+   earlier `Downloading`/`Started` reports already performed the real `CLAIMED ->
+RENDERING` transition) — the existing ADR-0043 same-state no-op branch now calls
+   `markRenderStarted` specifically when the raw legacy code is `4`, instead of just
+   re-reading the row. The real-transition branch only sets `startedAt` immediately when
+   there's no finer-grained signal still to come: the transition was itself triggered by
+   `InProgress` (an edge case — an earlier report was lost) or by a non-legacy caller
+   sending the canonical name `"RENDERING"` directly (no per-stage code to distinguish).
+   When triggered by the known pre-render legacy codes (`2`/`3`), `startedAt` is left
+   unset, to be filled in by the later `InProgress` report.
+3. `mapWorkerState`/`legacy-state-mapping.ts` is **unchanged** — this is entirely about
+   _when_ to write `startedAt`, never about which Studio state a report maps to.
+
+**Consequences.**
+
+- Render time (`computeRenderSeconds`) now actually measures only the `aerender`
+  invocation-to-completion window, matching its own documented intent for the first time
+  — previously it silently included download + script-generation + aerender-startup time
+  for every real render.
+- The pre-existing test asserting the old behavior (`transitionJobForWorker` setting
+  `startedAt` on legacy code `2`'s real transition) was wrong and has been corrected —
+  same pattern as ADR-0043/ADR-0044/ADR-0047's own "the shipped test asserted a design
+  that was never checked against the real Worker" fix.
+- **Goal #1 of the same brief (thumbnail generated from the rendered output) required no
+  change at all** — `generate-render-artifacts.ts` has generated the Job thumbnail from
+  the rendered video buffer (never the input) since Phase 9, already using a
+  frame-shortly-after-start (4s, with a 0s retry for short renders) rather than frame 0,
+  already stored via the ordinary `File`/`StorageAdapter` architecture, already
+  idempotency-safe (`acceptJobResult`'s duplicate-result short-circuit), and already
+  correctly surfaced in the Jobs List (`JobThumbnail`, Phase 15/ADR-0045) — verified, not
+  re-implemented.
+- No Worker change, no Worker API contract change, no database schema change (`startedAt`
+  is the same existing column, just written at a different, more accurate moment).
+
+**Status:** DECIDED.
+
+## ADR-0049 — `errorReason` is optional, not required, for a Worker-reported `ERROR`
+
+**Context.** A report that `Job.renderedAt` was never being persisted after a real render
+finished. A direct query against the live database confirmed: **every** Job that ever
+reached `RENDERED` had `videoFileId`/`screenshotFileId`/`thumbnailFileId`/`renderedAt` all
+`NULL` — a 100% failure rate, and one Job was permanently stuck at `RENDERING` forever
+with no error recorded at all. `renderedAt`/`videoFileId`/etc. are only ever written
+together, atomically, in `accept-job-result.ts`'s single `transitionJobRow` call — so
+this could only mean the Worker's upload (`POST .../upload`) was never completing
+successfully for any real render. Manually POSTing a real `ffmpeg`-generated test video
+directly to the running dev server's `/upload` endpoint for one of the stuck Jobs
+**succeeded immediately** (`renderedAt`/artifacts all set correctly) — proving
+`acceptJobResult` itself is correct; the real Worker's own requests were failing for a
+different reason and then getting **silently swallowed**.
+
+Tracing exactly why: the real Worker's error-handling (`renderer.go`'s `Start()`) reports
+a mid-render failure via `operator.ChangeState(jobId, operator.Error)` whenever `next()`
+returns any error (a failed download, a failed upload, anything). `ChangeState()`
+(`operator/request.go`) sends `PATCH .../state` with **`{"state": s}` only** — grepping
+the entire real Worker source (`navaak-ae-renderer`) for any error-message field
+(`reason`, `error`, etc.) found **none, anywhere**. Studio's `transitionJobForWorker`
+required `errorReason` whenever the target was `ERROR` — so every real Worker-reported
+failure was itself rejected with a `422 validation` error. The Worker's own loop does not
+retry on this rejection; it just moves on to the next Job, leaving the failed one stuck
+forever in whatever state it was already in, with **no error message ever recorded** —
+the reporting mechanism silently defeated its own purpose. (For a Job whose failure
+happens _after_ the real Worker's own `ChangeState(Rendered)` — the call order ADR-0043
+already documented — this is doubly stuck: `RENDERED` is also terminal, so even a
+successful `ERROR` report would be refused by the state machine; that half is not fixed
+by this ADR and is called out below as a remaining gap.)
+
+**Decision.** `transitionJobForWorker` no longer requires `errorReason`. A Worker-reported
+`ERROR` with no reason now uses a fixed fallback message
+(`"The Worker reported a render failure without providing a reason."`) instead of
+rejecting the transition. Nothing else changes: the state machine (`isValidTransition`)
+still decides whether `ERROR` is a legal target from the Job's current state exactly as
+before; `transitionJob` (the general, non-Worker primitive) never had this requirement in
+the first place, so nothing there needed touching either.
+
+**Consequences.**
+
+- A real Worker-side render failure (asset download, AE crash, etc.) while the Job is
+  still non-terminal (`QUEUED`/`CLAIMED`/`RENDERING`) now actually reaches `ERROR`, with a
+  generic-but-honest reason, instead of leaving the Job silently stuck forever.
+- **Remaining, separate gap — not fixed here**: a Job whose real Worker already called
+  `ChangeState(Rendered)` before a subsequent `/upload` failure has no path back to
+  `ERROR` (correctly — `RENDERED` is terminal by design) and the real Worker does not
+  retry a failed upload on its own. Recovering such a Job today requires a manual
+  re-`POST` of the result (as this diagnosis did) or a future, deliberately-scoped
+  Worker-recovery feature — not something this fix invents.
+- The historical Jobs discovered stuck during this diagnosis were not bulk-repaired by
+  this change — see the session record for the one Job manually completed as part of
+  verifying the root cause; every other stuck historical Job is unchanged, per
+  `docs/data/lifecycle-rules.md` (Jobs are never deleted or silently rewritten).
+- No Worker change, no schema change, no new Worker API field — `errorReason` was already
+  optional in `workerTransitionSchema`; only the use-case's runtime requirement moved.
+
+**Status:** DECIDED.
