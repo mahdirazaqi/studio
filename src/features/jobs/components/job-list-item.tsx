@@ -46,19 +46,32 @@ export function JobListItem({ job }: { job: SafeJob }) {
                 </Badge>
               ) : null}
             </div>
-            <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <span>Template: {job.templateName}</span>
-              {job.createdByName ? <span>By {job.createdByName}</span> : null}
-              <span>
-                Render time:{" "}
-                <span className="font-mono">
-                  {formatDurationHHMMSS(renderSeconds)}
-                </span>
-              </span>
+            {/* One fixed-height slot, one of two mutually-exclusive
+                contents — never an extra row appended for rendering Jobs,
+                so every card in the list shares the same height regardless
+                of state (Jobs List brief §2–3, §8). */}
+            <div className="min-h-6">
+              {job.state === "RENDERING" ? (
+                <JobRenderProgress
+                  progress={job.progress}
+                  variant="compact"
+                  className="max-w-56"
+                />
+              ) : (
+                <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                  <span>Template: {job.templateName}</span>
+                  {job.createdByName ? (
+                    <span>By {job.createdByName}</span>
+                  ) : null}
+                  <span>
+                    Render time:{" "}
+                    <span className="font-mono">
+                      {formatDurationHHMMSS(renderSeconds)}
+                    </span>
+                  </span>
+                </div>
+              )}
             </div>
-            {job.state === "RENDERING" ? (
-              <JobRenderProgress progress={job.progress} className="max-w-xs" />
-            ) : null}
             {job.state === "ERROR" && job.errorReason ? (
               <p className="text-destructive text-xs">{job.errorReason}</p>
             ) : null}
