@@ -337,6 +337,46 @@ Both durations render through the one shared `formatDurationHHMMSS` utility
 `Date`-formatted value, `"—"` for `null`/invalid. A duration is not a timestamp; this
 utility never touches `Intl.DateTimeFormat`.
 
+### Output & thumbnail download — implemented, Phase 21 (ADR-0052, corrected ADR-0053)
+
+The Jobs List can download a completed Job's rendered video and generated thumbnail
+directly, via `JobDownloadActions` (`features/jobs/components/job-download-actions.tsx`)
+— two compact icon buttons, rendered only for whichever of `videoFileId`/
+`screenshotFileId` is actually set (never a disabled button hinting at a download that
+would 404).
+
+- **No new download endpoint** — both link straight to the existing, unmodified
+  `/api/files/[fileId]` route (ADR-0024/0025/0046), the same one Job Detail's own
+  "Rendered result" card has always used. That route already streams (never buffers a
+  whole file into memory), supports `Range`, and re-authenticates/Department-scopes on
+  every request — nothing about _how_ a File is served changed, only where a link to it
+  was added.
+- **Exact original quality, always** — no transcoding, resizing, or re-encoding of any
+  kind happens on download; the bytes streamed are exactly what `generate-render-
+artifacts.ts` produced and stored.
+- **"Download thumbnail" serves `screenshotFileId`, not `Job.thumbnailFileId` —
+  corrected, ADR-0053.** `thumbnailFileId` is a deliberately downscaled 150px-height
+  preview image (fine for a Job Card, `JobThumbnail` still uses it there); downloading
+  that one produced a visibly low-quality file. `screenshotFileId` is the same frame at
+  full resolution, extracted directly from the rendered video before that downscale —
+  the actual highest-quality still image Studio has, and the correct download source.
+- **User-facing filenames**: `buildJobDownloadFilename` (`features/jobs/domain/job.ts`)
+  builds `<Job title>.mp4` / `<Job title>-thumbnail.jpg` — never the artifact File's
+  stored `originalName` (`render-<id>.mp4`/`screenshot-<id>.jpg`, meaningful only as a
+  storage record). The HTML `download` attribute on the anchor (not the route's
+  `Content-Disposition`) is what actually determines the saved filename, so no
+  server-side change was needed to make this work. `sanitizeForFilename` strips
+  characters illegal in a filename on any major OS and guards against a title shaped
+  like a path (never produces `/`/`\`).
+- `SafeJob` (list-view) gained `videoFileId`/`screenshotFileId` for this — see their own
+  doc comments in `features/jobs/domain/job.ts` for why that's cheap (plain columns, not
+  a join).
+
+**Not implemented, deliberately**: a download UI on Job Detail beyond its pre-existing
+links (out of this phase's scope — `JobDownloadActions` is a standalone component so a
+future pass can reuse it there without a second implementation), any download-quality
+option (there is exactly one quality: the original).
+
 ### Job status chips — implemented, Phase 15
 
 `JobStatusBadge` (`features/jobs/components/job-status-badge.tsx`) is the **one**

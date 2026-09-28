@@ -63,7 +63,7 @@ describe("updateUserProfile", () => {
       expect(findUserInScope).not.toHaveBeenCalled();
       expect(updateUserProfileRepo).toHaveBeenCalledWith("actor-1", {
         fullName: "My New Name",
-        phone: "15551234567",
+        phone: "989123456789",
       });
       expect(result.fullName).toBe("My New Name");
     });

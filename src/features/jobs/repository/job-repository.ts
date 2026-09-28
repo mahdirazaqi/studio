@@ -50,6 +50,12 @@ const SAFE_JOB_SELECT = {
   startedAt: true,
   renderedAt: true,
   thumbnailFileId: true,
+  // Phase 21/ADR-0053 — the Jobs List download action needs both of these
+  // per row: `videoFileId` for the rendered output, `screenshotFileId` (the
+  // full-resolution frame, not the downscaled `thumbnailFileId`) so
+  // "download thumbnail" doesn't hand the user a visibly low-quality image.
+  videoFileId: true,
+  screenshotFileId: true,
 } satisfies Prisma.JobSelect;
 
 type SafeJobRow = Prisma.JobGetPayload<{ select: typeof SAFE_JOB_SELECT }>;
@@ -74,6 +80,8 @@ function toSafeJob(row: SafeJobRow): SafeJob {
     startedAt: row.startedAt,
     renderedAt: row.renderedAt,
     thumbnailFileId: row.thumbnailFileId,
+    videoFileId: row.videoFileId,
+    screenshotFileId: row.screenshotFileId,
   };
 }
 
@@ -88,8 +96,6 @@ const SAFE_JOB_DETAIL_SELECT = {
   canceledAt: true,
   cancelReason: true,
   claimedAt: true,
-  videoFileId: true,
-  screenshotFileId: true,
   assets: {
     select: {
       id: true,
@@ -141,8 +147,6 @@ function toSafeJobDetail(row: SafeJobDetailRow): SafeJobDetail {
     canceledAt: row.canceledAt,
     cancelReason: row.cancelReason,
     claimedAt: row.claimedAt,
-    videoFileId: row.videoFileId,
-    screenshotFileId: row.screenshotFileId,
   };
 }
 

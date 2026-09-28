@@ -2482,3 +2482,96 @@ authorization model.
   only, per CLAUDE.md §12); no user deletion introduced or implied.
 
 **Status:** DECIDED.
+
+## ADR-0052 — Job output/thumbnail download from the Jobs List, via the existing `/api/files/[fileId]` route
+
+**Context.** The Jobs List had no way to download a Job's rendered output video or
+generated thumbnail — Job Detail already had working download links
+(`/api/files/{videoFileId}}`/`/api/files/{thumbnailFileId}`), but the List, where users
+actually scan many Jobs, did not. Asked to add compact download actions there, at full
+original quality (no transcoding/resizing), with a user-friendly filename.
+
+**Decision.**
+
+1. **No new download endpoint.** `/api/files/[fileId]` (ADR-0024/0025/0046) already
+   streams a File's bytes (via `storage.readStream`, byte-range support, no full-buffer
+   load), already re-authenticates and Department-scopes on every request, and already
+   serves `JOB_ARTIFACT`-category Files identically to `GALLERY_ASSET` ones (Job Detail's
+   existing links prove this). Reused verbatim — the only change is _where_ a link to it
+   appears, not the route itself.
+2. **`SafeJob` (the list-view type) gained `videoFileId`** — previously detail-only
+   (Phase 15's own reasoning: "the list only ever needs the small thumbnail image"). The
+   List's new download action needs it per row; it's a plain string column, the same cost
+   `thumbnailFileId` already was, not a join or a second query.
+3. **User-facing filenames, not the artifact File's stored `originalName`.**
+   `generate-render-artifacts.ts` names artifacts `render-<id>.mp4`/`thumbnail-<id>.jpg` —
+   accurate as a storage record, meaningless in a "Save As" dialog. `buildJobDownloadFilename`
+   (`features/jobs/domain/job.ts`) builds `<sanitized Job title>.mp4` /
+   `<sanitized Job title>-thumbnail.jpg` instead, via a new `sanitizeForFilename` helper
+   (strips characters illegal in a filename on any major OS, collapses whitespace, caps
+   length, falls back to `"job"` for an empty/all-punctuation title — never produces
+   something containing `/`/`\`, so a title shaped like a path traversal attempt can't
+   become one). The HTML `download` attribute (not the route's own `Content-Disposition:
+inline`, ADR-0046) is what makes a plain anchor click save-as instead of navigate, and
+   its value is what the browser actually uses as the saved filename — no server-side
+   route change needed to make this work.
+4. **Extension is a fixed `.mp4`/`.jpg`, not looked up from `mimeType`.** The current
+   `ffmpeg` pipeline (ADR-0039) only ever produces exactly these two formats for a Job's
+   video/thumbnail — verified against `generate-render-artifacts.ts`, not assumed. If that
+   pipeline's output format ever changes, `buildJobDownloadFilename` needs updating
+   alongside it (documented in its own doc comment).
+5. **`JobDownloadActions`** (`features/jobs/components/job-download-actions.tsx`) — two
+   compact icon-only buttons (`ImageDown`/`Download`, both existing `lucide-react` icons),
+   each a plain `<a>` (not a Server Action — a browser download is not an internal
+   mutation, per CLAUDE.md §12's own "binary file download → appropriate secure
+   server-side file response" distinction), wrapped in the existing `Tooltip` primitive
+   for desktop hover text, each with a real `aria-label` so mobile/screen-reader users
+   don't depend on hover. Renders **only** the action whose file id is non-null — never a
+   disabled button hinting at a download that would 404.
+
+**Consequences.**
+
+- Zero quality loss of any kind — the exact stored bytes are streamed, unmodified, exactly
+  as Job Detail's own links already did.
+- No large-file memory risk — same streaming path the route already used.
+- Department isolation is unchanged and automatic: `/api/files/[fileId]`'s existing
+  session-based authorization is what actually gates this, not anything new.
+- `JobDownloadActions` is a standalone component (not inlined into `JobListItem`)
+  specifically so a future Job Detail download-UI refresh could reuse it — out of this
+  phase's scope, since Job Detail's own download links already work.
+- No Worker change, no rendering/transcoding change, no new REST endpoint, no Job Card
+  redesign — only two new icon buttons added to the List row's existing actions area.
+
+**Status:** DECIDED.
+
+## ADR-0053 — Thumbnail download uses `screenshotFileId` (full resolution), not `thumbnailFileId`
+
+**Context.** A user report, right after ADR-0052 shipped: the downloaded "thumbnail" was
+visibly low quality. Correct — `generate-render-artifacts.ts` (Phase 9, ADR-0039) produces
+**two different still images** per Job, not one: `screenshotFileId` (the full-resolution
+frame `ffmpeg` extracts directly from the rendered video, `-q:v 2`) and `thumbnailFileId`
+(that same frame afterward downscaled to a 150px height via `resizeImageToHeight`, for
+fast loading in a Job Card). ADR-0052's download action pointed at `thumbnailFileId` —
+correct for what's _displayed_ on the card, wrong for what a user downloading it actually
+wants.
+
+**Decision.** The "Download thumbnail" action (`JobDownloadActions`) now serves
+`screenshotFileId` — the full-resolution image — never `thumbnailFileId`. The Job Card's
+own small preview image (`JobThumbnail`) is unchanged and still uses `thumbnailFileId`
+(correct there: a card doesn't need or want the full-resolution file loaded just to show a
+150px preview). `SafeJob` (list-view) gained `screenshotFileId` for this, moved out of
+`SafeJobDetail`-only (same reasoning as `videoFileId` in ADR-0052 — a plain column, not a
+join, no extra query). The button's label/icon/tooltip are unchanged ("Download
+thumbnail") — it's the same frame the user already sees as the Job's thumbnail, just not
+downscaled; only which `File` id the link points at changed.
+
+**Consequences.**
+
+- The downloaded image is now the actual highest-quality still Studio has for that Job —
+  no new image processing, no new artifact, no Worker/rendering change of any kind; this
+  reuses an artifact `generate-render-artifacts.ts` already produced.
+- `thumbnailFileId` keeps its one purpose (fast Job Card preview); `screenshotFileId`
+  keeps its one purpose (full-resolution still) — no field was repurposed or renamed, so
+  nothing elsewhere that already reads either field needed to change.
+
+**Status:** DECIDED.

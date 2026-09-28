@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { clampJobProgress, computeRenderSeconds } from "./job";
+import {
+  buildJobDownloadFilename,
+  clampJobProgress,
+  computeRenderSeconds,
+} from "./job";
 
 /**
  * Render time — `startedAt -> renderedAt` — deliberately distinct from the
@@ -80,5 +84,59 @@ describe("clampJobProgress", () => {
   it("treats a non-finite value as 0", () => {
     expect(clampJobProgress(Number.NaN)).toBe(0);
     expect(clampJobProgress(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+});
+
+/**
+ * User-facing download filenames (Phase 21, docs/domain/jobs.md "Output &
+ * thumbnail download") — built from the Job's own title, never the
+ * artifact File's generic `originalName`, and never containing anything
+ * that could be misread as a path.
+ */
+describe("buildJobDownloadFilename", () => {
+  it("builds a plain .mp4 filename for the video", () => {
+    expect(buildJobDownloadFilename("My Job Title", "video")).toBe(
+      "My Job Title.mp4",
+    );
+  });
+
+  it("builds a -thumbnail.jpg filename for the thumbnail", () => {
+    expect(buildJobDownloadFilename("My Job Title", "thumbnail")).toBe(
+      "My Job Title-thumbnail.jpg",
+    );
+  });
+
+  it("strips characters illegal in a filename on any major OS", () => {
+    expect(
+      buildJobDownloadFilename('Weird:Title?"With*Chars<>|', "video"),
+    ).toBe("WeirdTitleWithChars.mp4");
+  });
+
+  it("never lets a path-traversal-shaped title produce a path", () => {
+    const result = buildJobDownloadFilename("../../etc/passwd", "video");
+    expect(result).not.toContain("/");
+    expect(result).not.toContain("\\");
+  });
+
+  it("collapses runs of whitespace and trims", () => {
+    expect(buildJobDownloadFilename("  My    Job  ", "video")).toBe(
+      "My Job.mp4",
+    );
+  });
+
+  it("falls back to a generic name for an empty/untitled Job", () => {
+    expect(buildJobDownloadFilename("", "video")).toBe("job.mp4");
+  });
+
+  it("falls back to a generic name when the title is only illegal characters", () => {
+    expect(buildJobDownloadFilename("///???***", "thumbnail")).toBe(
+      "job-thumbnail.jpg",
+    );
+  });
+
+  it("caps an extremely long title to a reasonable length", () => {
+    const longTitle = "A".repeat(500);
+    const result = buildJobDownloadFilename(longTitle, "video");
+    expect(result.length).toBeLessThan(120);
   });
 });

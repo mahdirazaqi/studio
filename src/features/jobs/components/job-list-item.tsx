@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { formatDurationHHMMSS } from "@/lib/format-duration";
 import { computeRenderSeconds, type SafeJob } from "@/features/jobs/domain/job";
 import { JobActions } from "@/features/jobs/components/job-actions";
+import { JobDownloadActions } from "@/features/jobs/components/job-download-actions";
 import { JobRenderProgress } from "@/features/jobs/components/job-render-progress";
 import { JobStatusBadge } from "@/features/jobs/components/job-status-badge";
 import { JobThumbnail } from "@/features/jobs/components/job-thumbnail";
@@ -129,12 +130,19 @@ export function JobListItem({ job }: { job: SafeJob }) {
           </div>
         </div>
 
-        <JobActions
-          jobId={job.id}
-          jobTitle={job.title || "(untitled)"}
-          state={job.state}
-          size="sm"
-        />
+        <div className="flex shrink-0 items-center gap-2">
+          <JobDownloadActions
+            jobTitle={job.title || "(untitled)"}
+            screenshotFileId={job.screenshotFileId}
+            videoFileId={job.videoFileId}
+          />
+          <JobActions
+            jobId={job.id}
+            jobTitle={job.title || "(untitled)"}
+            state={job.state}
+            size="sm"
+          />
+        </div>
       </CardContent>
     </Card>
   );
